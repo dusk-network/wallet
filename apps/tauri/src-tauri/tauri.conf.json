@@ -30,7 +30,10 @@
   },
   "plugins": {
     "deep-link": {
-      "mobile": [{ "scheme": ["dusk"], "appLink": false }]
+      "mobile": [
+        { "scheme": ["dusk"], "appLink": false },
+        { "scheme": ["https"], "host": "apps.testnet.dusk.network", "pathPrefix": ["/wallet/dashboard/send"], "appLink": true }
+      ]
     }
   }
 }

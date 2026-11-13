@@ -311,6 +311,20 @@ describe("walletReset", () => {
     await expect(tokens.takeNoticeToken("a2".repeat(32), again)).resolves.toBe(false);
   });
 
+  // Said in the tab the wallet runs in: its last payment goes with its wallet, and every one with a reset.
+  it("forgets each wallet's last payment with a reset, and with its wallet removed, but not another wallet's", async () => {
+    const last = await import("./lastSends.js");
+    const NODE = "https://testnet.nodes.dusk.network";
+    await last.keepLastSend({ walletId: "gone0", nodeUrl: NODE, hash: "b1", state: "submitted" });
+    await last.keepLastSend({ walletId: "kept0", nodeUrl: NODE, hash: "b2", state: "executed" });
+    await expect(reset.forgetWalletData({ walletId: "gone0", accounts: ["gone0"] })).resolves.toBe(true);
+    await expect(last.lastSendOf({ walletId: "gone0", nodeUrl: NODE })).resolves.toBeNull();
+    await expect(last.lastSendOf({ walletId: "kept0", nodeUrl: NODE })).resolves.toMatchObject({ hash: "b2", state: "executed" });
+    await reset.beginReset();
+    await reset.finishReset();
+    await expect(last.lastSendOf({ walletId: "kept0", nodeUrl: NODE })).resolves.toBeNull();
+  });
+
   it("forgets the wallets' names and the one unlocked last with a reset", async () => {
     const wallets = await import("./wallets.js");
     await wallets.noteActiveWallet("key-1", { walletId: "acct", accounts: ["acct", "acct1"] });

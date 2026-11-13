@@ -1142,7 +1142,7 @@ describe("a stake with Sozu in figures", () => {
     it("says what grew while held and what unstaking took out, from the pool's events and Sozu's status", async () => {
       const [staked, unstaked] = ["5a".repeat(32), "5b".repeat(32)];
       // 100 DUSK staked at 2 DUSK an stDUSK, 0.25 deposit fee: 49.875 stDUSK. 15 of
-      // them unstaked at 2.02: 30.3 DUSK back, 0.3 over what they cost. 34.875 left, worth 2.04 each now.
+      // them unstaked at 2.02: 30.3 DUSK back, 0.2248 over what they cost with their part of the fee. 34.875 left, worth 2.04 each now.
       archive.query = archiveWith({
         4800001: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }],
         4800002: [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }],
@@ -1151,11 +1151,35 @@ describe("a stake with Sozu in figures", () => {
       const history = [move(staked, "sozu_stake", "100000000000", 4_800_001, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "30300000000", 4_800_002, Date.UTC(2026, 5, 1, 12))];
       popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
       // Held from March at 2 to June at 2.02 (49.875 stDUSK), then on to now at 2.04 (34.875): 0.9975 and 0.6975.
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.695 DUSK", "Sozu, taken out by unstaking: 0.3 DUSK"]]));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.695 DUSK", "Sozu, taken out by unstaking: 0.2248 DUSK"]]));
       // Lena's: the two lines read as two rewards to add. Under them, in both wallets' words, that one is part of the other, and how it's counted.
       expect(visibleText(body.querySelector(".stake-years-counted"))).toBe(
-        "Taken out by unstaking is part of grown while held: what came back, less what that stDUSK cost at its average price, deposit fees not counted."
+        "Taken out by unstaking is part of grown while held: what came back, less that stDUSK's average cost, deposit fees included."
       );
+    });
+
+    // Lena's: what unstaking took out is a figure for a tax return, its deposit fee counted as part of the cost; a stake
+    // and its unstake at one rate then lose that fee, which is said as the loss it is, never hidden as nothing.
+    it("says a year where unstaking didn't make up the deposit fee as a loss, with its minus sign, in DUSK and in the currency", async () => {
+      vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-US" });
+      const prices = [[Date.UTC(2026, 2, 1, 12), 0.07], [Date.UTC(2026, 2, 2, 12), 0.07]];
+      vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ prices }), { headers: { "content-type": "application/json" } })));
+      const [staked, unstaked] = ["6a".repeat(32), "6b".repeat(32)];
+      // 100 DUSK staked at 2 with a 0.1 fee: 49.95 stDUSK; all unstaked at 2: 99.9 back, 0.1 less than they cost.
+      archive.query = archiveWith({
+        4800011: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 100_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }],
+        4800012: [{ origin: unstaked, events: [poolEvent("unstake", [0n, 99_900_000_000n, 2_000_000_000_000n, 1_000_000_000_000n]), burn(49_950_000_000n)] }],
+      });
+      const overview = ov();
+      const history = [move(staked, "sozu_stake", "100000000000", 4_800_011, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "99900000000", 4_800_012, Date.UTC(2026, 2, 2, 12))];
+      const state = { route: "stake", staking: staking(owner()), sozu: holding(0n, 0n), activity: activityOf(overview, history) };
+      popup(state, overview);
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, taken out by unstaking: −0.1 DUSK"]]));
+
+      // Its worth: under a cent, a loss all the same, never $0.00.
+      body.querySelector("#stake-years-value").checked = true;
+      body.querySelector("#stake-years-value").dispatchEvent(new Event("change"));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, taken out by unstaking: −0.1 DUSK · a loss under $0.01"]]));
     });
 
     // Lena's: opened 10 s after an unstake, both lines said "couldn't be read": the archive
@@ -1190,7 +1214,7 @@ describe("a stake with Sozu in figures", () => {
       events[4800006] = [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }];
       archive.query = archiveWith(events);
       await vi.advanceTimersByTimeAsync(20_000);
-      await vi.waitFor(() => expect(years()[0]).toContain("Sozu, taken out by unstaking: 0.3 DUSK"));
+      await vi.waitFor(() => expect(years()[0]).toContain("Sozu, taken out by unstaking: 0.2248 DUSK"));
       vi.useRealTimers();
     });
 

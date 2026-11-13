@@ -2560,9 +2560,23 @@ button.network-pill.is-disabled .network-pill__chev {
 }
 
 /* The tab Firefox for Android shows for the wallet's engine: what it is, so it's left open. */
-.page--engine .engine-note {
-  margin: 24px 16px;
+.page--engine .engine-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 420px;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+
+.page--engine .engine-note,
+.page--engine .engine-last {
+  margin: 0;
   color: var(--text-muted);
+}
+
+.page--engine .engine-last {
+  color: var(--text);
 }
 
 /* What the red dot means, in words, on a line of its own under the top bar,
@@ -3022,6 +3036,14 @@ body.page--popup .brand-mark {
   line-height: 1.4;
 }
 
+/* A phrase pasted in that couldn't be taken off the clipboard: said under the boxes. */
+.srp-clipboard {
+  margin: 10px 0 0;
+  color: var(--dusk-warning);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 /* Boxes to type words in each have an edge, so they read as boxes; the
    words shown to write down have none. The box being typed in takes the
    focus ring, not the field inside it. */
@@ -3096,6 +3118,51 @@ body.page--popup .brand-mark {
   font-size: 12px;
   font-weight: 600;
   margin-bottom: 6px;
+}
+
+/* Payments from Send waiting for the network, or not sent, on Home: each
+   says what it pays, to whom, its memo and when it was made, with its
+   buttons under it. */
+.wallet-dashboard > .home-waiting-list {
+  grid-column: 1;
+  order: 2;
+}
+
+.home-waiting-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.home-waiting .callout-title {
+  font-size: 13px;
+  margin-bottom: 2px;
+  overflow-wrap: anywhere;
+}
+
+.home-waiting__made {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.home-waiting__note {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.home-waiting__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.home-waiting__actions .home-waiting__btn {
+  width: auto;
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
 }
 
 /* -------------------------------------------------------
@@ -3204,6 +3271,14 @@ body.page--popup .brand-mark {
   color: var(--text);
   font-size: 12.5px;
   line-height: 1.4;
+}
+
+/* A name's question at Save, with Yes, save it under its words. */
+.contact-note:has(.contact-note__yes) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
 /* Amount entry: one large field, its error, then the balance it comes from */
@@ -5671,4 +5746,35 @@ button.chain-link.text-btn--inline:not(:disabled) {
 
 button.chain-link.text-btn--inline:not(:disabled):hover {
   text-decoration-color: currentColor;
+}
+
+/* A busy network, under the fee on a Review: the price can be raised. */
+.gas-busy {
+  margin: 8px 2px 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+/* What an amount comes to in your currency, beside the DUSK: a request's,
+   and the payer's Send and Review. */
+.in-currency {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.send-in-currency,
+.review-in-currency {
+  text-align: center;
+}
+
+/* A phone turned sideways, a field typed in: the keyboard leaves a strip at
+   the top a box high, which the box gets. The test network's band and the
+   popup's top bar give it their room while the keyboard's up (keyboard.js). */
+:root[data-typing-sideways] .panel > .testnet-strip,
+:root[data-typing-sideways] body.page--popup .panel-header {
+  display: none;
+}
+
+:root[data-typing-sideways] body.page--full {
+  --strip-height: 0px;
 }

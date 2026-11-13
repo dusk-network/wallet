@@ -142,13 +142,16 @@ export async function proveSendPassword(password, params, { walletKey, walletId,
 
 /**
  * Refuses a wallet's own send that needs the password and has no ticket for it,
- * or one of another wallet, for less, or too old. A ticket counts once.
+ * or one of another wallet, for less, or too old. A ticket counts once: what it
+ * was given for comes back, for the same send's next try (sendPasswordOnce),
+ * null where no password was asked.
  * @param {object} params - the transaction as it goes to the engine, with its gas
  * @param {{ ticket?: unknown, walletId: string, nodeUrl: string, now?: number }} ctx
+ * @returns {Promise<{ moves: bigint, always: boolean } | null>}
  */
 export async function assertSendPassword(params, { ticket, walletId, nodeUrl, now = Date.now() }) {
   const asked = askedOf(params, await sendPasswordLimit(), nodeUrl);
-  if (!asked) return;
+  if (!asked) return null;
   const held = tickets.get(String(ticket ?? ""));
   tickets.delete(String(ticket ?? ""));
   const good =
@@ -158,6 +161,23 @@ export async function assertSendPassword(params, { ticket, walletId, nodeUrl, no
     held.moves >= BigInt(asked.moves) &&
     (held.always || !asked.always);
   if (!good) throw waits(asked);
+  return { moves: held.moves, always: held.always };
+}
+
+/**
+ * A wallet's own send, each time it's tried: the password's ticket checked
+ * the first time (`granted` undefined), and what it was given for after, as a
+ * payment that waits for the network is tried again, for the same wallet,
+ * which each try checks itself. What the next try takes.
+ * @param {object} params - the transaction as it goes to the engine, with its gas
+ * @param {{ moves: bigint, always: boolean } | null | undefined} granted
+ * @param {{ ticket?: unknown, walletId: string, nodeUrl: string, now?: number }} ctx
+ * @returns {Promise<{ moves: bigint, always: boolean } | null>}
+ */
+export async function sendPasswordOnce(params, granted, ctx) {
+  if (granted === undefined) return assertSendPassword(params, ctx);
+  await assertSiteSend(params, granted, ctx.nodeUrl);
+  return granted;
 }
 
 /**

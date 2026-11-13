@@ -128,10 +128,19 @@ const overview = (over = {}) => ({
   ...over,
 });
 
+// DUSK's price now as CoinGecko gives it, the one place a mainnet screen reads it from (app-core's /prices):
+// nothing in these tests leaves the machine.
+const coingecko = vi.fn(async (url) => {
+  if (!String(url).startsWith("https://api.coingecko.com/api/v3/coins/dusk-network?")) throw new TypeError("Nothing else answers in this test");
+  const market_data = { current_price: { eur: 0.060722, gbp: 0.0529, usd: 0.0703 }, last_updated: new Date().toISOString() };
+  return { ok: true, status: 200, text: async () => JSON.stringify({ market_data }) };
+});
+
 let dom;
 
 beforeEach(() => {
   dom = installFakeDom();
+  vi.stubGlobal("fetch", coingecko);
   lookupPrimaryName.mockReset();
   lookupPrimaryName.mockImplementation(async () => null);
   isAccount.mockReset();
@@ -1190,7 +1199,37 @@ describe("review", () => {
       type: "DUSK_UI_SEND_TX",
       params: expect.objectContaining({ to: ALICE.account, privacy: "public", gas: { limit: "2500000", price: "1" } }),
       walletId: overview().accounts[0],
+      // A payment that can wait for the network, called off by its ID, with the most its fee costs.
+      sendId: expect.stringMatching(/^[\w-]{8,64}$/),
+      feeCapLux: "2500000",
+      toName: undefined,
     });
+  });
+
+  // Marek's: the default followed the mempool's median with no ceiling, so a spammed mempool could raise every
+  // default fee; Lena's: the two wallets paid different prices for the same unstake. Both use app-core's one rule.
+  it("starts from the network's median up to a ceiling, saying the network is busy while the price in use is under its median", async () => {
+    const at = (median) => async (message) =>
+      message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median, max: "1000" } : { ok: true, result: { hash: "ab".repeat(32) } };
+    const busy = () => {
+      const note = dom.document.body.querySelector("dusk-gas-editor .gas-busy");
+      return note && isShown(note) ? note.textContent : "";
+    };
+    const fee = () => visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-fee"));
+
+    // A median of 900 over the ceiling of 5: the ceiling, and why.
+    review({ to: ALICE.account, privacy: "public" }, overview(), at("900"));
+    await settle();
+    expect(fee()).toBe("Network feeup to 0.0125 DUSKTotalup to 1.0125 DUSK");
+    expect(busy()).toBe("The network is busy. You can raise the gas price for it to go out sooner.");
+    // Raised to the median or over: the price is theirs, and nothing more is said.
+    typeInto(dom.document.body.querySelectorAll("dusk-gas-editor input")[1], "900");
+    expect(busy()).toBe("");
+
+    // A median of 2: the median, nothing said.
+    review({ to: ALICE.account, privacy: "public" }, overview(), at("2"));
+    await settle();
+    expect([fee(), busy()]).toEqual(["Network feeup to 0.005 DUSKTotalup to 1.005 DUSK", ""]);
   });
 
   it("hides Use the network's price while the fee is the network's, custom gas from Settings that equals it too", async () => {
@@ -1467,11 +1506,13 @@ describe("a name and the recipient Contacts sets", () => {
 
     dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
     await settle();
-    expect(review.actions.send).toHaveBeenCalledWith({
-      type: "DUSK_UI_SEND_TX",
-      params: expect.objectContaining({ privacy: "public", to: BOB.account }),
-      walletId: overview().accounts[0],
-    });
+    expect(review.actions.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "DUSK_UI_SEND_TX",
+        params: expect.objectContaining({ privacy: "public", to: BOB.account }),
+        walletId: overview().accounts[0],
+      })
+    );
   });
 });
 
@@ -2160,6 +2201,78 @@ describe("a request link", () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent("https://phish.example/x")}` });
     vi.resetModules();
     expect((await import("./popup/state.js")).state.draft).toBeNull();
+  });
+});
+
+describe("a payment's amount in your own currency", () => {
+  // Sofía's: a client sees what they're paying in their money, on Send and on Review; testnet has none.
+  it("says what the amount comes to in your currency on mainnet, on Send as it's typed and on Review, with the price's time", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-US" });
+    const shown = (selector) => {
+      const el = dom.document.body.querySelector(selector);
+      return el && isShown(el) ? el.textContent : "";
+    };
+    const mainnet = overview({ nodeUrl: "https://nodes.dusk.network" });
+    const form = mount(newState(), mainnet);
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "30");
+    await vi.waitFor(() => expect(shown(".send-in-currency")).toMatch(/^≈ \$2\.11 · price at \d{1,2}:\d{2}\s?[AP]M$/));
+    typeInto(form.amount, "");
+    expect(shown(".send-in-currency")).toBe("");
+
+    mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "30", amountLux: "30000000000", memo: "" } }, mainnet);
+    await vi.waitFor(() => expect(shown(".review-in-currency")).toMatch(/^≈ \$2\.11 · price at /));
+
+    // Test DUSK: nothing.
+    mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "30", amountLux: "30000000000", memo: "" } });
+    await settle();
+    expect(shown(".review-in-currency")).toBe("");
+  });
+});
+
+describe("a payment waiting to go out, as the network didn't answer", () => {
+  // Marek's: the same send made again while the first waited offline got no word on Review. Chen's: Max and
+  // Available ignored the send that waited.
+  const waiting = (over = {}) => ({ sendId: "s1", profileIndex: 0, privacy: "public", to: ALICE.account, lux: "13000000", feeLux: "2500000", memo: "Order 1044", at: Date.now() - 60_000, waiting: true, waits: true, ...over });
+  const draft = (over = {}) => ({ to: ALICE.account, privacy: "public", amountDusk: "0.013", amountLux: "13000000", memo: "Order 1044", ...over });
+  const contacts = { loaded: true, items: [{ name: "Alice", address: ALICE.account }] };
+  const text = (selector) => {
+    const el = dom.document.body.querySelector(selector);
+    return el && isShown(el) ? visibleText(el) : "";
+  };
+
+  it("is said on Review, and on the form, when the same one is made again, and Review's button says it sends it again", () => {
+    const at = Date.now() - 60_000;
+    const ov = overview({ waitingSends: [waiting({ at })] });
+    mount({ route: "confirm", addressBook: contacts, draft: draft() }, ov);
+    expect(text(".review-again")).toBe(`The same payment is waiting to go out: 0.013 DUSK to Alice with this memo, made at ${clockText(at)}.`);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again")).toBeTruthy();
+
+    const form = mount({ route: "send", addressBook: contacts, draft: draft() }, ov);
+    expect(text(".send-again")).toBe(`The same payment is waiting to go out: 0.013 DUSK to Alice with this memo, made at ${clockText(at)}.`);
+    // Another memo is another payment.
+    typeInto(dom.document.body.querySelector(".row > input"), "Order 1045");
+    expect(text(".send-again")).toBe("");
+    void form;
+
+    // One the wallet stopped waiting for won't go out: nothing to say.
+    mount({ route: "confirm", addressBook: contacts, draft: draft() }, overview({ waitingSends: [waiting({ waiting: false, waits: false, ended: "closed" })] }));
+    expect(text(".review-again")).toBe("");
+  });
+
+  it("is left out of Available and Max, with its fee, which say so", () => {
+    // 177.9865 DUSK public, the fee cap 0.0025: 0.013 and its fee wait.
+    const form = mount(newState(), overview({ waitingSends: [waiting()] }));
+    typeInto(form.to, ALICE.account);
+    expect(form.balanceLine()).toBe("Available after fees 177.9685 DUSK");
+    expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK · After the payments waiting to go out");
+    dom.document.body.querySelector(".amount-avail button").click();
+    expect(form.amount.value).toBe("177.9685");
+
+    // Another profile's, or one not waiting any more, takes nothing.
+    const other = mount(newState(), overview({ waitingSends: [waiting({ profileIndex: 1 }), waiting({ sendId: "s2", waiting: false, ended: "locked" })] }));
+    typeInto(other.to, ALICE.account);
+    expect(other.balanceLine()).toBe("Available after fees 177.984 DUSK");
   });
 });
 

@@ -1,11 +1,15 @@
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import fixture from "../../shared/fixtures/activity-testnet.json";
+import { fakeArchive } from "../../shared/fixtures/fakeArchive.js";
 import { installFakeDom, settle } from "../testing/fakeDom.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: vi.fn(async () => null),
+  lookupRecipientNames: vi.fn(async () => new Map()),
 }));
 
 const ACCOUNT =
@@ -337,6 +341,106 @@ describe("a node that answers again before the balance does", () => {
       expect(app.textContent).not.toContain("may be out of date");
     } finally {
       vi.useRealTimers();
+    }
+  });
+});
+
+describe("money coming in while the wallet shows", () => {
+  // The page with the wallet's Home, its history kept on this device, the
+  // archive answering from the recorded Testnet history, and the history and
+  // balance read again every `every` milliseconds while the wallet shows.
+  async function home(every) {
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    dom.document.body.innerHTML = "";
+    for (const [tag, id, className] of [["button", "network-pill", "network-pill"], ["div", "header-actions", ""], ["div", "app", ""]]) {
+      const el = dom.document.createElement(tag);
+      el.id = id;
+      if (className) el.className = className;
+      dom.document.body.appendChild(el);
+    }
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-US", onLine: true });
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const [account] = Object.keys(fixture.accounts);
+    const accounts = structuredClone(fixture.accounts);
+    const archive = fakeArchive({ accounts });
+    vi.resetModules();
+    vi.doMock("./views/requests.js", async (importOriginal) => ({ ...(await importOriginal()), LOOK_MS: every }));
+    const { send } = await import("../../wallet/bus.js");
+    const chain = { lux: 1_047_700_000n };
+    send.mockReset();
+    send.mockImplementation(async (message) =>
+      message.type === "DUSK_UI_OVERVIEW"
+        ? {
+            hasVault: true,
+            isUnlocked: true,
+            networkName: "Testnet",
+            nodeUrl: fixture.nodeUrl,
+            accounts: [account],
+            selectedAccountIndex: 0,
+            txs: [],
+            balance: { value: String(chain.lux) },
+            shieldedBalance: { value: "0", spendable: "0" },
+            shieldedSync: { state: "done", notes: 1 },
+          }
+        : {}
+    );
+    const { state } = await import("./state.js");
+    const { render } = await import("./app.js");
+    const app = dom.document.getElementById("app");
+    // A payment of `lux` from someone else, in the block after the last final one, final now.
+    const paid = (lux, origin) => {
+      const block = archive.finalized + 1;
+      accounts[account].receiver.push({
+        block_height: block,
+        origin,
+        events: [{ target: fixture.accounts[account].receiver[0].events[0].target, topic: "moonlight", reverted: false, data: { sender: fixture.accounts[account].receiver[0].events[0].data.sender, receiver: account, value: String(lux), memo: "", refund_info: null } }],
+      });
+      archive.finalized = block;
+      chain.lux += lux;
+    };
+    const rows = () => app.querySelectorAll(".tx-row").map((row) => row.textContent);
+    return { app, archive, chain, paid, render, rows, send, state };
+  }
+
+  afterEach(() => vi.doUnmock("./views/requests.js"));
+
+  it("shows by itself, in the balance and in Activity alike, without a Refresh", async () => {
+    // Sofía's: a client paid 0.01 while the app showed Home; for almost three minutes neither the balance nor
+    // Activity moved, nothing said so, and Refresh brought the balance but not the payment.
+    const view = await home(40);
+    try {
+      await view.render();
+      await vi.waitFor(() => expect(view.rows()).toHaveLength(4), { timeout: 3_000 });
+      expect(view.app.querySelector(".balance-amount").textContent).toBe("1.0477 DUSK");
+
+      view.paid(10_000_000n, "c1".repeat(32));
+
+      // Nothing pressed: the balance and Activity both have it.
+      await vi.waitFor(() => expect(view.app.querySelector(".balance-amount").textContent).toBe("1.0577 DUSK"), { timeout: 3_000 });
+      await vi.waitFor(() => expect(view.rows()).toHaveLength(5), { timeout: 3_000 });
+      expect(view.rows()[0]).toContain("+0.01");
+    } finally {
+      // Off Home, as a popup closed: nothing more is read.
+      view.state.route = "options";
+    }
+  });
+
+  it("has Refresh read the history along with the balance", async () => {
+    // Sofía's: Refresh made the balance right; the payment came into Activity only minutes later, after another send.
+    const view = await home(60 * 60_000);
+    try {
+      await view.render();
+      await vi.waitFor(() => expect(view.rows()).toHaveLength(4), { timeout: 3_000 });
+
+      view.paid(30_000_000n, "c2".repeat(32));
+      view.app.querySelector("button.balance-refresh").click();
+
+      await vi.waitFor(() => expect(view.app.querySelector(".balance-amount").textContent).toBe("1.0777 DUSK"), { timeout: 3_000 });
+      await vi.waitFor(() => expect(view.rows()).toHaveLength(5), { timeout: 3_000 });
+      expect(view.rows()[0]).toContain("+0.03");
+    } finally {
+      view.state.route = "options";
     }
   });
 });

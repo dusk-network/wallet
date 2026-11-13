@@ -98,6 +98,17 @@ async function ensureEnginePage(transportOnly = false) {
   return engineHostGeneration;
 }
 
+// What's told as the engine's tab closes, and the wallet open in it with it.
+const closedListeners = new Set();
+
+/**
+ * Hears the engine's tab closing, which ends the wallet open in it, as a lock does.
+ * @param {() => void} listener
+ */
+export function onEngineClosed(listener) {
+  closedListeners.add(listener);
+}
+
 if (ext?.tabs?.onRemoved) {
   try {
     ext.tabs.onRemoved.addListener((tabId) => {
@@ -109,6 +120,13 @@ if (ext?.tabs?.onRemoved) {
         // The wallet went with its tab: pages say it's locked, and an
         // approval open asks for the unlock before its answer.
         runtimeSendMessage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "engine_closed" }).catch(() => {});
+        for (const listener of closedListeners) {
+          try {
+            listener();
+          } catch {
+            // One that fails doesn't stop the others.
+          }
+        }
       }
     });
   } catch {

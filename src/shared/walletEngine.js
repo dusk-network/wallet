@@ -26,7 +26,7 @@ import { parseSozuPoolState } from "./sozuAdapter.js";
 import { blockedRecipient } from "./recipientBlocklist.js";
 import { askNodeChainId, chainIdForNode, chainRefusal, networkKeyOf, networkOf, noteChainId } from "./nodeNetwork.js";
 import { isRefusal, nodeRefusalText, propagationError } from "./nodeRefusal.js";
-import { connectionLost } from "./sendOutcome.js";
+import { SEND_CANCELLED_TEXT, unreachable } from "./sendOutcome.js";
 
 import {
   clearNotes,
@@ -643,7 +643,7 @@ function withPhoenixSpendMutex(profileIndex, fn) {
   return withProfileLock(phoenixSpendLocks, profileIndex, fn);
 }
 
-async function executeMoonlightTransaction(network, tx, profileIndex) {
+async function executeMoonlightTransaction(network, tx, profileIndex, sendId = "", waited = false) {
   const key = `${getNetworkKey()}|${getWalletId()}|${Number(profileIndex) || 0}`;
   const profile = await ensureProfileIndex(profileIndex);
   const balance = await state.treasury.account(profile.account);
@@ -652,7 +652,7 @@ async function executeMoonlightTransaction(network, tx, profileIndex) {
   if (previous != null && previous >= nonce) nonce = previous + 1n;
   if (typeof tx?.nonce === "function") tx = tx.nonce(nonce - 1n);
 
-  const result = await network.execute(tx);
+  const result = await network.execute(gated(tx, sendId, waited));
   // ponytail: session-local nonce memory; add a durable submission journal for restart recovery.
   moonlightNonces.set(key, BigInt(result?.nonce ?? nonce));
   return result;
@@ -1464,10 +1464,8 @@ function sayRefusalsPlainly(network) {
   for (const step of ["preverify", "propagate"]) {
     const call = txs?.[step];
     if (typeof call !== "function") continue;
-    txs[step] = (...args) => {
-      // From here it may reach the node, whatever comes back.
-      if (step === "propagate" && args[0] && typeof args[0] === "object") handedOver.add(args[0]);
-      return call.apply(txs, args).catch((error) => {
+    const asked = (...args) =>
+      call.apply(txs, args).catch((error) => {
         if (error?.name === "TypeError" || error?.name === "AbortError") throw error;
         // Before propagation nothing has gone out. After it, only the node's own refusal of the
         // transaction, in Rusk's words, says nothing went out (sayWhetherItWent); any other
@@ -1476,6 +1474,21 @@ function sayRefusalsPlainly(network) {
         const said = new Error(propagationError(error?.message ?? error));
         throw isRefusal(error?.message ?? error) ? markSent(said, { sent: false }) : said;
       });
+    txs[step] = (...args) => {
+      if (step !== "propagate" || !args[0] || typeof args[0] !== "object") return asked(...args);
+      const bytes = args[0];
+      const handTo = () => {
+        // A send called off is refused here, before it reaches the node; one
+        // not called off can't be from here on.
+        if (!handOver(bytes)) return Promise.reject(markSent(new Error(SEND_CANCELLED_TEXT), { sent: false, cancelled: true }));
+        // From here it may reach the node, whatever comes back.
+        handedOver.add(bytes);
+        return asked(...args);
+      };
+      // A payment that waited is kept with its transaction's ID first: never
+      // handed over without it.
+      if (!toldOfBytes.has(bytes)) return handTo();
+      return tellHandOver(gateOfBytes.get(bytes), hashOfBytes.get(bytes) ?? "").then(handTo);
     };
   }
   return sayWhetherItWent(network);
@@ -1483,6 +1496,98 @@ function sayRefusalsPlainly(network) {
 
 // The transactions handed to the node to propagate, by their bytes.
 const handedOver = new WeakSet();
+
+// What's told of a payment that waited for the network before it's handed to
+// the node: its send's ID and its transaction's (waitingSends.js keeps it with
+// the payment, so a payment handed over is followed by its ID, never said not
+// sent, whatever stops the wallet after). The hand-over waits for it, and a
+// payment it can't be told of isn't handed over.
+let handOverHook = null;
+const NOT_KEPT_TEXT = "The payment couldn't be kept on this device before it went out, so nothing was sent.";
+
+/**
+ * Sets what's told of a payment that waited for the network, before it's
+ * handed to the node: what's kept of it takes its transaction's ID then.
+ * @param {((sent: { sendId: string, hash: string }) => Promise<unknown> | unknown) | null} hook
+ */
+export function setHandOverHook(hook) {
+  handOverHook = typeof hook === "function" ? hook : null;
+}
+
+async function tellHandOver(sendId, hash) {
+  try {
+    if (!handOverHook || !hash) throw new Error("No one to tell");
+    await handOverHook({ sendId, hash });
+  } catch {
+    throw markSent(new Error(NOT_KEPT_TEXT), { sent: false });
+  }
+}
+
+// A payment from Send can be called off until it's handed to the node
+// (waitingSends.js): its gate, by its `sendId`, is settled here, where it's
+// handed over, so called off and handed over can't both happen. "open" until
+// then; "cancelled" refuses it before it goes; "handed-over" once the node was
+// asked to broadcast it. The last few are kept: one called off before its
+// next try came is refused when it comes.
+const sendGates = new Map();
+const SEND_GATES_KEPT = 64;
+// A gated transaction's builder, and the bytes it built, by its send's ID;
+// the transaction's ID by its bytes; and the builders and bytes of payments
+// that waited, told of before they're handed over (tellHandOver).
+const gateOfBuilder = new WeakMap();
+const gateOfBytes = new WeakMap();
+const hashOfBytes = new WeakMap();
+const toldOfBuilders = new WeakSet();
+const toldOfBytes = new WeakSet();
+
+function setSendGate(sendId, now) {
+  sendGates.delete(sendId);
+  sendGates.set(sendId, now);
+  while (sendGates.size > SEND_GATES_KEPT) sendGates.delete(sendGates.keys().next().value);
+}
+
+// The transaction `tx` builds is the send `sendId`'s, called off up to its
+// hand-over; told of before it, where it waited for the network (`waited`).
+function gated(tx, sendId, waited = false) {
+  if (sendId && tx && typeof tx === "object") {
+    gateOfBuilder.set(tx, sendId);
+    if (waited) toldOfBuilders.add(tx);
+  }
+  return tx;
+}
+
+// A send `sendId` begins, or is tried again: refused when it was called off,
+// and never handed over twice.
+function openSendGate(sendId) {
+  if (!sendId) return;
+  const now = sendGates.get(sendId);
+  if (now === "cancelled") throw markSent(new Error(SEND_CANCELLED_TEXT), { sent: false, cancelled: true });
+  if (now === "handed-over") throw markSent(new Error("This payment was handed to the network already."), { sent: "unknown" });
+  setSendGate(sendId, "open");
+}
+
+// The transaction of `bytes` is handed to the node: false when its send was called off.
+function handOver(bytes) {
+  const sendId = gateOfBytes.get(bytes);
+  if (!sendId) return true;
+  if (sendGates.get(sendId) === "cancelled") return false;
+  setSendGate(sendId, "handed-over");
+  return true;
+}
+
+/**
+ * Calls off the payment `sendId` from Send, unless it was handed to the node
+ * already: whether it was called off. One whose try hasn't come yet is refused
+ * when it does.
+ * @param {{ sendId?: string }} params
+ * @returns {{ cancelled: boolean }}
+ */
+export function cancelSend({ sendId } = {}) {
+  const id = String(sendId ?? "");
+  if (!id || sendGates.get(id) === "handed-over") return { cancelled: false };
+  setSendGate(id, "cancelled");
+  return { cancelled: true };
+}
 
 // A send that fails says whether it went out, in its error's `data.sent`: false
 // when it failed before it was handed to the node, nothing signed reaching it;
@@ -1496,9 +1601,17 @@ function sayWhetherItWent(network) {
     let built = typeof tx?.build === "function" ? null : tx;
     const build = built ? null : tx.build;
     const ownBuild = Boolean(build) && Object.prototype.hasOwnProperty.call(tx, "build");
+    // The payment from Send it is, if one: its bytes are handed over through its gate.
+    const sendId = tx && typeof tx === "object" ? gateOfBuilder.get(tx) : undefined;
+    const told = Boolean(sendId) && toldOfBuilders.has(tx);
     if (build) {
       tx.build = async function (...args) {
         built = await build.apply(this, args);
+        if (sendId && built?.buffer && typeof built.buffer === "object") {
+          gateOfBytes.set(built.buffer, sendId);
+          hashOfBytes.set(built.buffer, String(built.hash ?? ""));
+          if (told) toldOfBytes.add(built.buffer);
+        }
         return built;
       };
     }
@@ -1668,17 +1781,16 @@ function patchNetworkEndpoints(network) {
       }
 
       const primaryHost = hostOf(primary);
+      // The prover out of reach, in its own words: marked so (`data.unreachable`),
+      // as a send waits for the network on it (sendOutcome.js).
+      const outOfReach = (text) => Object.assign(new Error(text), { data: { unreachable: true } });
 
       if (lastErr?.name === "AbortError") {
-        throw new Error(
-          `Prover timed out after ${Math.round(PROVE_TIMEOUT_MS / 1000)}s (${primaryHost}). ${hint()}`
-        );
+        throw outOfReach(`Prover timed out after ${Math.round(PROVE_TIMEOUT_MS / 1000)}s (${primaryHost}). ${hint()}`);
       }
 
       if (lastErr?.name === "TypeError" || /failed to fetch/i.test(String(lastErr?.message ?? ""))) {
-        throw new Error(
-          `Could not reach prover (${primaryHost}). The prover may be down or dropped the connection. ${hint()}`
-        );
+        throw outOfReach(`Could not reach prover (${primaryHost}). The prover may be down or dropped the connection. ${hint()}`);
       }
 
       // Preserve useful HTTP errors produced by doProve()
@@ -2218,18 +2330,19 @@ async function readSozuOf(network, idx, profile) {
  *          All values are stringified u64 (Lux, i.e. 1e-9 DUSK).
  *          Returns { average: "1", max: "1", median: "1", min: "1" } when mempool is empty.
  */
-export async function getGasPrice({ maxTransactions = 100 } = {}) {
+export async function getGasPrice({ maxTransactions } = {}) {
   await ensureNetwork();
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    // Rusk endpoint: POST /on/blocks/gas-price with body "<max_transactions>".
-    // w3sper exposes it via network.blocks.call["gas-price"]().
-    let n = Number(maxTransactions ?? 100);
-    if (!Number.isFinite(n) || n <= 0) n = 100;
-    const res = await state.network.blocks.call["gas-price"](String(Math.floor(n)), {
+    // Rusk endpoint: POST /on/blocks/gas-price, with a body "<max_transactions>"
+    // for the stats of that many of the best-paying, and without one, as the
+    // web wallet asks it (w3sper's blocks.gasPrice), of every transaction the
+    // node holds: the median both wallets' default price follows.
+    const n = Number(maxTransactions);
+    const res = await state.network.blocks.call["gas-price"](Number.isFinite(n) && n > 0 ? String(Math.floor(n)) : undefined, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });
@@ -3036,6 +3149,11 @@ export async function transfer(params) {
     throw new Error("Shielded transfer requires a shielded recipient (base58 address)");
   }
   const isShieldedTransfer = privacyRaw === "shielded";
+  // A payment from Send, which can be called off until it's handed over; one
+  // that waited for the network is told of before it is (`sendKept`).
+  const sendId = typeof params?.sendId === "string" ? params.sendId : "";
+  const waited = Boolean(sendId) && params?.sendKept === true;
+  openSendGate(sendId);
 
   const network = await ensureNetwork();
   const idx = resolveProfileIndex(profileIndex);
@@ -3092,7 +3210,7 @@ export async function transfer(params) {
       await assertApprovalContext(params, idx);
 
       const session = walletSession();
-      const result = await network.execute(tx);
+      const result = await network.execute(gated(tx, sendId, waited));
       await persistPendingNullifiersForTx(result, idx, session);
       return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
     });
@@ -3108,7 +3226,7 @@ export async function transfer(params) {
   if (gas) tx = tx.gas(gas);
 
   await assertApprovalContext(params, idx);
-  const result = await executeMoonlightTransaction(network, tx, idx);
+  const result = await executeMoonlightTransaction(network, tx, idx, sendId, waited);
 
   // network.execute returns the tx object returned by tx.build, frozen
   return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
@@ -3447,8 +3565,8 @@ export function sendTransaction(params) {
     ).finally(forgetSharedReads);
   }).catch((error) => {
     // Only the hand-over sends (sayWhetherItWent), and what follows it reads
-    // nothing of the node: a connection that failed otherwise sent nothing.
-    if (error?.data?.sent === undefined && connectionLost(error?.message)) throw markSent(error, { sent: false });
+    // nothing of the node: a network out of reach otherwise sent nothing.
+    if (error?.data?.sent === undefined && unreachable(error)) throw markSent(error, { sent: false });
     throw error;
   });
 }

@@ -715,6 +715,25 @@ describe("a request link the extension's tab opened with", () => {
 });
 
 describe("coming back to the wallet during a payment", () => {
+  // Seen on testnet: after a send with no clear answer, each lookup, every 10 seconds, said it was still pending
+  // again, a toast with View over Review's Confirm for three minutes.
+  it("says a send is still pending once, not again at each lookup that hears no more of it", async () => {
+    const HASH = "7e".repeat(32);
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } });
+    const toasts = () => t.dom.document.body.querySelectorAll(".toast").filter((el) => !el.classList.contains("toast--leaving"));
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "unknown" });
+    await flush();
+    const first = toasts().at(-1);
+    expect(first?.textContent).toContain("still pending");
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "unknown" });
+    await flush();
+    expect(toasts()).toEqual([first]);
+    // News, once it comes.
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "executed", ok: true });
+    await flush();
+    expect(toasts().at(-1).textContent).toContain("completed");
+  });
+
   // Chen's: back a minute later, the first thing shown was "waiting for a block", the block long come.
   it("says it's looked up again from the moment it's left, never the wait for a block, till the lookup answers", async () => {
     const HASH = "9e".repeat(32);
@@ -951,6 +970,86 @@ describe("the app on a phone", () => {
     expect(t.app.textContent).not.toContain("Not confirmed");
     expect(t.app.textContent).not.toContain("stopped waiting");
     expect(t.dom.document.querySelector(".network-word")?.textContent ?? "").not.toContain("Can't reach the network");
+    opened = { hash: "" };
+  });
+
+  // Sofía's and Chen's: tapped from the Sent screen left with Home, "Your payment arrived" showed "Taking longer than
+  // usual" and a red "Can't reach the network" for 1 to 5 s before Completed, as the app's network came back.
+  it("opens a notice's payment from the Sent screen at once, as the notice knew it, though reads wait on the network coming back", async () => {
+    const HASH = "9d".repeat(32);
+    const TOKEN = "c5".repeat(16);
+    let opened = { hash: "" };
+    // Back from away, the network isn't back yet: reads fail at once, or wait on it.
+    let away = "";
+    const bridge = tauriBridge({ notices: (args) => (args?.action === "opened" ? { allowed: true, ...opened } : { allowed: true }) });
+    const record = { hash: HASH, kind: "transfer", privacy: "public", to: B, amount: "10000000", status: "submitted", submittedAt: Date.now() - 30_000, profileIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network" };
+    const answer = async (message, t) => {
+      if (message.type === "DUSK_UI_TX_NOTICED") {
+        if (message.hash !== HASH || message.token !== TOKEN) return { ok: true, result: null };
+        // Written on its record, and the page told, as the app's wallet does it.
+        t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "executed", ok: true, blockHeight: "4846300" });
+        return { ok: true, result: { patched: true } };
+      }
+      if (away === "waits" && message.type === "DUSK_UI_OVERVIEW") return new Promise(() => {});
+      if (away === "fails" && message.type === "DUSK_UI_OVERVIEW") return { ...t.open, balance: null, balanceError: "Failed to fetch", networkStatus: { nodeStatus: "offline", nodeUrl: t.open.nodeUrl } };
+      if (away && message.type === "DUSK_UI_CHECK_NODE") return { ok: true, networkStatus: { nodeStatus: "offline", nodeUrl: t.open.nodeUrl } };
+      if (message.type === "DUSK_UI_RECHECK_TX") {
+        // Not found by a node it couldn't ask: its record says unknown, and the page is told so,
+        // at once, or once the lookup gives up, after the notice's payment is open.
+        const giveUp = () => {
+          t.deliver({ type: "DUSK_UI_TX_STATUS", hash: message.hash, status: "unknown" });
+          return { ok: true, result: { status: "unknown", error: "reconciliation_unavailable" } };
+        };
+        return holdLookups ? new Promise((resolve) => heldLookups.push(() => resolve(giveUp()))) : giveUp();
+      }
+      return undefined;
+    };
+    let holdLookups = false;
+    const heldLookups = [];
+    const sent = () => ({ phase: "sent", status: "submitted", hash: HASH, title: "Send", amountLux: "10000000", feeCapLux: "2500000", sentAt: Date.now() - 30_000, startedAt: Date.now() - 31_000 });
+    const t = await popupOn("sent", { addressBook: { loaded: true, items: [] }, sent: sent() }, answer, { tauri: bridge });
+    t.open = { ...t.open, txs: [record] };
+    await t.render({ forceRefresh: true });
+    const shown = [];
+    // What the screen and its toast say, each moment.
+    const said = () => `${t.app.textContent} ${t.dom.document.body.querySelector(".toast")?.textContent ?? ""}`;
+    const leaveAndComeBack = async (how) => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      away = how;
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      shown.push(said());
+      for (let i = 0; i < 6; i++) {
+        await flush();
+        shown.push(said());
+      }
+    };
+
+    // Back without a notice, the node not answered yet: being looked up, never taking long.
+    await leaveAndComeBack("fails");
+    expect(t.state.route).toBe("sent");
+    expect(t.app.textContent).toContain("Looking it up again");
+    for (const text of shown) expect(text).not.toMatch(/Taking longer than usual|Can't reach the network|Not confirmed/);
+
+    // Back from the notice's tap: the payment as the notice knew it, at once, though the read waits.
+    away = "";
+    await t.render({ forceRefresh: true });
+    shown.length = 0;
+    opened = { hash: HASH, outcome: "executed", block: 4846300, token: TOKEN };
+    holdLookups = true;
+    await leaveAndComeBack("waits");
+    // The payment's own page, drawn, not the Sent screen behind it.
+    await vi.waitFor(() => expect(t.app.querySelector(".subnav-title")?.textContent).toBe("Transaction"));
+    expect(t.app.textContent).toContain("Completed");
+    // Nor a toast that it's still pending, from a lookup that couldn't ask the node (seen on the phone).
+    for (const giveUp of heldLookups.splice(0)) giveUp();
+    for (let i = 0; i < 6; i++) {
+      await flush();
+      shown.push(said());
+    }
+    for (const text of shown) expect(text).not.toMatch(/Taking longer than usual|Can't reach the network|Not confirmed|still pending/);
+    expect(t.app.textContent).toContain("Completed");
     opened = { hash: "" };
   });
 

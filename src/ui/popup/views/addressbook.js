@@ -1,4 +1,4 @@
-import { NAME_HIDES, nameHides } from "@dusk-network/app-core/names";
+import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, nameHides } from "@dusk-network/app-core/names";
 import { searchKey } from "@dusk-network/app-core/text";
 import { isAccount } from "@dusk-network/networks/account";
 import { ProfileGenerator } from "@dusk/w3sper";
@@ -19,7 +19,7 @@ import { fieldLabel, searchInput, textInput } from "../../components/FormControl
 import { nameAddressChoice } from "../../components/NameAddressChoice.js";
 import { nameCheckNoteEl } from "../../components/NameCheckNote.js";
 import { ownProfileName } from "../../components/ProfileName.js";
-import { HIDDEN_NAME_NOTE, HIDDEN_NAME_ROW, contactAlikeText, contactNameClash, contactNameStartsText, contactNameText } from "../../lib/contactNames.js";
+import { HIDDEN_NAME_NOTE, HIDDEN_NAME_ROW, contactAlikeText, contactNameText, profilesOf } from "../../lib/contactNames.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
 import { contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
@@ -469,32 +469,31 @@ export function addressBookView(ov, { state, actions } = {}) {
       },
     });
     const nameError = fieldError(`contact-name-error-${n}`);
-    // A name in use, or one that looks like it in other letters: only the
-    // address would tell the two apart in a payment. It can be saved. One
-    // that is, or looks like, a profile's would read as that profile on
-    // Review: it can't be, for anyone else's address.
-    const nameNote = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
-    const profileClashText = (clash) =>
-      clash.same ? `That's the name of your profile ${clash.entry.name}. Choose another name.` : `That looks like the name of your profile ${clash.entry.name}. Choose another name.`;
-    const clashNow = () =>
-      contactNameClash(ov, nameInput.value, { address: normalizeRecipient(addrInput.value), contacts: Array.isArray(ab.items) ? ab.items : [], except: ab.editId ?? undefined });
+    // The one check both wallets make of a contact's name at Save (app-core):
+    // refused, under the field, for what can't be seen in it and for a
+    // profile's name it is or looks like, as Review would read the contact as
+    // that profile; asked, for another contact's name it is, looks like,
+    // starts as or is the start of, as only the address tells them apart, and
+    // a profile's it starts as. A name asked about is saved only once the
+    // question's answered, with Yes, save it. Said as it's typed too.
+    const noteWords = h("span", { class: "contact-note__words" });
+    const yesBtn = h("button", { class: "mini-btn contact-note__yes", type: "button", text: NAME_SAVE_YES, hidden: true });
+    const nameNote = h("div", { class: "send-self-note contact-note", role: "status", hidden: true }, [noteWords, yesBtn]);
+    // What Save was about to keep when it asked: kept on Yes, save it, unless the form changed since.
+    let asked = null;
+    const say = (text, { answer = null } = {}) => {
+      noteWords.textContent = text;
+      nameNote.hidden = !text;
+      asked = text ? answer : null;
+      yesBtn.hidden = !asked;
+    };
+    const checkName = (name, address) =>
+      contactNameCheck(name, { profiles: profilesOf(ov), contacts: Array.isArray(ab.items) ? ab.items : [], except: ab.editId ?? undefined, address });
     const updateName = () => {
       const typed = String(nameInput.value ?? "").trim();
-      // What can't be seen can make it read as another name: refused, before any other check.
-      if (nameHides(typed)) {
-        setFieldError(nameInput, nameError, NAME_HIDES);
-        nameNote.textContent = "";
-        nameNote.hidden = true;
-        return;
-      }
-      const clash = typed ? clashNow() : null;
-      const at = (e) => `${contactNameText(e.name)}, at ${shortAddress(String(e.address ?? ""))}`;
-      setFieldError(nameInput, nameError, clash?.kind === "profile" ? profileClashText(clash) : "");
-      // A profile's name it starts with, or that starts it, is asked about: it can be saved.
-      const starts = typed && !clash ? contactNameStartsText(ov, typed, { address: normalizeRecipient(addrInput.value) }) : "";
-      nameNote.textContent =
-        clash?.kind !== "contact" ? starts : clash.same ? `You already have a contact called ${at(clash.entry)}.` : `This looks like your contact ${at(clash.entry)}, but uses different letters.`;
-      nameNote.hidden = !nameNote.textContent;
+      const said = typed ? checkName(typed, normalizeRecipient(addrInput.value)) : null;
+      setFieldError(nameInput, nameError, said?.refused ? said.words : "");
+      say(said && !said.refused ? said.words : "");
     };
 
     const addrInput = textInput({
@@ -643,49 +642,73 @@ export function addressBookView(ov, { state, actions } = {}) {
             addrInput.focus();
             return;
           }
-          const clash = contactNameClash(ov, name, { address: t.address, contacts: Array.isArray(ab.items) ? ab.items : [], except: ab.editId ?? undefined });
-          if (clash?.kind === "profile") {
-            setFieldError(nameInput, nameError, profileClashText(clash));
-            nameInput.focus();
-            return;
-          }
           const other = (Array.isArray(ab.items) ? ab.items : []).find((e) => e?.address === t.address && e?.id !== ab.editId);
           if (other) {
             setFieldError(addrInput, addrError, `This address is already saved as ${contactNameText(other.name)}.`);
             addrInput.focus();
             return;
           }
-          if (requestRecipient(String(addrInput.value || "").trim())) {
-            actions?.showToast?.("Saved the recipient from the request link", 1800);
+          const said = checkName(name, t.address);
+          if (said?.refused) {
+            setFieldError(nameInput, nameError, said.words);
+            nameInput.focus();
+            return;
           }
-          const saved = await upsertAddressBookEntry({
-            id: ab.editId || undefined,
-            name,
-            address: t.address,
-            type: ProfileGenerator.typeOf(t.address),
-            duskName: t.duskName ?? null,
-            checkedAt: t.checkedAt ?? null,
-          }, shown);
-          await refreshItems();
-          ab.prefillName = "";
-
-          // In pick mode: after creating or editing, select it and go back.
-          if (ab.mode === "pick") return pick(saved.address);
-
-          actions?.showToast?.("Saved contact", 1600);
-          if (!isNew && ab.editReturnView === "detail") {
-            ab.detailId = saved.id;
-            ab.view = "detail";
-          } else {
-            ab.view = "list";
+          // Asked: kept only on Yes, save it, which takes what Save read now.
+          if (said) {
+            say(said.words, { answer: { name, address: String(addrInput.value ?? ""), target: t } });
+            return;
           }
-          rerender();
+          await keepContact(name, t);
         } catch (e) {
           setFieldError(addrInput, addrError, e?.message ?? String(e));
         } finally {
           saveBtn.disabled = false;
         }
       },
+    });
+
+    // The contact kept, and the form left as Save leaves it.
+    const keepContact = async (name, t) => {
+      if (requestRecipient(String(addrInput.value || "").trim())) {
+        actions?.showToast?.("Saved the recipient from the request link", 1800);
+      }
+      const saved = await upsertAddressBookEntry({
+        id: ab.editId || undefined,
+        name,
+        address: t.address,
+        type: ProfileGenerator.typeOf(t.address),
+        duskName: t.duskName ?? null,
+        checkedAt: t.checkedAt ?? null,
+      }, shown);
+      await refreshItems();
+      ab.prefillName = "";
+
+      // In pick mode: after creating or editing, select it and go back.
+      if (ab.mode === "pick") return pick(saved.address);
+
+      actions?.showToast?.("Saved contact", 1600);
+      if (!isNew && ab.editReturnView === "detail") {
+        ab.detailId = saved.id;
+        ab.view = "detail";
+      } else {
+        ab.view = "list";
+      }
+      rerender();
+    };
+    yesBtn.addEventListener("click", async () => {
+      const answer = asked;
+      // The question was of the form as Save read it: changed since, it says what's typed now.
+      if (!answer || String(nameInput.value ?? "").trim() !== answer.name || String(addrInput.value ?? "") !== answer.address) return;
+      say("");
+      yesBtn.disabled = true;
+      try {
+        await keepContact(answer.name, answer.target);
+      } catch (e) {
+        setFieldError(addrInput, addrError, e?.message ?? String(e));
+      } finally {
+        yesBtn.disabled = false;
+      }
     });
 
     // Back leaves without saving, so the form has no Cancel.

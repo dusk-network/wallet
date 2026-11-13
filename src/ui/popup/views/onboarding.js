@@ -9,6 +9,9 @@ import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
+import { segmented } from "../../components/Segmented.js";
+import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
+import { detectPresetId } from "../../../shared/network.js";
 import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 
 function generateMnemonic12() {
@@ -483,11 +486,68 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   ], { busy: () => busy });
 }
 
+// Import wallet's network, Mainnet or Testnet, the ones people hold DUSK on:
+// the wallet opens on the one picked, so a phrase used on Testnet doesn't open
+// on Mainnet with nothing in it. Picking one moves the wallet there, as the
+// network menu does, and keeps what's typed. On another network, picked
+// before in Settings, nothing's asked: the top bar names it. `setDisabled`
+// holds it while the wallet is made.
+function networkChoice(ov, actions) {
+  const on = detectPresetId({ nodeUrl: ov?.nodeUrl, proverUrl: ov?.proverUrl, archiverUrl: ov?.archiverUrl });
+  if (!ov?.nodeUrl || (on !== "mainnet" && on !== "testnet")) return null;
+  const offered = NETWORK_PRESETS.filter((preset) => preset.id === "mainnet" || preset.id === "testnet");
+  const host = h("div", { class: "onboard-network" });
+  const err = formError();
+  let picked = on;
+  let busy = false;
+  let held = false;
+  const draw = () =>
+    host.replaceChildren(
+      segmented({
+        label: "Network",
+        items: offered.map((preset) => ({ id: preset.id, text: preset.label, disabled: busy || held })),
+        selected: picked,
+        onSelect: pick,
+      })
+    );
+  async function pick(id) {
+    const preset = offered.find((p) => p.id === id);
+    if (!preset || busy || held) return;
+    // Picked with the keys: the focus stays on the choice.
+    const focused = host.contains(globalThis.document?.activeElement ?? null);
+    busy = true;
+    err.show("");
+    draw();
+    try {
+      const res = await actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: preset.nodeUrl, proverUrl: preset.proverUrl, archiverUrl: preset.archiverUrl });
+      if (res?.error) throw new Error(res.error.message ?? `Couldn't switch to ${preset.label}`);
+      picked = id;
+    } catch (e) {
+      err.show(e?.message ?? String(e));
+    } finally {
+      busy = false;
+      draw();
+      if (focused) host.querySelector('[aria-selected="true"]')?.focus?.();
+    }
+    // The top bar names it too.
+    await actions?.render?.({ forceRefresh: true })?.catch?.(() => {});
+  }
+  draw();
+  return {
+    els: [h("label", { text: "Network", "aria-hidden": "true" }), host, err.el],
+    setDisabled(on) {
+      held = Boolean(on);
+      draw();
+    },
+  };
+}
+
 // A recovery phrase and a new password, for Import wallet and for a restore
 // in place of the wallet here: what's wrong with the phrase under it, with
 // the password under each field, then one message to the wallet. `landing`:
-// in Add wallet, the line that says which wallet the phrase becomes.
-function phraseForm({ state, actions, title, lead = "", landing = null, passwordLabel, verb, busyVerb, type, onBack, adding = false }) {
+// in Add wallet, the line that says which wallet the phrase becomes;
+// `network`, what's asked first: Import wallet's network.
+function phraseForm({ state, actions, title, lead = "", landing = null, network = null, passwordLabel, verb, busyVerb, type, onBack, adding = false }) {
   const mnemonicInput = createMnemonicInput({
     wordCount: 12,
     allowWordCountToggle: true,
@@ -533,6 +593,7 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
   const setBusy = (isBusy) => {
     busy = Boolean(isBusy);
     mnemonicInput.setDisabled(busy);
+    network?.setDisabled(busy);
     fields.pwd.disabled = busy;
     if (fields.pwd2) fields.pwd2.disabled = busy;
     if (backBtn) backBtn.disabled = busy;
@@ -609,6 +670,7 @@ function phraseForm({ state, actions, title, lead = "", landing = null, password
   const form = h("div", { class: "row onboard-form" }, [
     landing?.el,
     lead ? h("p", { class: "auth-lead", text: lead }) : null,
+    ...(network?.els ?? []),
     groupLabel(mnemonicInput.el, "Recovery phrase"),
     mnemonicInput.el,
     phraseError.el,
@@ -630,6 +692,8 @@ export function onboardingImportView({ state, actions, adding = false, ov } = {}
     actions,
     adding,
     landing: adding ? walletLanding(ov) : null,
+    // The first wallet's: one added opens on the network the others are on, named in the top bar.
+    network: adding ? null : networkChoice(ov, actions),
     title: "Import wallet",
     verb: "Import wallet",
     busyVerb: "Importing…",

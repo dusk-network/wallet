@@ -16,3 +16,9 @@ export const handleEngineReady = (...args) =>
   typeof host.handleEngineReady === "function"
     ? host.handleEngineReady(...args)
     : undefined;
+// The engine's page closing, which ends the wallet open in it: Firefox's tab.
+// Chrome's offscreen document closes only as the background closes it.
+export const onEngineClosed = (...args) =>
+  typeof host.onEngineClosed === "function"
+    ? host.onEngineClosed(...args)
+    : undefined;

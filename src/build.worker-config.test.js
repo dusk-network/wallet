@@ -23,6 +23,20 @@ describe("the offer on the web wallet", () => {
   });
 });
 
+describe("the Android app and the web wallet's request links", () => {
+  // Lena's, Chen's and Sofía's: a request link shared from the app, or opened from a chat, opened the web wallet in a
+  // browser, whose page led with "Open in Firefox", though the Dusk app was installed.
+  it("claims testnet's, verified against the web wallet's own assetlinks.json, and keeps dusk: links", async () => {
+    const config = JSON.parse(await readFile(path.resolve(process.cwd(), "apps", "tauri", "src-tauri", "tauri.conf.json"), "utf8"));
+    const wallet = new URL(networks.testnet.apps.wallet);
+    expect(config.identifier).toBe("network.dusk.wallet");
+    expect(config.plugins["deep-link"].mobile).toEqual([
+      { scheme: ["dusk"], appLink: false },
+      { scheme: ["https"], host: wallet.host, pathPrefix: [`${wallet.pathname}/dashboard/send`], appLink: true },
+    ]);
+  });
+});
+
 describe("what a site can load of the extension's own files", () => {
   it("is nothing in Chrome, and in Firefox the provider script its content script injects, so no site can tell the build by its files", async () => {
     // Marek's: a page that never connected fetched chunks/strings.js and loaded chunks/core.js; a hash of them names the build.

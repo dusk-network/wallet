@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Opened the testnet web wallet's request links in the Android app where it's installed, as Android App Links, once the web wallet serves the file that names the app.
+- Said what a request asks comes to in your currency on mainnet, with the price's time, as it's made and in Receive's list, and what an amount comes to on Send and Review; the link stays in DUSK.
 - Added the recovery phrase and Change password to the Android app's Settings, each behind the password.
 - Let a fingerprint answer the password on big sends and before Reset in the Android app.
 - Looked a send up with the Android app in the background, for its notice once the app is left.
@@ -40,6 +42,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Counted the deposit fees as part of what unstaked stDUSK cost in Rewards by year, at its average cost, said under the table, and showed a year's loss with its minus sign, in DUSK and in your currency.
 - Split Sozu's part of Rewards by year into what grew while held and what unstaking took out, saying where either couldn't be read.
 - Worded the question for an amount that could be two as "Is that 1 or 1000?".
 - Answered a site's request made while its last one waits with -32002, request already pending, rather than a refusal.
@@ -76,6 +79,19 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept the field being typed in on show above the keyboard with a phone turned sideways, the Testnet band and the top bar out of its way, and showed the screen whole again once it's upright and the keyboard's gone.
+- Took a recovery phrase pasted into its boxes off the clipboard, where any app or page could read it, and said it's still there where the browser won't let it go.
+- Gave the tab Firefox for Android keeps the wallet running in Open the wallet, and said on it whether the last payment went through, is on its way or waits for the network, rather than a page with no way back.
+- Asked on Import wallet which network the wallet is for, Mainnet or Testnet, and opened it there, rather than on Mainnet with nothing in it.
+- Picked the default gas price by both wallets' one rule: the network's median, read as the web wallet reads it, up to five times the minimum, saying on Review that the network is busy and the price can be raised when it's over that.
+- Saved a profile's name or a contact's that asks a question only once it's answered, with Yes, save it, asked about any .dusk name in a profile's name, a contact's or not, and about a contact's name another contact's starts as, as a plain "Lucas" beside "Lucas (petit-fils)", in both wallets' words.
+- Showed the balance read last, said to be out of date with when it was read, where it can't be read now, as when the wallet opens with no signal, rather than a dash, and named the part the node couldn't give, as the stake.
+- Opened a payment from its notice in the Android app at once, as the notice knew it, without waiting for the network to come back, and said a payment on Sent is being looked up, never that it's taking long, until the node answers.
+- Sent a payment that couldn't reach the network at Confirm once the network answers, as the web wallet does, with Cancel on its screen and on Home until then, and payments that waited one at a time, in their order.
+- Said on Home that a payment waiting for the network wasn't sent once the wallet closed or locked before it went, with Send it now and Drop, never sending it by itself.
+- Listed each payment waiting for the network on Home with its amount, recipient, memo and time, and said on Send and Review when the same payment is waiting already.
+- Left payments waiting for the network out of Send's Available and Max.
+- Showed money that came in on Home and in Activity by itself while the wallet shows, read again every 30 seconds, and had Refresh read Activity too.
 - Moved on to the next box at a space typed after a recovery word on a phone, as Enter does, rather than running every word into the first box.
 - Put revokes, and approvals no migration spent, in the export, each once, in the file of the profile its migration paid, as the web wallet does, and said whose network fees on other chains the file has and which it may be short of.
 - Said under Rewards by year, in the web wallet's words, that taken out by unstaking is part of grown while held and how it's counted, and kept a year's figures while a new unstake's are read, rather than couldn't be read.

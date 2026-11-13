@@ -9,7 +9,7 @@ import { getSettings, normalizeAutoLock, rememberNodeChain, setSettings } from "
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearAllPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
-import { applyTxDefaults } from "../shared/txDefaults.js";
+import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem } from "../shared/securityPolicy.js";
@@ -18,7 +18,7 @@ import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
 import { getTxEpoch, getTxMeta, listTxs, onTxSettled, patchTxMeta, putTxMeta } from "../shared/txStore.js";
-import { sendingProfile, submittedTxMeta, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
+import { sendingProfile, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import {
   executionEventError,
@@ -27,8 +27,8 @@ import {
 } from "../shared/txExecution.js";
 import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx } from "../shared/txReconcile.js";
-import { engineContactsVault, handleUiCommand } from "./uiCommands.js";
-import { assertSendPassword, sendPasswordLimit } from "../shared/sendPassword.js";
+import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.js";
+import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
 import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
@@ -36,6 +36,9 @@ import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, watc
 import { noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
+import { cancelWaitingSend, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { withKeptBalances } from "../shared/keptBalances.js";
+import { TX_KIND } from "../shared/constants.js";
 import {
   configure,
   getAccounts,
@@ -60,6 +63,8 @@ import {
   openContactsRecords,
   sealContactsRecord,
   sendTransaction,
+  cancelSend,
+  setHandOverHook,
   selectAccountIndex,
   setShieldedCheckpointNow,
   startShieldedSync,
@@ -122,6 +127,33 @@ async function watchArrival(hash, { kind, nodeUrl, walletId }) {
   await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network, wallet: String(walletId ?? ""), token: await noticeTokenOf(hash, walletId) });
 }
 
+// How the payments from Send that wait for the network reach the wallet, as
+// the extension's background has them: the node asked whether it answers,
+// the engine to call one off, the page told whether one waits (waitingSends.js).
+const waitingHost = {
+  answers: async () => (await checkNode((await getSettings()).nodeUrl))?.nodeStatus === "online",
+  cancelInEngine: async (sendId) => cancelSend({ sendId }),
+  // Handed to the node, or maybe: kept as a send with no clear answer, looked up by its ID.
+  follow: async ({ record, hash }) => {
+    const params = { kind: TX_KIND.TRANSFER, privacy: record.privacy, to: record.to, amount: record.lux, memo: record.memo };
+    const sent = { walletId: record.walletId, origin: "Wallet", nodeUrl: record.nodeUrl, profileIndex: Number(record.profileIndex) || 0 };
+    await putTxMeta(hash, unclearTxMeta(params, sent, { toName: typedRecipientName(record.toName) }), { epoch: await getTxEpoch() });
+  },
+  tell: (message) => tellPage(message),
+};
+
+// A payment that waited is kept with its transaction's ID before the engine
+// hands it to the node (waitingSends.js); those being handed over as the app
+// stopped are followed by their IDs.
+setHandOverHook(({ sendId, hash }) => noteHandingOver(sendId, hash, waitingHost));
+followHandedOver(waitingHost).catch(() => {});
+
+// The wallet locks: a payment waiting for the network goes out only while its wallet is open.
+async function lockWallet() {
+  await stopWaitingSends("locked", waitingHost).catch(() => {});
+  lock();
+}
+
 // Auto-lock in the app, as the extension's background does it: the wallet
 // locks once it's gone this long without a press or a key in it (the page's
 // DUSK_UI_ACTIVITY), looked at every half minute while the page runs, and as
@@ -136,7 +168,7 @@ async function lockIfIdle() {
   if (!(minutes > 0) || Date.now() - lastActivity < minutes * 60_000) return false;
   return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
     if (!isUnlocked()) return false;
-    lock();
+    await lockWallet();
     tellPage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "auto_lock" });
     return true;
   });
@@ -273,8 +305,12 @@ export async function localSend(message) {
       // Locked as the extension's background locks it: the page is told,
       // and shows the unlock form (a switch that failed, a removal cut short).
       lock: async (reason = "remove") => {
-        lock();
+        await lockWallet();
         tellPage({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason });
+      },
+      // Another wallet: what waited to go out on the one before doesn't.
+      beforeSwitch: () => {
+        stopWaitingSends("switched", waitingHost).catch(() => {});
       },
       walletsChanged: () => tellPage({ type: "DUSK_UI_WALLETS_CHANGED" }),
     });
@@ -308,7 +344,7 @@ export async function localSend(message) {
 
     if (message?.type === "DUSK_UI_LOCK") {
       return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-        lock();
+        await lockWallet();
         if (isUnlocked()) throw new Error("Wallet lock did not complete");
         return { ok: true };
       });
@@ -318,7 +354,7 @@ export async function localSend(message) {
       return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         // The password first, as for removing a wallet: a reset wipes them all.
         if (await loadVault()) await checkResetPassword(message.password);
-        lock();
+        await lockWallet();
         if (isUnlocked()) throw new Error("Wallet lock did not complete");
         await beginReset();
         await clearAllPermissions();
@@ -379,7 +415,7 @@ export async function localSend(message) {
         const walletId = await walletIdOf(String(mnemonic));
         // Mainnet, Testnet or Devnet stays: a restore isn't a move to another network.
         const network = listedSettings(String((await getSettings())?.nodeUrl ?? ""));
-        lock();
+        await lockWallet();
         // Noted with the wallet it makes until that wallet's vault is.
         await beginReset({ keepContactsOf: walletId });
         await clearAllPermissions();
@@ -529,6 +565,14 @@ export async function localSend(message) {
       }
 
       const networkStatus = await networkStatusFor(settings, { failing: Boolean(balanceError) || !Number.isInteger(settings.chainId), read: Boolean(balance) && !balanceError });
+      // What couldn't be read now, as with no signal: what was read last on
+      // this phone, said to be maybe out of date; what was read, kept.
+      const kept = status.isUnlocked
+        ? await withKeptBalances(
+            { nodeUrl: settings.nodeUrl, account: String(status.accounts?.[Number(status.selectedAccountIndex) || 0] ?? "") },
+            { balance, shieldedBalance }
+          ).catch(() => ({}))
+        : {};
       return {
         hasVault: Boolean(vault),
         isUnlocked: status.isUnlocked,
@@ -541,6 +585,7 @@ export async function localSend(message) {
         shieldedBalance,
         shieldedSync,
         shieldedError,
+        ...kept,
         nodeUrl: settings.nodeUrl,
         proverUrl: settings.proverUrl,
         archiverUrl: settings.archiverUrl,
@@ -559,6 +604,8 @@ export async function localSend(message) {
         activeConnected,
         txs,
         accountNames,
+        // Payments from Send waiting for the network, or not sent: this wallet's on this node.
+        waitingSends: status.isUnlocked ? await waitingSendsOf({ walletId: String(status.accounts?.[0] ?? ""), nodeUrl: settings.nodeUrl }).catch(() => []) : [],
         // Each wallet the switcher shows, and the one unlocked.
         wallets: await walletsShown(status).catch(() => []),
         walletKey: status.walletKey,
@@ -630,11 +677,44 @@ export async function localSend(message) {
       return { ok: true, result: reconciled };
     }
 
+    // Cancel on a payment from Send, waiting for the network or being sent:
+    // whether it was called off before it went out.
+    if (message?.type === "DUSK_UI_CANCEL_SEND") {
+      return { ok: true, result: { cancelled: await cancelWaitingSend(String(message.sendId ?? ""), waitingHost) } };
+    }
+
+    // Drop, or Send it now, on a payment from Send that wasn't sent.
+    if (message?.type === "DUSK_UI_DROP_UNSENT") {
+      return { ok: true, result: { dropped: await dropUnsent(String(message.sendId ?? "")) } };
+    }
+
     // UI initiated transaction (from the wallet popup)
     if (message?.type === "DUSK_UI_SEND_TX") {
+      // A payment from Send (`sendId`) waits for the network where it
+      // couldn't reach it before it went out, and can be called off until it
+      // goes (waitingSends.js); any other send is tried once.
+      const sendId = typeof message.sendId === "string" && /^[\w-]{8,64}$/.test(message.sendId) && String(message.params?.kind ?? "").toLowerCase() === TX_KIND.TRANSFER ? message.sendId : "";
+      // From the profile its Review was for, whichever is picked as it goes.
+      const reviewed = reviewedParams(message.params);
+      // Above the amount chosen in Settings, the password's ticket counts
+      // once for the payment, however many tries it takes (`granted`):
+      // checked as it's taken, priced as its Review asked it, as one that
+      // waits behind others would outlive its ticket.
+      let granted;
+      const taking = engineStatus();
+      const expectedWallet = String(message.walletId ?? "");
+      if (taking?.isUnlocked && (!expectedWallet || expectedWallet === String(taking.accounts?.[0] ?? ""))) {
+        granted = await sendPasswordOnce(await sendParams({ params: reviewed }, { engineCall: localEngineCall, ensureEngineConfigured }), undefined, {
+          ticket: message.sendTicket,
+          walletId: String(taking.accounts?.[0] ?? ""),
+          nodeUrl: (await getSettings()).nodeUrl,
+        });
+      }
       // Sent from the wallet unlocked as it goes, the one its Review was on
-      // (`walletId`): a switch, lock or reset waits for it.
-      const { status, txEpoch, baseParams, result } = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      // (`walletId`): a switch, lock or reset waits for it. A payment that
+      // waited (`waited`) is kept with its transaction's ID before it's
+      // handed over (`sendKept`).
+      const attempt = ({ waited = false } = {}) => withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         const status = engineStatus();
         if (!status.isUnlocked) {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
@@ -646,19 +726,20 @@ export async function localSend(message) {
         // What this send and its watcher keep is dropped after a reset meanwhile.
         const txEpoch = await getTxEpoch();
         await ensureEngineConfigured();
-        // Fetch live gas price from node (cached for 30s) to use as default.
+        // The node's gas price (kept 30 s) by both wallets' one rule: its
+        // median, under a ceiling.
         let dynamicPrice;
         try {
           const gasData = await getCachedGasPrice();
-          dynamicPrice = gasData?.median;
+          dynamicPrice = defaultGasPriceOf(gasData).price.toString();
         } catch {
           // Ignore errors, will fall back to static default
         }
-        const baseParams = applyTxDefaults(message.params ?? {}, { dynamicPrice });
+        const baseParams = applyTxDefaults(reviewed, { dynamicPrice });
         // Above the amount chosen in Settings, only with the password checked for it.
         const { nodeUrl } = await getSettings();
-        await assertSendPassword(baseParams, { ticket: message.sendTicket, walletId: String(status.accounts?.[0] ?? ""), nodeUrl });
-        const result = await sendTransaction(baseParams).catch(async (error) => {
+        granted = await sendPasswordOnce(baseParams, granted, { ticket: message.sendTicket, walletId: String(status.accounts?.[0] ?? ""), nodeUrl });
+        const result = await sendTransaction({ ...baseParams, ...(sendId ? { sendId } : {}), ...(sendId && waited ? { sendKept: true } : {}) }).catch(async (error) => {
           // Handed over with no clear answer: kept, to be looked up by its ID.
           const hash = error?.data?.sent === "unknown" ? String(error.data.hash ?? "") : "";
           if (hash) {
@@ -669,6 +750,14 @@ export async function localSend(message) {
         });
         return { status, txEpoch, baseParams, result };
       });
+      const { status, txEpoch, baseParams, result } = sendId
+        ? await sendWhenReachable({
+            sendId,
+            record: waitingRecordOf(message, await getSettings().then((settings) => ({ nodeUrl: settings.nodeUrl, profileIndex: Number(settings.selectedAccountIndex ?? 0) || 0 }))),
+            attempt,
+            host: waitingHost,
+          })
+        : await attempt();
       const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
 
       // Persist metadata (see background/index.js comments).

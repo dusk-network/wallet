@@ -23,7 +23,8 @@ import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 import { ERROR_CODES } from "../../shared/errors.js";
 import { safeBigInt } from "../../shared/amount.js";
 import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
-import { activityRows, ensureActivity, refreshActivitySoon, selected, sozuFactOfSent } from "./activity.js";
+import { activityKey, activityRows, ensureActivity, lookForPayments, refreshActivitySoon, selected, sozuFactOfSent } from "./activity.js";
+import { LOOK_MS } from "./views/requests.js";
 import { checkArrivals } from "./arrivals.js";
 import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../../shared/bridgeArrival.js";
 import { saveHandedExport } from "./activityExport.js";
@@ -756,6 +757,15 @@ function txStatusToastFor(hash, status) {
   return txStatusToast(tx, status, { hidden: balancesHidden(ov), contactName, onItsWayTo, onView });
 }
 
+// Sends this page heard came to their end, in their block or failed: a later
+// word that one's still on its way, from a lookup that couldn't ask the node
+// (the app back from away, its network not back yet), isn't news. Nor is the
+// word it heard last of a send, said again by its next lookup: its toast
+// shows once (`heardTxs`).
+const endedTxs = new Set();
+const heardTxs = new Map();
+const endedStatus = (status) => status === "executed" || status === "failed";
+
 function installTxStatusListener() {
   if (txStatusListenerInstalled) return;
   txStatusListenerInstalled = true;
@@ -803,6 +813,23 @@ function installTxStatusListener() {
           return;
         }
 
+        // A payment from Send waits for the network, or is tried again as it
+        // answers: its Sent screen says so, with Cancel while it waits, and
+        // Home lists it.
+        if (msg?.type === "DUSK_UI_SEND_WAITING") {
+          const sent = state.sent;
+          if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && sent.waits !== Boolean(msg.waits)) {
+            sent.waits = Boolean(msg.waits);
+            if (state.route === "sent") {
+              toaster.announce(sentAnnouncement(sent, state.overview));
+              render({ cached: true }).catch(() => {});
+            }
+          }
+          state.needsRefresh = true;
+          if (state.route === "home") render({ forceRefresh: true }).catch(() => {});
+          return;
+        }
+
         if (msg?.type === "DUSK_UI_SHIELDED_STATUS") {
           const nextKey = shieldedStatusKey(msg.status);
           if (nextKey && nextKey === lastShieldedStatusKey) return;
@@ -839,6 +866,11 @@ function installTxStatusListener() {
         const status = String(
           msg.status ?? (msg.ok === false ? "failed" : msg.ok === true ? "executed" : "unknown")
         ).toLowerCase();
+        const record = hash && Array.isArray(state.overview?.txs) ? state.overview.txs.find((t) => String(t?.hash ?? "") === hash) : null;
+        if (!endedStatus(status) && (endedTxs.has(hash) || endedStatus(String(record?.status ?? "")))) return;
+        if (hash && endedStatus(status)) endedTxs.add(hash);
+        const news = !hash || heardTxs.get(hash) !== status;
+        if (hash) heardTxs.set(hash, status);
 
         // The Sent screen shows its own transaction's steps; a toast would
         // repeat them. It reads what the watcher reports from state.sent.
@@ -846,7 +878,7 @@ function installTxStatusListener() {
         if (forSent && state.route === "sent") {
           toaster.announce(sentAnnouncement(state.sent, state.overview));
           render().catch(() => {});
-        } else if (["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
+        } else if (news && ["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
           showToast(txStatusToastFor(hash, status));
         }
 
@@ -1026,9 +1058,13 @@ async function lookUpSends() {
   resumeTimer = null;
   const hashes = sendsOnTheirWay();
   if (!hashes.length) return;
-  await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
-  // Looked up: what the node said shows from here on.
-  if (state.sent) state.sent.lookingUp = false;
+  const answers = await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
+  // Looked up: what the node said shows from here on. A node that couldn't
+  // be asked yet, as just back from away, said nothing: the Sent screen goes
+  // on saying it's being looked up, never that it's taking long.
+  const at = state.sent?.hash ? hashes.indexOf(String(state.sent.hash)) : -1;
+  const own = at >= 0 ? answers[at] : undefined;
+  if (state.sent && (at < 0 || (own && !own.error && !own.result?.error))) state.sent.lookingUp = false;
   state.needsRefresh = true;
   await renderForConnection({ forceRefresh: true }).catch(() => {});
   if (Date.now() < resumeUntil && document.visibilityState !== "hidden" && sendsOnTheirWay().length) {
@@ -1063,16 +1099,83 @@ function followSent() {
   resumeTimer = setTimeout(() => lookUpSends().catch(() => {}), Math.max(0, went + SENT_LOOKED_UP_AFTER_MS - Date.now()));
 }
 
-// Back in front, the balance and the shielded sync are read again at once, as
-// Refresh does: a send made meanwhile, or a sync the phone stopped, shows as it is.
+// Back in front, the balance, the shielded sync and the history are read
+// again at once, as Refresh does: a send made meanwhile, money that came in,
+// or a sync the phone stopped, shows as it is.
 function comeBack() {
   state.needsRefresh = true;
   // A phone cut the page's network while it was away: it reconnects first.
   reconnectingUntil = Date.now() + RECONNECT_MS;
+  // Said at once, from what's read: the network being checked, never what
+  // was said of it while away; a send on Sent being looked up.
+  renderHeader(headerOf(state.overview));
+  lookingUpOnLeave();
   setTimeout(() => askNode().catch(() => {}), 0);
   setTimeout(() => renderHeader(headerOf(state.overview)), RECONNECT_MS + 50);
-  renderForConnection({ forceRefresh: true }).catch(() => {});
+  renderForConnection({ forceRefresh: true })
+    .then(() => lookForPayments(state.overview, { state, render }))
+    .catch(() => {});
   resumeWatching();
+}
+
+// --- Money coming in ----------------------------------------------------------
+// While Home or Activity shows an unlocked wallet, its balance and its history
+// are read again every 30 seconds, as Receive's requests look for a payment
+// (requests.js): money that came in shows by itself, on Home and in Activity
+// alike. Once the balance moved, however it was read, the history is read
+// again at once, and both every 10 seconds for a minute: the history lists a
+// payment once its block is final, a moment after the balance has it. Away
+// from the wallet (another app, the phone's Home) nothing is read; back, at
+// once (comeBack).
+const FOLLOW_ROUTES = new Set(["home", "activity"]);
+const CATCH_UP_EVERY_MS = 10_000;
+const CATCH_UP_FOR_MS = 60_000;
+let followTimer = null;
+let following = false;
+let catchUpUntil = 0;
+// The balances last read, with the profile and node they're of.
+let balancesSeen = "";
+
+// What the balances are: one that moved changes it.
+const balancesOf = (ov) => [ov?.balance?.value, ov?.shieldedBalance?.value, ov?.staked?.lux].map((value) => String(value ?? "")).join("|");
+
+// A balance read that moved since the last one, for the same profile on the
+// same node: the history is read for what moved it, and followed closely a minute.
+function noteBalances(ov) {
+  const key = ov?.isUnlocked ? activityKey(ov) : "";
+  const seen = key ? `${key}\n${balancesOf(ov)}` : "";
+  const moved = Boolean(key && balancesSeen.startsWith(`${key}\n`) && seen !== balancesSeen);
+  balancesSeen = seen;
+  if (!moved) return;
+  catchUpUntil = Date.now() + CATCH_UP_FOR_MS;
+  // The next read comes sooner: the one set for later goes.
+  clearTimeout(followTimer);
+  followTimer = null;
+  lookForPayments(ov, { state, render });
+}
+
+const followable = () =>
+  Boolean(state.overview?.isUnlocked) && FOLLOW_ROUTES.has(state.route) && document.visibilityState !== "hidden" && globalThis.navigator?.onLine !== false;
+
+async function follow() {
+  followTimer = null;
+  if (following || !followable()) return;
+  following = true;
+  try {
+    state.needsRefresh = true;
+    await render({ forceRefresh: true });
+    lookForPayments(state.overview, { state, render });
+  } finally {
+    following = false;
+  }
+  scheduleFollow(state.overview);
+}
+
+// One read at a time, the next once it's over: a node that holds a read
+// never piles them up.
+function scheduleFollow(ov) {
+  if (followTimer || following || !ov?.isUnlocked || !FOLLOW_ROUTES.has(state.route)) return;
+  followTimer = setTimeout(() => follow().catch(() => {}), Date.now() < catchUpUntil ? CATCH_UP_EVERY_MS : LOOK_MS);
 }
 
 // Back in front after a phone cut the page's network, the wallet reconnects:
@@ -1328,7 +1431,9 @@ async function onRefresh() {
   acctMenu.close();
   state.needsRefresh = true;
   await render({ forceRefresh: true });
-  // A send on its way is looked up again too.
+  // The history too, for Activity to have what the balance has; and a send
+  // on its way is looked up again.
+  lookForPayments(state.overview, { state, render });
   resumeWatching();
 }
 
@@ -1440,6 +1545,9 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   scheduleArrivalCheck(ov);
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });
+  // A balance that moved has the history read for it.
+  if (overviewRefreshed) noteBalances(ov);
+  scheduleFollow(ov);
 
   // What the screen drawn now is for (reviewOf): its wallet, profile and
   // network, and the context. Its handlers act for that wallet alone, however
@@ -1498,7 +1606,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
       return;
     }
     if (state.route === "onboard_import") {
-      setApp(keepForm(() => onboardingImportView({ state, actions })));
+      setApp(keepForm(() => onboardingImportView({ state, actions, ov })));
       return;
     }
 
@@ -1678,6 +1786,9 @@ async function openNoticed() {
   netMenu.close();
   acctMenu.close();
   Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
+  // At once, from what's read, with the notice's news on it (DUSK_UI_TX_STATUS):
+  // a read now could wait seconds on a network still coming back.
+  await render({ cached: true });
   state.needsRefresh = true;
   await render({ forceRefresh: true });
 }

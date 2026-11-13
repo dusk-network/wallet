@@ -272,7 +272,8 @@ describe("the wallet's own send", () => {
     delete mocks.store[STORAGE_KEYS.UNLOCK_GUARD];
 
     const ticket = await proveSendPassword(PASSWORD, params, { ...WALLET, walletKey: key() });
-    await expect(assertSendPassword(params, { ...WALLET, ticket })).resolves.toBeUndefined();
+    // What it was given for comes back, for the same send's next try; the ticket itself counts once.
+    await expect(assertSendPassword(params, { ...WALLET, ticket })).resolves.toEqual({ moves: 6n * DUSK, always: false });
     await expect(assertSendPassword(params, { ...WALLET, ticket })).rejects.toThrow();
   });
 
@@ -285,6 +286,6 @@ describe("the wallet's own send", () => {
     const ticket = await proved(params, 1_000);
     await expect(assertSendPassword(params, { ...WALLET, ticket, now: 1_000 + 2 * 60_000 })).rejects.toThrow();
     // Below the amount, none's needed.
-    await expect(assertSendPassword(transfer(DUSK), { ...WALLET })).resolves.toBeUndefined();
+    await expect(assertSendPassword(transfer(DUSK), { ...WALLET })).resolves.toBeNull();
   });
 });

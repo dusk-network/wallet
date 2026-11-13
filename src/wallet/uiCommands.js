@@ -6,7 +6,7 @@ import { nativeRewardRate, stakingFigures } from "../shared/rewardRate.js";
 import { contactsStore, forgetWalletContacts } from "../shared/contactsStore.js";
 import { askedOf, proveSendPassword, sendPasswordLimit, setSendPasswordLimit } from "../shared/sendPassword.js";
 import { checkVaultPassword } from "../shared/vault.js";
-import { applyTxDefaults } from "../shared/txDefaults.js";
+import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import {
   getWatchedAssets,
   watchToken,
@@ -101,10 +101,10 @@ function serializeResult(type, result) {
 }
 
 // The transaction as it would go: with the gas it goes with, as the send does it.
-async function sendParams(message, { engineCall, ensureEngineConfigured }) {
+export async function sendParams(message, { engineCall, ensureEngineConfigured }) {
   await ensureEngineConfigured();
   const stats = await engineCall("dusk_getCachedGasPrice").catch(() => null);
-  return applyTxDefaults(message.params ?? {}, { dynamicPrice: stats?.median });
+  return applyTxDefaults(message.params ?? {}, { dynamicPrice: stats ? defaultGasPriceOf(stats).price.toString() : undefined });
 }
 
 /**

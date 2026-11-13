@@ -33,8 +33,22 @@ export { sendRefused };
 
 let sentSeq = 0;
 
+// A payment's own ID, by which it's called off while it waits.
+function newSendId() {
+  try {
+    return globalThis.crypto.randomUUID();
+  } catch {
+    return `send-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
+  }
+}
+
 // Offline, as the browser says.
 const offline = () => globalThis.navigator?.onLine === false;
+
+// A payment from Send waiting for the network it couldn't reach, before it
+// went out, as the web wallet says it: it goes out once the network answers.
+const waitingText = () =>
+  `${offline() ? "You're offline." : "The network isn't answering."} Nothing has left your wallet yet. It goes out once the network answers.`;
 
 // "13:21 CET": when it was sent, with the time zone it shows in.
 function clock(ts) {
@@ -122,8 +136,10 @@ export function sentSteps(sent, ov) {
     ];
   }
   if (phase === "sending") {
+    // A payment from Send waits for the network; any other send is tried once.
+    const sub = sent?.waits || (offline() && sent?.sendId) ? waitingText() : offline() ? "You're offline, so it can't reach the network." : "Signing it and handing it to the network";
     return [
-      { label: "Sending", state: "current", sub: offline() ? "No connection. It can't reach the network until you're back online." : "Signing it and handing it to the network" },
+      { label: "Sending", state: "current", sub },
       { label: "Sent to the network", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
@@ -288,10 +304,13 @@ async function sendPasswordFor(message, { state, actions }) {
  * @param {() => boolean} [opts.unchanged] - asked just before the transaction
  *   goes to the wallet: false when what it was reviewed for changed, and then
  *   it isn't sent
+ * @param {boolean} [opts.canWait] - a payment from Send: where it can't reach
+ *   the network before it goes out, it waits for it, with Cancel, and goes
+ *   out once it answers (shared/waitingSends.js)
  * @returns {Promise<object | null>} the Sent screen's state, or null when the
  *   password it needed wasn't given, and the Review stays
  */
-export async function sendFromReview({ state, actions, message, summary, backRoute, doneRoute = "home", onSent, unchanged }) {
+export async function sendFromReview({ state, actions, message, summary, backRoute, doneRoute = "home", onSent, unchanged, canWait = false }) {
   const sendTicket = await sendPasswordFor(message, { state, actions });
   if (sendTicket === null) {
     actions?.showToast?.(SEND_PASSWORD_WAITS);
@@ -315,6 +334,9 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     nodeUrl: String(review?.nodeUrl ?? ""),
     backRoute,
     doneRoute,
+    // A payment that waits for the network, by which it's called off; and whether it waits now.
+    sendId: canWait ? newSendId() : "",
+    waits: false,
   };
   state.sent = sent;
   state.route = "sent";
@@ -330,7 +352,12 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   let res;
   if (!switched) {
     try {
-      res = await actions?.send?.({ ...boundToReview(message, review), ...(sendTicket ? { sendTicket } : {}) });
+      res = await actions?.send?.({
+        ...boundToReview(message, review),
+        ...(sendTicket ? { sendTicket } : {}),
+        // What's kept of it while it waits: the most its fee costs, as Review said it.
+        ...(sent.sendId ? { sendId: sent.sendId, feeCapLux: String(summary?.feeCapLux ?? "0") } : {}),
+      });
     } catch (e) {
       res = { error: { message: e?.message ?? String(e) } };
     }
@@ -345,8 +372,14 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     const went = sentOf(res?.error ?? { message: sent.error });
     sent.phase = went === false ? "not_sent" : "unconfirmed";
     if (went === "unknown" && res?.error?.data?.hash) sent.hash = String(res.error.data.hash);
+    // Said here, a payment that waited and then failed isn't said again on
+    // Home; one the wallet stopped as it locked or switched is, once it's open.
+    if (sent.sendId && went === false && !res?.error?.data?.cancelled) {
+      Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: sent.sendId })).catch(() => {});
+    }
   } else {
     sent.phase = "sent";
+    sent.waits = false;
     sent.status = "submitted";
     sent.hash = String(res.result?.hash ?? "");
     sent.sentAt = Date.now();
@@ -608,6 +641,25 @@ export function sentView(ov, { state, actions, sozu } = {}) {
     : null;
   // The phone's Back: back to review when nothing went, else Done.
   (notSent ? back : done).setAttribute("data-back", "");
+  // A payment waiting for the network: called off from here, until it goes.
+  const cancel =
+    phase === "sending" && sent.sendId && (sent.waits || offline())
+      ? h("button", {
+          class: "btn-outline sent-secondary sent-cancel",
+          type: "button",
+          text: "Cancel",
+          onclick: async (event) => {
+            const button = event?.currentTarget;
+            if (button) button.disabled = true;
+            const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: sent.sendId })).catch(() => null);
+            // Called off, it says Not sent as the send's answer comes; gone out, it goes on.
+            if (!res?.result?.cancelled) {
+              if (button) button.disabled = false;
+              actions?.showToast?.(res?.error ? "Couldn't cancel it. Try again." : "It went out already, so it can't be cancelled.");
+            }
+          },
+        })
+      : null;
   const explorer = explorerUrl
     ? h(
         "button",
@@ -638,7 +690,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
       final ? null : noticeOffer({ state, actions }),
       stepper,
       details.children.length ? details : null,
-      h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : [done, explorer]).filter(Boolean)),
+      h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : cancel ? [cancel, done] : [done, explorer]).filter(Boolean)),
     ].filter(Boolean)),
   ];
 }

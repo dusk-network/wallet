@@ -7,6 +7,7 @@
 // Values are expressed in LUX (1 LUX = 10^-9 DUSK) as decimal strings.
 
 import { SOZU_GAS as PACKAGE_SOZU_GAS, TRANSFER_GAS } from "@dusk-network/networks/gas";
+import { GAS_PRICE_BUSY, defaultGasPrice } from "@dusk-network/app-core/gas";
 
 import { TX_KIND } from "./constants.js";
 
@@ -54,6 +55,23 @@ import { TX_KIND } from "./constants.js";
  * The web wallet uses the same numbers; the public transfer's come from
  * @dusk-network/networks/gas.
  */
+/** What a Review says while the default gas price is held under a busy network's median. */
+export { GAS_PRICE_BUSY };
+
+/**
+ * The default gas price by both wallets' one rule (app-core's
+ * defaultGasPrice), from the node's gas price stats as the engine reads them
+ * (`median`, digits): the mempool's median, at least the network's minimum
+ * and at most its ceiling, where `busy` says the median is above it. Without
+ * a median, the minimum.
+ * @param {{ median?: unknown } | null | undefined} stats
+ * @returns {{ price: bigint, busy: boolean, median: bigint | null, minimum: bigint, ceiling: bigint }}
+ */
+export function defaultGasPriceOf(stats) {
+  const median = String(stats?.median ?? "").trim();
+  return defaultGasPrice(/^\d+$/.test(median) ? { median: BigInt(median) } : {});
+}
+
 export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
   public: Object.freeze({
     limit: String(TRANSFER_GAS.limit),

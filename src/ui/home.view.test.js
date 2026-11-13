@@ -229,6 +229,35 @@ describe("home balance", () => {
     expect(fine.title).toBeFalsy();
   });
 
+  // Chen's on Firefox for Android: opened with no signal, "—" in place of the balance, while it said the balance
+  // "may be out of date". Lena's: a stake that couldn't be read went without a word.
+  it("shows the balance read last where it can't be read now, says so with when it was read, and names a part it couldn't read", () => {
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const readAt = new Date(2026, 10, 12, 19, 52).getTime();
+    const draw = (over, online = true) => {
+      vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: online });
+      const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs: [], balance: { value: "857535243" }, shieldedBalance: { value: "0", spendable: "0" }, staked: { lux: "247500000", native: "0", sozu: "247500000" }, ...over };
+      document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
+      return {
+        total: document.body.querySelector(".home-hero .balance-amount").textContent,
+        label: document.body.querySelector(".balance-label__text").textContent,
+        note: document.body.querySelector(".balance-stale")?.textContent ?? "",
+      };
+    };
+    // Opened offline: the figures read last, never a dash, and when they were read.
+    const offline = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedStale: true, stakeStale: true }, false);
+    expect(offline.total).toBe("1.105 DUSK");
+    expect(offline.label).toBe("Total balance");
+    expect(offline.note).toMatch(/^Your balance may be out of date until you're back online\. Last read (at|yesterday at|on .+ at) /);
+    // Online, the node silent: the same, without the connection.
+    expect(draw({ balanceError: "timed out", balanceStale: true, balanceReadAt: readAt }).note).toMatch(/^Your balance may be out of date\. Last read /);
+    // What the node couldn't give now, by name: the stake; the stake and the shielded balance.
+    expect(draw({ stakeStale: true }).note).toBe("Your stake couldn't be read just now, so it may be out of date.");
+    expect(draw({ stakeStale: true, shieldedStale: true }).note).toBe("Your shielded balance and stake couldn't be read just now, so they may be out of date.");
+    expect(draw({}).note).toBe("");
+  });
+
   it("refreshes through the header's old Refresh action", async () => {
     const app = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "app.js"), "utf8");
     expect(app).toMatch(/const actions = \{\s*send: \(message\) => send\(forScreen\(message\)\),\s*review,\s*render,\s*showToast,\s*refresh: onRefresh,/);
@@ -236,5 +265,87 @@ describe("home balance", () => {
     expect(onRefresh).toContain("acctMenu.close();");
     expect(onRefresh).toContain("state.needsRefresh = true;");
     expect(onRefresh).toContain("await render({ forceRefresh: true });");
+  });
+});
+
+describe("payments from Send waiting for the network, on Home", () => {
+  // Amélie's, Marek's and Chen's: two sends waiting offline showed as two identical boxes, and Cancel said nothing.
+  const LUCAS = "lucas-account-26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdk";
+  const at = (h, m) => new Date(2026, 10, 13, h, m).getTime();
+  const send = (over = {}) => ({ sendId: "s1", walletId: "w", nodeUrl: "https://testnet.nodes.dusk.network", profileIndex: 0, privacy: "public", to: LUCAS, lux: "10000000", feeLux: "2500000", memo: "Hors ligne un", at: at(2, 34), waiting: true, waits: true, ...over });
+  const ov = (waitingSends, over = {}) => ({
+    isUnlocked: true,
+    nodeUrl: "https://testnet.nodes.dusk.network",
+    accounts: ["mine"],
+    selectedAccountIndex: 0,
+    balance: { value: "900000000" },
+    shieldedBalance: { value: "0", spendable: "0" },
+    waitingSends,
+    ...over,
+  });
+  const boxes = (document) => document.body.querySelectorAll(".home-waiting").map((el) => visibleText(el));
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("says what each pays, to whom, its memo and when it was made, to tell them apart, with Cancel", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2, 40));
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
+    const sent = [];
+    const actions = {
+      render: vi.fn(async () => {}),
+      showToast: vi.fn(),
+      send: vi.fn(async (message) => {
+        sent.push(message);
+        return { ok: true, result: { cancelled: true } };
+      }),
+    };
+    document.body.replaceChildren(...homeView(ov([send(), send({ sendId: "s2", memo: "Hors ligne deux", at: at(2, 36), waits: false })]), { state, actions }));
+    expect(boxes(document)).toEqual([
+      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers.Cancel",
+      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36It's being sent.Cancel",
+    ]);
+
+    // Cancel on the second: that one alone, and said.
+    document.body.querySelectorAll(".home-waiting button")[1].click();
+    await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+    expect(sent).toEqual([{ type: "DUSK_UI_CANCEL_SEND", sendId: "s2" }]);
+    expect(actions.showToast).toHaveBeenCalledWith({ text: "Not sent: 0.01 DUSK to Lucas (petit-fils). Nothing was sent and no fee was charged.", tone: "ok" });
+    expect(actions.render).toHaveBeenCalledWith({ forceRefresh: true });
+
+    // Hidden balances hide what it pays; another profile's aren't this one's to list.
+    document.body.replaceChildren(...homeView(ov([send()], { hideBalances: true }), { state, actions }));
+    expect(boxes(document)[0]).toMatch(/^Not sent yet: •••• DUSK to Lucas/);
+    document.body.replaceChildren(...homeView(ov([send({ profileIndex: 1 })]), { state, actions }));
+    expect(boxes(document)).toEqual([]);
+  });
+
+  it("says plainly one the wallet stopped waiting for wasn't sent, never sends it by itself, and offers Send it now through Review, or Drop", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(9, 0));
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true, result: { dropped: true } })) };
+    const closed = send({ waiting: false, waits: false, ended: "closed" });
+    const failed = send({ sendId: "s2", memo: "", waiting: false, waits: false, ended: "failed", error: "Failed to fetch" });
+    document.body.replaceChildren(...homeView(ov([closed, failed]), { state, actions }));
+    expect(boxes(document)).toEqual([
+      "Not sent: 0.01 DUSK to lucas-…jWmUdk“Hors ligne un” · made at 02:34The wallet closed before the network answered, so nothing was sent.Send it nowDrop",
+      "Not sent: 0.01 DUSK to lucas-…jWmUdkmade at 02:34Couldn't reach the network. Nothing was sent and no fee was charged.Send it nowDrop",
+    ]);
+
+    // Send it now: Send, filled in, for Review; the one said goes.
+    document.body.querySelectorAll(".home-waiting button").find((b) => b.textContent === "Send it now").click();
+    await vi.waitFor(() => expect(state.route).toBe("send"));
+    expect(actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_DROP_UNSENT", sendId: "s1" });
+    expect(state.draft).toMatchObject({ to: LUCAS, amountDusk: "0.01", memo: "Hors ligne un" });
+
+    // Drop: gone, Home drawn again.
+    document.body.querySelectorAll(".home-waiting button").filter((b) => b.textContent === "Drop")[1].click();
+    await vi.waitFor(() => expect(actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_DROP_UNSENT", sendId: "s2" }));
   });
 });

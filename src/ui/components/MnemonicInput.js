@@ -66,6 +66,8 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  *   is composing is taken once it's done.
  * - A word that isn't a recovery word is marked once a paste puts it in or
  *   its box is left, never while it's typed; it clears once it's a word.
+ * - Words pasted in are taken off the clipboard, which any app or page can
+ *   read, in the paste's own tap; where the browser won't, it's said once.
  * - `onCheck` hears what's wrong with the words, in one plain sentence ("" for
  *   nothing), after a paste and when the focus leaves the boxes, and "" again
  *   as soon as something's typed. `problem()` says the same on asking.
@@ -82,6 +84,9 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  *   its WebView has no ime-mode; the app has no browser's password manager, and
  *   to Android's autofill each is a one-time code's, no password it keeps.
  */
+/** What's said where a phrase pasted into the boxes couldn't be taken off the clipboard. */
+export const CLIPBOARD_KEPT_TEXT = "Your recovery phrase is still on the clipboard. Copy something else over it.";
+
 export function createMnemonicInput({
   initialMnemonic = "",
   wordCount = 12,
@@ -222,12 +227,29 @@ export function createMnemonicInput({
     return words;
   }
 
+  // Words pasted in leave the clipboard, where any app or page could read
+  // them: emptied in the paste's own tap, where the browser lets it be; where
+  // it doesn't, said once, under the boxes.
+  const clipNote = h("p", { class: "srp-clipboard", role: "status", hidden: true, text: CLIPBOARD_KEPT_TEXT });
+  function emptyClipboard() {
+    let emptied = null;
+    try {
+      emptied = globalThis.navigator?.clipboard?.writeText?.("") ?? null;
+    } catch {
+      emptied = null;
+    }
+    Promise.resolve(emptied ?? Promise.reject(new Error("No clipboard to write to"))).catch(() => {
+      clipNote.hidden = false;
+    });
+  }
+
   function onPaste(i, e) {
     const clip = e?.clipboardData?.getData?.("text");
     if (!clip) return;
     e.preventDefault();
     const words = parseWords(clip);
     if (!words.length) return;
+    emptyClipboard();
     placeWords(i, words);
   }
 
@@ -361,7 +383,7 @@ export function createMnemonicInput({
   const box = h("div", { class: "box srp-box" }, [grid]);
   const hintEl = hint ? h("p", { class: "srp-hint", id: `srp-hint-${++hintIds}`, text: hint }) : null;
   if (showBtn) showBtn.onclick = () => setShown(!shown);
-  const root = h("form", { class: "mnemonic-input", novalidate: "" }, [toggleRow, hintEl, box, showBtn].filter(Boolean));
+  const root = h("form", { class: "mnemonic-input", novalidate: "" }, [toggleRow, hintEl, box, showBtn, clipNote].filter(Boolean));
   // Nothing submits it: Enter moves on to the next word, or completes them.
   root.addEventListener("submit", (e) => e.preventDefault());
   if (hintEl) root.setAttribute("aria-describedby", hintEl.id);

@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [] }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -100,7 +100,20 @@ vi.mock("../shared/walletEngine.js", () => ({
   getAccounts: () => [`account of ${engine.wallet}`, `account 1 of ${engine.wallet}`],
   getSelectedAccountIndex: () => 0,
   getCachedGasPrice: vi.fn(async () => ({ median: "1" })),
+  // The node's balance where a test says it (`engine.balance`), else none to read, as with no signal.
+  getPublicBalance: async () => {
+    if (!engine.balance) throw new TypeError("Failed to fetch");
+    return { nonce: 4n, value: engine.balance };
+  },
+  getShieldedStatus: () => ({ state: "done", progress: 1, notes: 0 }),
+  getShieldedBalance: async () => ({ value: 0n, spendable: 0n }),
   sendTransaction: engine.sendTransaction,
+  // A payment from Send called off unless it was handed over, as walletEngine.js settles it.
+  cancelSend: ({ sendId }) => ({ cancelled: !engine.handedOver.has(sendId) }),
+  // What's told of a payment that waited before it's handed over: the app's bus keeps it.
+  setHandOverHook: (hook) => {
+    engine.handOverHook = hook;
+  },
   // Execution is never seen here, unless a test says when (`engine.executed`).
   waitTxExecuted: () => engine.executed?.promise ?? new Promise(() => {}),
   waitTxRemoved: () => new Promise(() => {}),
@@ -136,10 +149,15 @@ vi.mock("../platform/notices.js", () => ({
 
 // The node, prover and archiver checks the overview starts: none, but in the
 // tests of them, so no test reaches a real network or counts their reads.
-const statusChecks = vi.hoisted(() => ({ real: false }));
+const statusChecks = vi.hoisted(() => ({ real: false, nodeAnswers: true }));
 vi.mock("../shared/networkStatus.js", async (importOriginal) => {
   const real = await importOriginal();
-  return { ...real, checkAllEndpoints: (endpoints) => (statusChecks.real ? real.checkAllEndpoints(endpoints) : real.getNetworkStatus()) };
+  return {
+    ...real,
+    checkAllEndpoints: (endpoints) => (statusChecks.real ? real.checkAllEndpoints(endpoints) : real.getNetworkStatus()),
+    // The node asked whether it answers: as a test says, but in the tests of the checks.
+    checkNode: (nodeUrl, opts) => (statusChecks.real ? real.checkNode(nodeUrl, opts) : Promise.resolve({ nodeStatus: statusChecks.nodeAnswers ? "online" : "offline", nodeUrl })),
+  };
 });
 
 function memoryStorage() {
@@ -170,6 +188,9 @@ beforeEach(() => {
   engine.switchFails = false;
   engine.checkpoints = [];
   engine.executed = null;
+  engine.handedOver = new Set();
+  engine.balance = null;
+  statusChecks.nodeAnswers = true;
 });
 
 afterEach(() => {
@@ -326,6 +347,173 @@ describe("local sends", () => {
     const byHash = Object.fromEntries((await listTxs()).map((tx) => [tx.hash, tx]));
     expect(byHash["aa".repeat(32)]).toMatchObject({ to: ACCOUNT, toName: "alice.dusk", status: "submitted" });
     expect(byHash["bb".repeat(32)].toName).toBeUndefined();
+  });
+});
+
+describe("a payment from Send that can't reach the network before it goes out", () => {
+  // Amélie's and Chen's on Android: the Wi-Fi off at Confirm said "Not sent" a moment later and never waited.
+  const params = { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "10000000", memo: "Hors ligne un" };
+  const offline = () => Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+  // The page, and what the wallet tells it.
+  const page = () => {
+    const told = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent: told });
+    return () => told.mock.calls.map(([event]) => event.detail).filter((m) => m.type === "DUSK_UI_SEND_WAITING");
+  };
+  const waitingNow = async (localSend) => (await localSend({ type: "DUSK_UI_OVERVIEW" })).waitingSends;
+
+  afterEach(() => vi.useRealTimers());
+
+  it("waits for it, which Home says with what it pays, and goes out once, once it answers", async () => {
+    const { localSend } = await import("./localBus.js");
+    const heard = page();
+    statusChecks.nodeAnswers = false;
+    engine.sendTransaction.mockRejectedValueOnce(offline()).mockResolvedValueOnce({ hash: "ad".repeat(32), nonce: 1n });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0001", feeCapLux: "2500000", walletId: "account of wallet A", params });
+    await vi.waitFor(() => expect(heard()).toEqual([{ type: "DUSK_UI_SEND_WAITING", sendId: "send-0001", waits: true }]));
+    expect(await waitingNow(localSend)).toEqual([expect.objectContaining({ sendId: "send-0001", lux: "10000000", feeLux: "2500000", memo: "Hors ligne un", waiting: true, waits: true })]);
+
+    // No answer yet: it waits on.
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(engine.sendTransaction).toHaveBeenCalledOnce();
+
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "ad".repeat(32) } });
+    expect(engine.sendTransaction).toHaveBeenCalledTimes(2);
+    expect(engine.sendTransaction.mock.calls[1][0]).toMatchObject({ sendId: "send-0001", memo: "Hors ligne un" });
+    expect(await waitingNow(localSend)).toEqual([]);
+  });
+
+  it("is called off with Cancel while it waits: nothing sent, and never tried again", async () => {
+    const { localSend } = await import("./localBus.js");
+    const heard = page();
+    statusChecks.nodeAnswers = false;
+    engine.sendTransaction.mockRejectedValue(offline());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0002", walletId: "account of wallet A", params });
+    await vi.waitFor(() => expect(heard()).toHaveLength(1));
+    await expect(localSend({ type: "DUSK_UI_CANCEL_SEND", sendId: "send-0002" })).resolves.toEqual({ ok: true, result: { cancelled: true } });
+    await expect(response).resolves.toMatchObject({ error: { message: "You cancelled it, so nothing was sent.", data: { sent: false, cancelled: true } } });
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(engine.sendTransaction).toHaveBeenCalledOnce();
+    expect(await waitingNow(localSend)).toEqual([]);
+  });
+
+  // Astra's, in the app too: a payment waiting on one profile, another picked meanwhile, failed as it went; and one
+  // above the amount spent its password's ticket on the try the network didn't answer.
+  it("goes from the profile its Review was for, on the password given for it once, however many tries it takes", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { proveSendPassword, setSendPasswordLimit } = await import("../shared/sendPassword.js");
+    const { getSettings } = await import("../shared/settings.js");
+    const heard = page();
+    const wallet = await (await import("../shared/vault.js")).createVault("wallet A", "the password");
+    await setSendPasswordLimit(1_000_000n);
+    const { nodeUrl } = await getSettings();
+    const ticket = await proveSendPassword("the password", { ...params, gas: { limit: "100000000", price: "1000" } }, { walletKey: wallet.id, walletId: "account of wallet A", nodeUrl });
+    const reviewed = { ...params, _approvalContext: { walletId: "account of wallet A", profileIndex: 1, account: "account 1 of wallet A", nodeUrl } };
+    statusChecks.nodeAnswers = false;
+    engine.sendTransaction.mockRejectedValueOnce(offline()).mockResolvedValueOnce({ hash: "ae".repeat(32), nonce: 1n });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0004", walletId: "account of wallet A", sendTicket: ticket, params: reviewed });
+    await vi.waitFor(() => expect(heard()).toEqual([{ type: "DUSK_UI_SEND_WAITING", sendId: "send-0004", waits: true }]));
+    expect(await waitingNow(localSend)).toEqual([expect.objectContaining({ sendId: "send-0004", profileIndex: 1 })]);
+
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "ae".repeat(32) } });
+    // Both tries from profile 1; the second, which waited, told of before it's handed over.
+    expect(engine.sendTransaction.mock.calls.map(([sent]) => [sent.profileIndex, sent.sendKept])).toEqual([
+      [1, undefined],
+      [1, true],
+    ]);
+  });
+
+  // Astra's: a payment waiting behind another outlived its password's ticket, checked only as its turn came.
+  it("checks each payment's password as it's taken, so one waiting behind another goes out on it, however long", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { proveSendPassword, setSendPasswordLimit } = await import("../shared/sendPassword.js");
+    const { getSettings } = await import("../shared/settings.js");
+    const heard = page();
+    const wallet = await (await import("../shared/vault.js")).createVault("wallet A", "the password");
+    await setSendPasswordLimit(1_000_000n);
+    const { nodeUrl } = await getSettings();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    const ticket = () => proveSendPassword("the password", params, { walletKey: wallet.id, walletId: "account of wallet A", nodeUrl });
+    const [first, second] = [await ticket(), await ticket()];
+    statusChecks.nodeAnswers = false;
+    engine.sendTransaction
+      .mockRejectedValueOnce(offline())
+      .mockResolvedValueOnce({ hash: "b1".repeat(32), nonce: 1n })
+      .mockResolvedValueOnce({ hash: "b2".repeat(32), nonce: 2n });
+    const one = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0006", walletId: "account of wallet A", sendTicket: first, params });
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0006", waits: true }));
+    const two = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0007", walletId: "account of wallet A", sendTicket: second, params });
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0007", waits: true }));
+    // Three minutes with no network: past either ticket's two.
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(one).resolves.toMatchObject({ ok: true, result: { hash: "b1".repeat(32) } });
+    await expect(two).resolves.toMatchObject({ ok: true, result: { hash: "b2".repeat(32) } });
+  });
+
+  it("keeps a waiting payment with its transaction's ID as the engine hands it over, and follows it by that ID", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { getTxMeta } = await import("../shared/txStore.js");
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    // Kept by an app that stopped during its try: the engine hands it over all the same.
+    localStorage.setItem(
+      "dusk_waiting_sends_v1",
+      JSON.stringify({ "send-0005": { sendId: "send-0005", walletId: "account of wallet A", nodeUrl, profileIndex: 0, privacy: "public", to: ACCOUNT, lux: "10000000", feeLux: "0", memo: "Hors ligne un", at: 1 } })
+    );
+    await engine.handOverHook({ sendId: "send-0005", hash: "af".repeat(32) });
+    expect(await waitingNow(localSend)).toEqual([]);
+    await expect(getTxMeta("af".repeat(32))).resolves.toMatchObject({ status: "unknown", recoveryReason: "handover_unclear", to: ACCOUNT, amount: "10000000", memo: "Hors ligne un" });
+  });
+
+  it("ends as the wallet locks, and after the unlock Home says it wasn't sent, till it's dropped; it never goes out by itself", async () => {
+    const { localSend } = await import("./localBus.js");
+    const heard = page();
+    statusChecks.nodeAnswers = false;
+    engine.sendTransaction.mockRejectedValue(offline());
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0003", walletId: "account of wallet A", params });
+    await vi.waitFor(() => expect(heard()).toHaveLength(1));
+    await localSend({ type: "DUSK_UI_LOCK" });
+    await expect(response).resolves.toMatchObject({ error: { message: "The wallet locked before the network answered, so nothing was sent." } });
+
+    engine.unlocked = true;
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(engine.sendTransaction).toHaveBeenCalledOnce();
+    expect(await waitingNow(localSend)).toEqual([expect.objectContaining({ sendId: "send-0003", memo: "Hors ligne un", waiting: false, ended: "locked" })]);
+    await expect(localSend({ type: "DUSK_UI_DROP_UNSENT", sendId: "send-0003" })).resolves.toEqual({ ok: true, result: { dropped: true } });
+    expect(await waitingNow(localSend)).toEqual([]);
+  });
+});
+
+describe("the balance in the app", () => {
+  // Chen's: opened with no signal, Firefox for Android showed "—" for every balance while saying they "may be out
+  // of date"; the app does the same where Android ended it and it's opened offline.
+  it("shows the one read last on this phone where it can't be read now, said to be out of date with when it was read", async () => {
+    const { localSend } = await import("./localBus.js");
+    engine.balance = 857535243n;
+    await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ balance: { value: "857535243" }, balanceError: null });
+
+    // No signal now.
+    engine.balance = null;
+    const offline = await localSend({ type: "DUSK_UI_OVERVIEW" });
+    expect(offline).toMatchObject({ balance: { value: "857535243" }, balanceStale: true, balanceReadAt: expect.any(Number), shieldedBalance: { value: "0" }, shieldedStale: true });
+    expect(offline.balanceError).toBeTruthy();
+
+    // Nothing kept: nothing shown, never a figure made up.
+    const { forgetKeptBalances } = await import("../shared/keptBalances.js");
+    await forgetKeptBalances();
+    const none = await localSend({ type: "DUSK_UI_OVERVIEW" });
+    expect([none.balance, none.balanceStale]).toEqual([null, undefined]);
   });
 });
 

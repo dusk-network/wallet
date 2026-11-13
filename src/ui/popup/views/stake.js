@@ -37,7 +37,7 @@ import { keptRatesOf, nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../ac
 import { currencyName } from "../activityExport.js";
 import { duskPrices } from "../duskPrice.js";
 import { defaultCurrency } from "@dusk-network/app-core/amounts";
-import { REWARDS_COUNTED, REWARD_WORDS } from "@dusk-network/app-core/export";
+import { REWARDS_COUNTED, REWARD_WORDS, rewardWorth } from "@dusk-network/app-core/export";
 import { sendFromReview } from "./sent.js";
 
 const FUNDING_PUBLIC = "account";
@@ -414,18 +414,20 @@ function nodeRow(actions) {
   ]);
 }
 
-// What a year's rewards of one kind were worth, as the web wallet says it: in
-// the currency, at least its smallest coin, else "under" it, and how many of
-// them have no price.
+// What a year's rewards of one kind were worth, in both wallets' words
+// (app-core's rewardWorth): in the currency, "under" its smallest coin, a loss
+// with its minus sign, as taken out by unstaking can be with its deposit fees
+// counted, or "a loss under" it, never 0; and how many of them have no price.
 function worthText({ worth, unpriced }, currency) {
   if (worth === null || worth === undefined) return "";
   const one = currencyName(currency, 1);
   if (unpriced && !Number(worth)) return `no ${one} value`;
-  const money = new Intl.NumberFormat(amountLocale(), { currency, style: "currency" });
-  const least = 10 ** -(money.resolvedOptions().maximumFractionDigits ?? 2);
-  const amount = Number(worth);
-  return `${amount > 0 && amount < least ? `under ${money.format(least)}` : money.format(amount)}${unpriced ? `, ${unpriced} with no ${one} value` : ""}`;
+  const said = rewardWorth(String(worth), { currency, language: globalThis.navigator?.language });
+  return said ? `${said}${unpriced ? `, ${unpriced} with no ${one} value` : ""}` : "";
 }
+
+// A year's rewards of one kind that say anything: more than none, or a loss.
+const anyOf = (sum) => typeof sum?.lux === "bigint" && sum.lux !== 0n;
 
 // Rewards by calendar year, in this device's time zone, as a tax return asks
 // for them: native rewards claimed, and with Sozu what grew while held and
@@ -459,11 +461,11 @@ function rewardYears(ov, { state, actions, hidden, status }) {
       .catch(() => {});
   }
   // Sozu's part as it is, or null where it couldn't be read, which is said.
-  const years = state.rewardYears.years.filter((year) => year.claimed.lux > 0n || year.sozu?.lux > 0n || year.sozuGrown?.lux > 0n || year.sozu === null || year.sozuGrown === null);
+  const years = state.rewardYears.years.filter((year) => anyOf(year.claimed) || anyOf(year.sozu) || anyOf(year.sozuGrown) || year.sozu === null || year.sozuGrown === null);
   if (!years.length) return null;
   const line = (label, sum) => {
     if (sum === null) return [`${label}: couldn't be read`];
-    if (!(sum?.lux > 0n)) return null;
+    if (!anyOf(sum)) return null;
     const worth = valued ? worthText(sum, currency) : "";
     return [`${label}: `, ...amountParts(hidden, sum.lux), worth ? h("span", { class: "kv-muted" }, [" · ", balance(hidden, worth)]) : null].filter(Boolean);
   };
@@ -480,7 +482,7 @@ function rewardYears(ov, { state, actions, hidden, status }) {
     h("span", { text: `Add each reward's value in ${currencyName(currency)}, from CoinGecko's prices` }),
   ]);
   // Sozu's two lines, how they're counted, in both wallets' words (app-core).
-  const sozuShown = years.some(({ sozu, sozuGrown }) => sozu === null || sozuGrown === null || sozu?.lux > 0n || sozuGrown?.lux > 0n);
+  const sozuShown = years.some(({ sozu, sozuGrown }) => sozu === null || sozuGrown === null || anyOf(sozu) || anyOf(sozuGrown));
   return [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
     h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown }) =>
