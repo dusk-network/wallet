@@ -299,3 +299,60 @@ describe("the password on big sends, in Settings", () => {
     expect(every.app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsOn every send");
   });
 });
+
+describe("Import wallet's network", () => {
+  // Amélie's: her phrase, used on Testnet, imported opened on Mainnet with "TOTAL BALANCE 0 DUSK", twice.
+  it("asks which network first, moves the wallet there keeping what's typed, and imports it there", async () => {
+    const messages = [];
+    const answer = async (message) => {
+      messages.push(message);
+      if (message.type === "DUSK_UI_SET_NODE_URL") Object.assign(overview, { nodeUrl: message.nodeUrl, networkName: "Testnet" });
+      if (message.type === "DUSK_UI_CREATE_WALLET") Object.assign(overview, { hasVault: true, isUnlocked: true, accounts: [ACCOUNT], wallets: [OVERVIEW.wallets[0]] });
+      return { ok: true };
+    };
+    const fresh = { hasVault: false, isUnlocked: false, accounts: [], accountCount: 0, wallets: [], walletKey: null, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" };
+    const t = await popupAt("onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, answer, fresh);
+    const tabs = () => t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]').map((tab) => [tab.textContent, tab.getAttribute("aria-selected")]);
+    expect(tabs()).toEqual([
+      ["Mainnet", "true"],
+      ["Testnet", "false"],
+    ]);
+
+    // The words and the password typed first, then the network.
+    const names = [...WORDS.map((_, i) => `Word ${i + 1}`), "Password", "Confirm password"];
+    const fields = fieldsOf(t.app, names);
+    typeAll(fields);
+    t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]')[1].click();
+    await flush();
+    expect(messages.filter((m) => m.type === "DUSK_UI_SET_NODE_URL")).toEqual([
+      {
+        type: "DUSK_UI_SET_NODE_URL",
+        nodeUrl: "https://testnet.nodes.dusk.network",
+        proverUrl: "https://testnet.provers.dusk.network",
+        archiverUrl: "https://testnet.nodes.dusk.network",
+      },
+    ]);
+    expect(tabs()).toEqual([
+      ["Mainnet", "false"],
+      ["Testnet", "true"],
+    ]);
+    expect(fieldsOf(t.app, names)).toEqual(fields);
+    expect(fields.every((f) => f.value && t.app.contains(f))).toBe(true);
+
+    button(t.app, "Import wallet").click();
+    await flush();
+    expect(messages.map((m) => m.type).filter((type) => type === "DUSK_UI_SET_NODE_URL" || type === "DUSK_UI_CREATE_WALLET")).toEqual(["DUSK_UI_SET_NODE_URL", "DUSK_UI_CREATE_WALLET"]);
+    expect(messages.find((m) => m.type === "DUSK_UI_CREATE_WALLET").mnemonic).toBe(WORDS.join(" "));
+    expect([t.state.route, overview.nodeUrl]).toEqual(["home", "https://testnet.nodes.dusk.network"]);
+  });
+
+  it("asks nothing on another network picked before, nor beside other wallets, where the top bar names it", async () => {
+    const devnet = { hasVault: false, isUnlocked: false, accounts: [], wallets: [], walletKey: null, networkName: "Devnet", nodeUrl: "https://devnet.nodes.dusk.network" };
+    let t = await popupAt("onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, async () => ({}), devnet);
+    expect(t.app.querySelectorAll('[role=tablist][aria-label="Network"]')).toHaveLength(0);
+    expect(fieldsOf(t.app, ["Word 1"])).toHaveLength(1);
+
+    t = await popupAt("wallet_add_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false, adding: true } });
+    expect(t.app.querySelectorAll('[role=tablist][aria-label="Network"]')).toHaveLength(0);
+  });
+});

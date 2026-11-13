@@ -78,6 +78,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Asked on Import wallet which network the wallet is for, Mainnet or Testnet, and opened it there, rather than on Mainnet with nothing in it.
 - Picked the default gas price by both wallets' one rule: the network's median, read as the web wallet reads it, up to five times the minimum, saying on Review that the network is busy and the price can be raised when it's over that.
 - Saved a profile's name or a contact's that asks a question only once it's answered, with Yes, save it, asked about any .dusk name in a profile's name, a contact's or not, and about a contact's name another contact's starts as, as a plain "Lucas" beside "Lucas (petit-fils)", in both wallets' words.
 - Showed the balance read last, said to be out of date with when it was read, where it can't be read now, as when the wallet opens with no signal, rather than a dash, and named the part the node couldn't give, as the stake.

@@ -1606,7 +1606,7 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
       return;
     }
     if (state.route === "onboard_import") {
-      setApp(keepForm(() => onboardingImportView({ state, actions })));
+      setApp(keepForm(() => onboardingImportView({ state, actions, ov })));
       return;
     }
 
