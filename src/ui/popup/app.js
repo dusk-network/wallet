@@ -757,6 +757,15 @@ function txStatusToastFor(hash, status) {
   return txStatusToast(tx, status, { hidden: balancesHidden(ov), contactName, onItsWayTo, onView });
 }
 
+// Sends this page heard came to their end, in their block or failed: a later
+// word that one's still on its way, from a lookup that couldn't ask the node
+// (the app back from away, its network not back yet), isn't news. Nor is the
+// word it heard last of a send, said again by its next lookup: its toast
+// shows once (`heardTxs`).
+const endedTxs = new Set();
+const heardTxs = new Map();
+const endedStatus = (status) => status === "executed" || status === "failed";
+
 function installTxStatusListener() {
   if (txStatusListenerInstalled) return;
   txStatusListenerInstalled = true;
@@ -857,6 +866,11 @@ function installTxStatusListener() {
         const status = String(
           msg.status ?? (msg.ok === false ? "failed" : msg.ok === true ? "executed" : "unknown")
         ).toLowerCase();
+        const record = hash && Array.isArray(state.overview?.txs) ? state.overview.txs.find((t) => String(t?.hash ?? "") === hash) : null;
+        if (!endedStatus(status) && (endedTxs.has(hash) || endedStatus(String(record?.status ?? "")))) return;
+        if (hash && endedStatus(status)) endedTxs.add(hash);
+        const news = !hash || heardTxs.get(hash) !== status;
+        if (hash) heardTxs.set(hash, status);
 
         // The Sent screen shows its own transaction's steps; a toast would
         // repeat them. It reads what the watcher reports from state.sent.
@@ -864,7 +878,7 @@ function installTxStatusListener() {
         if (forSent && state.route === "sent") {
           toaster.announce(sentAnnouncement(state.sent, state.overview));
           render().catch(() => {});
-        } else if (["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
+        } else if (news && ["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
           showToast(txStatusToastFor(hash, status));
         }
 
@@ -1044,9 +1058,13 @@ async function lookUpSends() {
   resumeTimer = null;
   const hashes = sendsOnTheirWay();
   if (!hashes.length) return;
-  await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
-  // Looked up: what the node said shows from here on.
-  if (state.sent) state.sent.lookingUp = false;
+  const answers = await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
+  // Looked up: what the node said shows from here on. A node that couldn't
+  // be asked yet, as just back from away, said nothing: the Sent screen goes
+  // on saying it's being looked up, never that it's taking long.
+  const at = state.sent?.hash ? hashes.indexOf(String(state.sent.hash)) : -1;
+  const own = at >= 0 ? answers[at] : undefined;
+  if (state.sent && (at < 0 || (own && !own.error && !own.result?.error))) state.sent.lookingUp = false;
   state.needsRefresh = true;
   await renderForConnection({ forceRefresh: true }).catch(() => {});
   if (Date.now() < resumeUntil && document.visibilityState !== "hidden" && sendsOnTheirWay().length) {
@@ -1088,6 +1106,10 @@ function comeBack() {
   state.needsRefresh = true;
   // A phone cut the page's network while it was away: it reconnects first.
   reconnectingUntil = Date.now() + RECONNECT_MS;
+  // Said at once, from what's read: the network being checked, never what
+  // was said of it while away; a send on Sent being looked up.
+  renderHeader(headerOf(state.overview));
+  lookingUpOnLeave();
   setTimeout(() => askNode().catch(() => {}), 0);
   setTimeout(() => renderHeader(headerOf(state.overview)), RECONNECT_MS + 50);
   renderForConnection({ forceRefresh: true })
@@ -1764,6 +1786,9 @@ async function openNoticed() {
   netMenu.close();
   acctMenu.close();
   Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
+  // At once, from what's read, with the notice's news on it (DUSK_UI_TX_STATUS):
+  // a read now could wait seconds on a network still coming back.
+  await render({ cached: true });
   state.needsRefresh = true;
   await render({ forceRefresh: true });
 }

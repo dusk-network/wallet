@@ -76,6 +76,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Opened a payment from its notice in the Android app at once, as the notice knew it, without waiting for the network to come back, and said a payment on Sent is being looked up, never that it's taking long, until the node answers.
 - Sent a payment that couldn't reach the network at Confirm once the network answers, as the web wallet does, with Cancel on its screen and on Home until then, and payments that waited one at a time, in their order.
 - Said on Home that a payment waiting for the network wasn't sent once the wallet closed or locked before it went, with Send it now and Drop, never sending it by itself.
 - Listed each payment waiting for the network on Home with its amount, recipient, memo and time, and said on Send and Review when the same payment is waiting already.
