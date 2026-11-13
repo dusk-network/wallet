@@ -3,9 +3,9 @@
 // DuskEVM, contacts, profile labels and tokens, the wallets' names, what sites
 // asked, the sends the app on Android looks for while it's away, Send's draft
 // kept by the page, payments from Send that waited for the network and
-// weren't sent, and the settings, so the network is Mainnet's own node
-// again and no address stays. And what removing one wallet clears of it alone
-// (forgetWalletData).
+// weren't sent, the balances read last, and the settings, so the network is
+// Mainnet's own node again and no address stays. And what removing one wallet
+// clears of it alone (forgetWalletData).
 //
 // A reset is noted before the vault goes. If any of these can't be cleared,
 // the reset fails and stays noted, and no new wallet is made until another
@@ -31,6 +31,7 @@ import { clearShieldedStore, forgetWalletNotes } from "./shieldedStore.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs, forgetWalletTxs } from "./txStore.js";
 import { clearWaitingSends, forgetWalletUnsent } from "./waitingSends.js";
+import { forgetKeptBalances } from "./keptBalances.js";
 import { clearWallets } from "./wallets.js";
 import { forgetWalletRequests, keepOnlyRequestsOf } from "./paymentRequests.js";
 import { forgetAppArrivals } from "../platform/notices.js";
@@ -73,6 +74,8 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     forgetSendDrafts(),
     // Payments from Send that waited for the network, or weren't sent.
     clearWaitingSends(),
+    // The balances read last, shown where they can't be read.
+    forgetKeptBalances(),
     // Names checked and rates read, kept by account or by node, and the password on big sends.
     storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.MEASURED_RATES, STORAGE_KEYS.SEND_PASSWORD]),
   ]);
@@ -138,6 +141,7 @@ export async function forgetWalletData({ walletId, accounts }) {
     forgetNoticeTokens(id),
     forgetSendDrafts(id),
     forgetWalletUnsent(id),
+    forgetKeptBalances(Array.isArray(accounts) ? accounts : []),
   ]);
   return results.every((r) => r.status === "fulfilled");
 }

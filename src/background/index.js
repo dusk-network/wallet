@@ -69,6 +69,7 @@ import {
 import { sendingProfile, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { cancelWaitingSend, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import { SEND_PASSWORD_COMMANDS, assertScreenWallet, engineContactsVault, handleUiCommand, sendParams } from "../wallet/uiCommands.js";
 import { handleWalletCommand, keepWalletShown, openWalletName, walletsShown } from "../wallet/walletCommands.js";
@@ -1477,6 +1478,17 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             .catch(() => {});
         }
 
+        // What couldn't be read now, as with no signal: what was read last
+        // on this device, said to be maybe out of date; what was read, kept.
+        const selectedAccountIndex = status.selectedAccountIndex ?? settings.selectedAccountIndex ?? 0;
+        const kept = status.isUnlocked
+          ? await withKeptBalances(
+              { nodeUrl: settings.nodeUrl, account: String(status.accounts?.[Number(selectedAccountIndex) || 0] ?? "") },
+              { balance, shieldedBalance, staked },
+              { stakeRead: staked !== null }
+            ).catch(() => ({}))
+          : {};
+
         sendResponse({
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
@@ -1488,6 +1500,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           shieldedSync,
           shieldedError,
           staked,
+          ...kept,
           // Payments from Send waiting for the network, or not sent: this wallet's on this node.
           waitingSends: status.isUnlocked
             ? await waitingSendsOf({ walletId: String(status.accounts?.[0] ?? ""), nodeUrl: settings.nodeUrl }).catch(() => [])

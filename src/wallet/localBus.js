@@ -37,6 +37,7 @@ import { noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import { cancelWaitingSend, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import {
   configure,
@@ -564,6 +565,14 @@ export async function localSend(message) {
       }
 
       const networkStatus = await networkStatusFor(settings, { failing: Boolean(balanceError) || !Number.isInteger(settings.chainId), read: Boolean(balance) && !balanceError });
+      // What couldn't be read now, as with no signal: what was read last on
+      // this phone, said to be maybe out of date; what was read, kept.
+      const kept = status.isUnlocked
+        ? await withKeptBalances(
+            { nodeUrl: settings.nodeUrl, account: String(status.accounts?.[Number(status.selectedAccountIndex) || 0] ?? "") },
+            { balance, shieldedBalance }
+          ).catch(() => ({}))
+        : {};
       return {
         hasVault: Boolean(vault),
         isUnlocked: status.isUnlocked,
@@ -576,6 +585,7 @@ export async function localSend(message) {
         shieldedBalance,
         shieldedSync,
         shieldedError,
+        ...kept,
         nodeUrl: settings.nodeUrl,
         proverUrl: settings.proverUrl,
         archiverUrl: settings.archiverUrl,

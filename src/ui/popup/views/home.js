@@ -254,14 +254,7 @@ export function homeView(ov, { state, actions } = {}) {
       [balance(hidden, heroText), heroAmt === "—" ? null : h("span", { class: "balance-unit", text: " DUSK" })].filter(Boolean)
     ),
     balanceSplit,
-    // Offline, as the browser says at once; or read before, kept while the node can't give it or doesn't answer; or not read at all.
-    globalThis.navigator?.onLine === false
-      ? h("div", { class: "muted balance-stale", role: "status", text: BALANCE_OFFLINE })
-      : ov?.balanceStale || ov?.shieldedStale || (hasBalance && ov?.networkStatus?.nodeStatus === "offline")
-        ? h("div", { class: "muted balance-stale", role: "status", text: BALANCE_STALE })
-        : ov?.balanceError
-          ? h("div", { class: "muted", text: BALANCE_UNREAD })
-          : null,
+    staleNote(ov, hasBalance),
   ].filter(Boolean));
 
   // Activity: the newest rows, the full list behind See all.
@@ -299,6 +292,25 @@ export function homeView(ov, { state, actions } = {}) {
       ...(getStarted ? [getStarted] : assetsSectionsView(ov, { state, actions })),
     ]),
   ];
+}
+
+/**
+ * What's said under the balances where they may be out of date: offline, as
+ * the browser says at once; read before and kept while the node can't give
+ * it or doesn't answer, with when it was read where the wallet kept that,
+ * as after opening with no signal; or the parts the node couldn't give now,
+ * by name; or not read at all.
+ * @returns {HTMLElement | null}
+ */
+function staleNote(ov, hasBalance) {
+  const at = Number(ov?.balanceReadAt);
+  const read = Number.isFinite(at) && at > 0 ? ` Last read ${whenAtText(at)}.` : "";
+  const note = (text) => h("div", { class: "muted balance-stale", role: "status", text });
+  if (globalThis.navigator?.onLine === false) return note(`${BALANCE_OFFLINE}${read}`);
+  if (ov?.balanceStale || (hasBalance && ov?.networkStatus?.nodeStatus === "offline")) return note(`${BALANCE_STALE}${read}`);
+  const parts = [ov?.shieldedStale && "shielded balance", ov?.stakeStale && "stake"].filter(Boolean);
+  if (parts.length) return note(`Your ${parts.join(" and ")} couldn't be read just now, so ${parts.length > 1 ? "they" : "it"} may be out of date.`);
+  return ov?.balanceError ? h("div", { class: "muted", text: BALANCE_UNREAD }) : null;
 }
 
 /**

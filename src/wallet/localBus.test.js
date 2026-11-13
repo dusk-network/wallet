@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set() }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -100,6 +100,13 @@ vi.mock("../shared/walletEngine.js", () => ({
   getAccounts: () => [`account of ${engine.wallet}`, `account 1 of ${engine.wallet}`],
   getSelectedAccountIndex: () => 0,
   getCachedGasPrice: vi.fn(async () => ({ median: "1" })),
+  // The node's balance where a test says it (`engine.balance`), else none to read, as with no signal.
+  getPublicBalance: async () => {
+    if (!engine.balance) throw new TypeError("Failed to fetch");
+    return { nonce: 4n, value: engine.balance };
+  },
+  getShieldedStatus: () => ({ state: "done", progress: 1, notes: 0 }),
+  getShieldedBalance: async () => ({ value: 0n, spendable: 0n }),
   sendTransaction: engine.sendTransaction,
   // A payment from Send called off unless it was handed over, as walletEngine.js settles it.
   cancelSend: ({ sendId }) => ({ cancelled: !engine.handedOver.has(sendId) }),
@@ -182,6 +189,7 @@ beforeEach(() => {
   engine.checkpoints = [];
   engine.executed = null;
   engine.handedOver = new Set();
+  engine.balance = null;
   statusChecks.nodeAnswers = true;
 });
 
@@ -484,6 +492,28 @@ describe("a payment from Send that can't reach the network before it goes out", 
     expect(await waitingNow(localSend)).toEqual([expect.objectContaining({ sendId: "send-0003", memo: "Hors ligne un", waiting: false, ended: "locked" })]);
     await expect(localSend({ type: "DUSK_UI_DROP_UNSENT", sendId: "send-0003" })).resolves.toEqual({ ok: true, result: { dropped: true } });
     expect(await waitingNow(localSend)).toEqual([]);
+  });
+});
+
+describe("the balance in the app", () => {
+  // Chen's: opened with no signal, Firefox for Android showed "—" for every balance while saying they "may be out
+  // of date"; the app does the same where Android ended it and it's opened offline.
+  it("shows the one read last on this phone where it can't be read now, said to be out of date with when it was read", async () => {
+    const { localSend } = await import("./localBus.js");
+    engine.balance = 857535243n;
+    await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ balance: { value: "857535243" }, balanceError: null });
+
+    // No signal now.
+    engine.balance = null;
+    const offline = await localSend({ type: "DUSK_UI_OVERVIEW" });
+    expect(offline).toMatchObject({ balance: { value: "857535243" }, balanceStale: true, balanceReadAt: expect.any(Number), shieldedBalance: { value: "0" }, shieldedStale: true });
+    expect(offline.balanceError).toBeTruthy();
+
+    // Nothing kept: nothing shown, never a figure made up.
+    const { forgetKeptBalances } = await import("../shared/keptBalances.js");
+    await forgetKeptBalances();
+    const none = await localSend({ type: "DUSK_UI_OVERVIEW" });
+    expect([none.balance, none.balanceStale]).toEqual([null, undefined]);
   });
 });
 

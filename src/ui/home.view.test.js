@@ -229,6 +229,35 @@ describe("home balance", () => {
     expect(fine.title).toBeFalsy();
   });
 
+  // Chen's on Firefox for Android: opened with no signal, "—" in place of the balance, while it said the balance
+  // "may be out of date". Lena's: a stake that couldn't be read went without a word.
+  it("shows the balance read last where it can't be read now, says so with when it was read, and names a part it couldn't read", () => {
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const readAt = new Date(2026, 10, 12, 19, 52).getTime();
+    const draw = (over, online = true) => {
+      vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: online });
+      const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs: [], balance: { value: "857535243" }, shieldedBalance: { value: "0", spendable: "0" }, staked: { lux: "247500000", native: "0", sozu: "247500000" }, ...over };
+      document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
+      return {
+        total: document.body.querySelector(".home-hero .balance-amount").textContent,
+        label: document.body.querySelector(".balance-label__text").textContent,
+        note: document.body.querySelector(".balance-stale")?.textContent ?? "",
+      };
+    };
+    // Opened offline: the figures read last, never a dash, and when they were read.
+    const offline = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedStale: true, stakeStale: true }, false);
+    expect(offline.total).toBe("1.105 DUSK");
+    expect(offline.label).toBe("Total balance");
+    expect(offline.note).toMatch(/^Your balance may be out of date until you're back online\. Last read (at|yesterday at|on .+ at) /);
+    // Online, the node silent: the same, without the connection.
+    expect(draw({ balanceError: "timed out", balanceStale: true, balanceReadAt: readAt }).note).toMatch(/^Your balance may be out of date\. Last read /);
+    // What the node couldn't give now, by name: the stake; the stake and the shielded balance.
+    expect(draw({ stakeStale: true }).note).toBe("Your stake couldn't be read just now, so it may be out of date.");
+    expect(draw({ stakeStale: true, shieldedStale: true }).note).toBe("Your shielded balance and stake couldn't be read just now, so they may be out of date.");
+    expect(draw({}).note).toBe("");
+  });
+
   it("refreshes through the header's old Refresh action", async () => {
     const app = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "app.js"), "utf8");
     expect(app).toMatch(/const actions = \{\s*send: \(message\) => send\(forScreen\(message\)\),\s*review,\s*render,\s*showToast,\s*refresh: onRefresh,/);
