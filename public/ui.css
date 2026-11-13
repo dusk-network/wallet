@@ -3251,6 +3251,14 @@ body.page--popup .brand-mark {
   line-height: 1.4;
 }
 
+/* A name's question at Save, with Yes, save it under its words. */
+.contact-note:has(.contact-note__yes) {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
 /* Amount entry: one large field, its error, then the balance it comes from */
 .amount-entry {
   display: flex;

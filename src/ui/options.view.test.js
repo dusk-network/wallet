@@ -119,11 +119,11 @@ describe("profile names", () => {
     expect(shownError()).toBe("This name has hidden characters. Type it again without them.");
     expect(view.actions.showToast).not.toHaveBeenCalledWith("Name saved.");
 
-    typeInto(label(2), "Alice");
+    typeInto(label(2), "Savings");
     expect(shownError()).toBe("");
     label(2).dispatchEvent(fakeEvent("blur"));
     await settle();
-    expect(setAccountName).toHaveBeenCalledWith(ACCOUNTS[0], 1, "Alice");
+    expect(setAccountName).toHaveBeenCalledWith(ACCOUNTS[0], 1, "Savings");
   });
 
   // Lena's: Profile 2 named after a contact read as that contact in History.
@@ -168,31 +168,47 @@ describe("profile names", () => {
 
   // Marek's: Profile 2 named alice.dusk, Wendy's .dusk name, was saved, the question naming another
   // contact; Sofía's: "sofiadesign.dusk cliente" saved without a word, and then read as her;
-  // "VVendy" and "Davicl" passed for Wendy and David. Both wallets now ask app-core the same.
-  it("ask about a name that is a contact's .dusk name or starts as a profile's, naming whose, and refuse look-alikes in letter pairs", async () => {
+  // "VVendy" and "Davicl" passed for Wendy and David. Both wallets now ask app-core the same. Round 27:
+  // the question came with "Name saved.", nothing left to answer, and a stranger's .dusk name got no word.
+  it("ask about a name that is a contact's .dusk name, any other .dusk name, or starts as a profile's, naming whose, save it only on Yes, and refuse look-alikes in letter pairs", async () => {
     const WENDY = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
     listAddressBook.mockResolvedValue([
       { id: "w", name: "Wendy", address: WENDY, duskName: "wendy.dusk" },
       { id: "d", name: "David", address: `${WENDY.slice(0, -1)}U` },
     ]);
     setAccountName.mockClear();
-    await settings();
+    const view = await settings();
     const shownError = (n) => {
       const id = label(n).getAttribute("aria-describedby");
       return id ? dom.document.getElementById(id).textContent : "";
     };
-    const question = (n) => label(n).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.textContent);
+    const question = (n) => label(n).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.querySelector(".contact-note__words").textContent);
+    const yes = (n) => label(n).parentNode.querySelectorAll(".contact-note button").find((b) => isShown(b) && b.textContent === "Yes, save it");
     const name = async (n, typed) => {
       typeInto(label(n), typed);
       label(n).dispatchEvent(fakeEvent("blur"));
       await settle();
     };
 
+    // Asked, and not saved until it's answered.
     await name(2, "wendy.dusk");
-    expect([question(2), setAccountName.mock.calls.at(-1)]).toEqual([["You have a contact called Wendy, at wendy.dusk. Is this someone else?"], [ACCOUNTS[0], 1, "wendy.dusk"]]);
+    expect(question(2)).toEqual(["You have a contact called Wendy, at wendy.dusk. Is this someone else?"]);
+    expect(setAccountName).not.toHaveBeenCalled();
+    expect(view.actions.showToast).not.toHaveBeenCalledWith("Name saved.");
+    // Yes, save it: saved, once, though the field is left as it's pressed.
+    label(2).dispatchEvent(fakeEvent("blur"));
+    yes(2).click();
+    await settle();
+    expect([question(2), setAccountName.mock.calls]).toEqual([[], [[ACCOUNTS[0], 1, "wendy.dusk"]]]);
+    expect(view.actions.showToast).toHaveBeenCalledWith("Name saved.");
+
     // The first profile goes by its verified .dusk name.
+    setAccountName.mockClear();
     await name(2, "alice.dusk cliente");
-    expect([question(2), setAccountName.mock.calls.at(-1)]).toEqual([["Your other profile is called alice.dusk. Is this someone else?"], [ACCOUNTS[0], 1, "alice.dusk cliente"]]);
+    expect([question(2), setAccountName.mock.calls]).toEqual([["Your other profile is called alice.dusk. Is this someone else?"], []]);
+    // A stranger's .dusk name, no contact's: asked too.
+    await name(2, "sofiadesign.dusk");
+    expect([question(2), setAccountName.mock.calls]).toEqual([["sofiadesign.dusk is a .dusk name. Is it this profile's?"], []]);
 
     setAccountName.mockClear();
     for (const [typed, said] of [
@@ -207,21 +223,28 @@ describe("profile names", () => {
   });
 
   // Amélie's: her profile named Lucas beside her grandson's contact "Lucas (petit-fils)".
-  it("ask about a name a contact's starts, or that starts it, word for word, and save it", async () => {
+  it("ask about a name a contact's starts, or that starts it, word for word, and save it once it's answered", async () => {
     listAddressBook.mockResolvedValue([{ id: "c1", name: "Lucas (petit-fils)", address: "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T" }]);
     setAccountName.mockClear();
     await settings();
-    const question = () => label(1).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.textContent);
+    const question = () => label(1).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.querySelector(".contact-note__words").textContent);
     typeInto(label(1), "Lucas");
     label(1).dispatchEvent(fakeEvent("blur"));
     await settle();
-    expect([question(), setAccountName.mock.calls.at(-1)]).toEqual([["You have a contact called Lucas (petit-fils). Is this someone else?"], [ACCOUNTS[0], 0, "Lucas"]]);
-    // Typed again, the question goes with what it asked of.
+    expect([question(), setAccountName.mock.calls]).toEqual([["You have a contact called Lucas (petit-fils). Is this someone else?"], []]);
+    // Typed again, the question goes with what it asked of, and the name typed now is saved as any.
     typeInto(label(1), "Luc");
     expect(question()).toEqual([]);
     label(1).dispatchEvent(fakeEvent("blur"));
     await settle();
-    expect(question()).toEqual([]);
+    expect([question(), setAccountName.mock.calls]).toEqual([[], [[ACCOUNTS[0], 0, "Luc"]]]);
+    // Back to Lucas: asked again, and Yes saves it.
+    typeInto(label(1), "Lucas");
+    label(1).dispatchEvent(fakeEvent("blur"));
+    await settle();
+    label(1).parentNode.querySelectorAll(".contact-note button").find((b) => b.textContent === "Yes, save it").click();
+    await settle();
+    expect([question(), setAccountName.mock.calls.at(-1)]).toEqual([[], [ACCOUNTS[0], 0, "Lucas"]]);
     listAddressBook.mockResolvedValue([]);
   });
 

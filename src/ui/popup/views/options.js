@@ -1,4 +1,4 @@
-import { profileNameCheck } from "@dusk-network/app-core/names";
+import { NAME_SAVE_YES, profileNameCheck } from "@dusk-network/app-core/names";
 import { networks } from "@dusk-network/networks";
 
 import { formatDuskExact, formatFee } from "../../../shared/amount.js";
@@ -232,12 +232,18 @@ export function optionsView(ov, { state, actions } = {}) {
                 input.removeAttribute("aria-describedby");
               }
             };
-            // A .dusk name it is or starts as, a contact's or another profile's, or a contact's
-            // name it starts as, word for word, is asked about: the name is saved.
-            const question = h("div", { class: "send-self-note contact-note", role: "status", hidden: true });
-            const ask = (text) => {
-              question.textContent = text;
+            // A .dusk name it is or starts as, a contact's, another profile's or any other,
+            // or a contact's name it starts as, word for word, is asked about: the name is
+            // saved only once the question is answered, with Yes, save it.
+            const words = h("span", { class: "contact-note__words" });
+            const yes = h("button", { class: "mini-btn contact-note__yes", type: "button", text: NAME_SAVE_YES });
+            const question = h("div", { class: "send-self-note contact-note", role: "status", hidden: true }, [words, yes]);
+            // The name the question shown is about.
+            let asked = "";
+            const ask = (text, label = "") => {
+              words.textContent = text;
               question.hidden = !text;
+              asked = text ? label : "";
             };
             input.addEventListener("input", () => {
               drafts[i] = input.value;
@@ -254,19 +260,36 @@ export function optionsView(ov, { state, actions } = {}) {
                 if (drafts[i] === value) delete drafts[i];
                 return;
               }
+              // Asked already, as Yes is pressed and the field left: the answer saves it.
+              if (label && label === asked) return;
               // The one check both wallets make at Save (app-core): refused, said under the
-              // field; asked, saved with the question under it. Each profile by its label and
-              // its verified .dusk name; each contact by its name and the .dusk name it was saved from.
-              let said = null;
+              // field; asked, said under it with Yes, save it, and saved only then. Each
+              // profile by its label and its verified .dusk name; each contact by its name and
+              // the .dusk name it was saved from.
               if (label) {
                 const profiles = displayAccounts.map((account, j) => ({ account: String(account ?? ""), address: String(ov?.addresses?.[j] ?? ""), name: profileLabelOf(ov, j), duskName: verified.get(j) || undefined }));
-                said = profileNameCheck(label, { profiles, contacts: await contactsNow(), self: String(acct ?? "") });
+                const said = profileNameCheck(label, { profiles, contacts: await contactsNow(), self: String(acct ?? "") });
+                // Typed again meanwhile: what's said is of the name as it is now.
+                if (input.value !== value) return;
                 if (said?.refused) {
                   showError(said.words);
                   return;
                 }
+                if (said) {
+                  ask(said.words, label);
+                  return;
+                }
               }
-              ask(said?.words ?? "");
+              await keep(value, label);
+            };
+            yes.addEventListener("click", () => {
+              const value = input.value;
+              if (!asked || labelOf(value) !== asked) return;
+              ask("");
+              keep(value, labelOf(value)).catch(() => {});
+            });
+            // The name kept on this device, with "Name saved.".
+            const keep = async (value, label) => {
               const before = saved;
               saved = label;
               try {

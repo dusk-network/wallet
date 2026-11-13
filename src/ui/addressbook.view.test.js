@@ -273,33 +273,59 @@ describe("contacts", () => {
     const ADDRESS_OWN = "4QpZhL54DtNrCpXRK54BhfF8WYsgvPbfVTfeNf2ePSRPTCnuZYMk988Es2NMbwCXMPTKGTLfYunZ4mbFc7i743QE";
     const ADDRESS_SECOND = encodeBase58(decodeBase58(ADDRESS_OWN).map((byte, i, all) => (i === all.length - 1 ? byte ^ 1 : byte)));
     const shownNote = () =>
-      dom.document.body.querySelectorAll(".contact-note").filter(isShown).map((el) => el.textContent);
+      dom.document.body.querySelectorAll(".contact-note").filter(isShown).map((el) => (el.querySelector(".contact-note__words") ?? el).textContent);
+    // Yes, save it, under a name's question at Save.
+    const yes = () => dom.document.body.querySelectorAll(".contact-note button").find((b) => isShown(b) && b.textContent === "Yes, save it");
     const edit = (over = {}, ov) => mount({ view: "edit", editId: null, editReturnView: "list", loaded: true, items: [ALICE, { id: "2", name: "Estudio Marta", address: ADDRESS, type: "address" }], ...over }, ov);
 
-    it("says a name is in use, with the address it has, and lets it be saved", async () => {
+    it("asks about a name in use, with the address it has, and saves it only once that's answered", async () => {
       const view = edit();
       const name = view.field("Name");
       expect(shownNote()).toEqual([]);
       for (const typed of ["Estudio Marta", "  estudio   marta ", "Estudió Marta"]) {
         typeInto(name, typed);
-        expect(shownNote()).toEqual([`You already have a contact called Estudio Marta, at ${shortAddress(ADDRESS)}.`]);
+        expect(shownNote()).toEqual([`You have a contact called Estudio Marta, at ${shortAddress(ADDRESS)}. Is this someone else?`]);
       }
+      // A name it starts as, word for word, is asked about too; another name isn't.
       typeInto(name, "Estudio Marta 2");
+      expect(shownNote()).toEqual([`You have a contact called Estudio Marta, at ${shortAddress(ADDRESS)}. Is this someone else?`]);
+      typeInto(name, "Estudio Pablo");
       expect(shownNote()).toEqual([]);
 
       typeInto(name, "Alice");
       typeInto(view.field("Address"), BOB);
-      expect(shownNote()).toEqual([`You already have a contact called Alice, at ${shortAddress(ACCOUNT)}.`]);
+      expect(shownNote()).toEqual([`You have a contact called Alice, at ${shortAddress(ACCOUNT)}. Is this someone else?`]);
+      expect(yes()).toBeUndefined();
+      // A question, not a refusal: two people can have one name. Saved once it's answered.
       view.button("Save").click();
       await settle();
-      // A warning, not a refusal: two people can have one name.
+      expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+      yes().click();
+      await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Alice", address: BOB }), expect.anything());
     });
 
-    it("says a name looks like another contact's in other letters, and lets it be saved", async () => {
+    // Amélie's: "Mamie, c'est Lucas, nouveau compte": a plain "Lucas" beside "Lucas (petit-fils)" wasn't questioned.
+    it("asks about a name an existing contact's starts as, or that starts it, at Save", async () => {
+      const view = edit({ items: [ALICE, { id: "3", name: "Lucas (petit-fils)", address: ADDRESS, type: "address" }] });
+      typeInto(view.field("Name"), "Lucas");
+      typeInto(view.field("Address"), BOB);
+      view.button("Save").click();
+      await settle();
+      expect(shownNote()).toEqual([`You have a contact called Lucas (petit-fils), at ${shortAddress(ADDRESS)}. Is this someone else?`]);
+      expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+      // Changed after the question: the question goes, and Yes is for none.
+      typeInto(view.field("Name"), "Lucas Martin");
+      expect([shownNote(), yes()]).toEqual([[], undefined]);
+      view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Lucas Martin", address: BOB }), expect.anything());
+    });
+
+    it("asks about a name that looks like another contact's in other letters, and saves it once that's answered", async () => {
       const view = edit();
       const name = view.field("Name");
-      const alike = `This looks like your contact Alice, at ${shortAddress(ACCOUNT)}, but uses different letters.`;
+      const alike = `That looks like your contact Alice, at ${shortAddress(ACCOUNT)}. Is this someone else?`;
       // Cyrillic А and е, Greek Α, a capital I for the l, and a 1.
       for (const typed of ["\u0410lice", "Alic\u0435", "\u0391LICE", "AIice", "A1ice"]) {
         typeInto(name, typed);
@@ -312,6 +338,9 @@ describe("contacts", () => {
       typeInto(name, "\u0410lice");
       typeInto(view.field("Address"), BOB);
       view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+      yes().click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "\u0410lice", address: BOB }), expect.anything());
     });
@@ -373,9 +402,9 @@ describe("contacts", () => {
       const view = edit({}, ov);
       typeInto(view.field("Address"), CAROL);
       typeInto(view.field("Name"), "Profile 2");
-      expect(view.error("Name")).toBe("That's the name of your profile Profile 2. Choose another name.");
+      expect(view.error("Name")).toBe("One of your profiles is called Profile 2. Choose another name.");
       typeInto(view.field("Name"), "ProfiIe  2");
-      expect(view.error("Name")).toBe("That looks like the name of your profile Profile 2. Choose another name.");
+      expect(view.error("Name")).toBe("That looks like Profile 2, one of your profiles. Choose another name.");
       view.button("Save").click();
       await settle();
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
@@ -391,7 +420,7 @@ describe("contacts", () => {
 
     // Amélie's: her own profile named Lucas, by a slip, beside her grandson saved as "Lucas (petit-fils)": Send read
     // "From Lucas … To Lucas (petit-fils)".
-    it("asks about a name a profile's starts, or that starts it, word for word, and lets it be saved", async () => {
+    it("asks about a name a profile's starts, or that starts it, word for word, and saves it once that's answered", async () => {
       const ov = { nodeUrl: NODE, accounts: [OWN, BOB], addresses: [ADDRESS_OWN, ADDRESS_SECOND], accountNames: { 0: "Lucas" }, selectedAccountIndex: 0, txs: [] };
       const view = edit({}, ov);
       typeInto(view.field("Address"), CAROL);
@@ -404,6 +433,9 @@ describe("contacts", () => {
       expect(shownNote()).toEqual([]);
       typeInto(view.field("Name"), "Lucas (petit-fils)");
       view.button("Save").click();
+      await settle();
+      expect(upsertAddressBookEntry).not.toHaveBeenCalled();
+      yes().click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Lucas (petit-fils)", address: CAROL }), expect.anything());
     });
