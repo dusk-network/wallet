@@ -2,12 +2,25 @@
 // keyboard, with the screen's next button when both fit.
 //
 // Where the browser says what the keyboard covers (the visual viewport gets
-// shorter, as in the app's WebView, or the page itself does), the field goes
-// just above it. Firefox's add-on page on Android says nothing and doesn't
-// move the page, so the field goes into the top half of the page, which a
-// phone's keyboard leaves free. Either way the page gets room under its end
-// (#app's padding, ui.css) to scroll that far; the room stays until the next
-// screen, so nothing moves under a finger as the keyboard closes.
+// shorter, as in the app's WebView and Firefox's tab, or the page itself
+// does), the field goes just above it, and once the keyboard's gone, the field
+// still typed in, the page goes back where it was before it came. Firefox's
+// add-on page on Android says nothing and doesn't move the page, so the field
+// goes into the top half of the page, which a phone's keyboard leaves free.
+// Either way the page gets room under its end (#app's padding, ui.css) to
+// scroll that far; where nothing's said, the room stays until the next screen,
+// so nothing moves under a finger as the keyboard closes.
+//
+// Turned sideways, the keyboard leaves a strip at the top a box high: the
+// field goes there, and the test network's band and the popup's top bar give
+// it their room while it's typed in with the keyboard up
+// (`data-typing-sideways` on the page, ui.css). Which way round the phone is
+// held is the screen's to say: a keyboard makes the page shorter. Turned back,
+// the page goes back where it was before the keyboard came, and the field
+// typed in still goes above it from there. For a moment after a turn, what
+// the browser says the keyboard covers is still the other way round's
+// (Firefox's tab says the sideways keyboard leaves 62 px of an upright page):
+// the field goes where a keyboard leaves room, as when nothing is said.
 
 import { isPhone } from "./device.js";
 
@@ -16,6 +29,8 @@ const UNTYPED = new Set(["checkbox", "radio", "range", "file", "button", "submit
 const MARGIN = 12;
 // Less than this under the visual viewport is a toolbar, not a keyboard.
 const KEYBOARD_MIN = 80;
+// How long after a turn what the browser says of the keyboard is the other way round's.
+const TURN_SETTLE_MS = 600;
 
 const isTyped = (el) =>
   (el?.localName === "textarea" || (el?.localName === "input" && !UNTYPED.has(String(el.getAttribute?.("type") ?? "text").toLowerCase()))) &&
@@ -24,19 +39,44 @@ const isTyped = (el) =>
 
 /**
  * Where the keyboard starts, from the top of the page's viewport, in CSS px.
+ * `told`: false where what the browser says isn't to be taken, as just after a turn.
  * @param {Window} win
+ * @param {{ told?: boolean }} [opts]
  */
-export function keyboardTop(win) {
+export function keyboardTop(win, { told = true } = {}) {
   const layout = win.document?.documentElement?.clientHeight || win.innerHeight || 0;
   const vv = win.visualViewport;
   const seen = vv ? vv.offsetTop + vv.height : layout;
   // The browser says what it covers.
-  if (layout - seen > KEYBOARD_MIN) return seen;
+  if (told && layout - seen > KEYBOARD_MIN) return seen;
   // The page was made shorter for it.
+  if (told && madeShorter(win, layout)) return layout;
+  // Nothing said: the top half; turned sideways, the fifth the keyboard
+  // leaves above it, as on Amélie's phone in Firefox's tab and its menu's page.
+  return Math.round(layout * (sideways(win) ? 0.2 : 0.5));
+}
+
+// Whether the page is shorter than the screen leaves it without a keyboard.
+function madeShorter(win, layout) {
   const screen = Number(win.screen?.height) || 0;
-  if (screen && layout < screen * 0.7) return layout;
-  // Nothing said: the top half, a little more than a third turned sideways.
-  return Math.round(layout * ((win.innerWidth || 0) > layout ? 0.35 : 0.5));
+  return Boolean(screen && layout < screen * 0.7);
+}
+
+// Whether the browser says the keyboard covers part of the page now.
+function keyboardSaid(win) {
+  const layout = win.document?.documentElement?.clientHeight || win.innerHeight || 0;
+  const vv = win.visualViewport;
+  const seen = vv ? vv.offsetTop + vv.height : layout;
+  return layout - seen > KEYBOARD_MIN || madeShorter(win, layout);
+}
+
+// Whether the phone's on its side, as its screen says; else the page wider
+// than it's tall.
+function sideways(win) {
+  const held = String(win.screen?.orientation?.type ?? "");
+  if (held) return held.startsWith("landscape");
+  const layout = win.document?.documentElement?.clientHeight || win.innerHeight || 0;
+  return (win.innerWidth || 0) > layout;
 }
 
 // Whether `n` is a box that scrolls what's in it: one that may and has more
@@ -80,6 +120,20 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
   let room = 0;
   // Where the box the keyboard moved was before it did, to go back to.
   let before = null;
+  // Until when what the browser says of the keyboard is from before a turn.
+  let settled = 0;
+  // Whether this page's browser has said what the keyboard covers, and
+  // whether the keyboard was up when it last did.
+  let tells = false;
+  let covered = false;
+
+  // While a field is typed in on a phone on its side, with the keyboard up
+  // where that's said: the page's top lines give it their room.
+  const markSideways = (typing) => {
+    const up = !tells || keyboardSaid(win);
+    if (touch() && sideways(win) && isTyped(typing) && up) root?.setAttribute?.("data-typing-sideways", "");
+    else root?.removeAttribute?.("data-typing-sideways");
+  };
 
   const setRoom = (px) => {
     const next = Math.max(room, Math.ceil(px));
@@ -95,7 +149,23 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
 
   const reveal = (field) => {
     if (!field?.isConnected) return;
-    const top = keyboardTop(win);
+    const told = Date.now() >= settled;
+    if (told) {
+      const said = keyboardSaid(win);
+      tells ||= said;
+      // A browser that says what the keyboard covers says it's down: once it
+      // goes, the page goes back where it was before it came.
+      if (tells && !said) {
+        if (covered) {
+          covered = false;
+          dropRoom();
+          if (before?.scroller?.isConnected) before.scroller.scrollTop = before.top;
+        }
+        return;
+      }
+      covered = said;
+    }
+    const top = keyboardTop(win, { told });
     const layout = doc.documentElement?.clientHeight || win.innerHeight || 0;
     // The room first: a screen that fits whole scrolls only once it's there,
     // as one opened again from its Review does, its first field tapped low.
@@ -122,24 +192,32 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
     frame = (win.requestAnimationFrame ?? ((fn) => setTimeout(fn, 0)))(() => {
       frame = 0;
       const el = doc.activeElement;
+      // The top lines go or come back first: the field goes where they leave it.
+      markSideways(el);
       if (touch() && isTyped(el)) reveal(el);
+      markSideways(el);
     });
   };
   doc.addEventListener("focusin", (e) => {
+    markSideways(e.target);
     if (isTyped(e.target)) soon();
   });
+  // Where the focus goes next, if anywhere: another field keeps it so.
+  doc.addEventListener("focusout", (e) => markSideways(e.relatedTarget ?? null));
   win.visualViewport?.addEventListener?.("resize", soon);
   // Turned sideways or back: the room made for the keyboard the other way
-  // round goes, and the page goes back where it was before the keyboard came,
-  // or makes room afresh for a field still typed in.
+  // round goes, and the page goes back where it was before the keyboard came;
+  // a field still typed in goes above the keyboard again from there.
   let width = win.innerWidth;
   win.addEventListener?.("resize", () => {
     if (win.innerWidth !== width) {
       width = win.innerWidth;
-      if (room) {
+      const typing = touch() && isTyped(doc.activeElement);
+      markSideways(doc.activeElement);
+      settled = Date.now() + TURN_SETTLE_MS;
+      if (room || before) {
         dropRoom();
-        const typing = touch() && isTyped(doc.activeElement);
-        if (!typing && before?.scroller?.isConnected) before.scroller.scrollTop = before.top;
+        if (before?.scroller?.isConnected) before.scroller.scrollTop = before.top;
         if (!typing) before = null;
       }
     }
@@ -149,6 +227,8 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
   return {
     reset() {
       before = null;
+      // The field typed in goes with its screen, which tells nothing as it does.
+      markSideways(null);
       if (!room) return;
       dropRoom();
     },

@@ -149,3 +149,147 @@ describe("a field typed in on a phone", () => {
     expect(page.room()).toBe("");
   });
 });
+
+// Send in a tab of Firefox for Android on Amélie's phone, which says nothing of
+// the keyboard: upright the page is 414×790; on its side 914×324, and the
+// keyboard leaves its top 63 px. The page scrolls; To, Amount, Memo and Review
+// sit where each way round puts them.
+function sendTab({ touch = true, says = false } = {}) {
+  const dom = installFakeDom({ pathname: "/full.html" });
+  const doc = dom.document;
+  const html = doc.documentElement;
+  const win = Object.assign(dom.window, {
+    document: doc,
+    navigator: { userAgent: touch ? "Mozilla/5.0 (Android 15; Mobile; rv:144.0) Gecko/144.0 Firefox/159.0" : "Mozilla/5.0 (X11; Linux x86_64; rv:144.0) Gecko/20100101 Firefox/159.0" },
+    visualViewport: { offsetTop: 0, height: 790, addEventListener: vi.fn() },
+    requestAnimationFrame: (fn) => setTimeout(fn, 0),
+  });
+  // `says`: the browser says what the keyboard covers, as Firefox's tab does: 468 px show upright, 62 sideways.
+  const vvListeners = [];
+  win.visualViewport.addEventListener = (type, fn) => vvListeners.push(fn);
+  // `pageHeight`: the page as tall as the keyboard left it the other way round, as Firefox's tab keeps it a moment.
+  const turn = (onSide, { seen, pageHeight } = {}) => {
+    const [width, height] = onSide ? [914, 324] : [414, 790];
+    const orientation = { type: onSide ? "landscape-primary" : "portrait-primary" };
+    Object.assign(win, { innerWidth: width, innerHeight: height, screen: onSide ? { width: 914, height: 411, orientation } : { width: 414, height: 914, orientation } });
+    win.visualViewport.height = seen ?? (says ? (onSide ? 62 : 468) : height);
+    html.clientHeight = pageHeight ?? height;
+  };
+  turn(false);
+  html.scrollTop = 0;
+  doc.scrollingElement = html;
+  win.getComputedStyle = () => ({ overflowY: "visible" });
+  // Each one's top upright, its height, and its top on its side.
+  const places = { to: [180, 46, 120], amount: [250, 84, 190], memo: [420, 46, 300], review: [478, 46, 358] };
+  const make = (tag, name, className = "") => {
+    const el = Object.assign(doc.createElement(tag), { className });
+    el.getBoundingClientRect = () => {
+      const [upright, height, onSide] = places[name];
+      const top = (win.innerWidth > html.clientHeight ? onSide : upright) - html.scrollTop;
+      return { top, bottom: top + height };
+    };
+    return el;
+  };
+  const app = doc.createElement("div");
+  app.id = "app";
+  const [to, amount, memo, review] = [make("input", "to"), make("input", "amount"), make("input", "memo"), make("button", "review", "btn-primary")];
+  app.append(to, amount, memo, review);
+  doc.body.append(app);
+  installKeyboardRoom({ win });
+  const settleTurn = async (onSide, opts) => {
+    turn(onSide, opts);
+    win.dispatchEvent(fakeEvent("resize"));
+    await settle();
+  };
+  const keyboardSays = async (seen) => {
+    win.visualViewport.height = seen;
+    for (const fn of vvListeners) fn(fakeEvent("resize"));
+    await settle();
+  };
+  const focus = async (field) => {
+    field.focus();
+    field.dispatchEvent(fakeEvent("focusin"));
+    await settle();
+  };
+  const leave = async (field, next = null) => {
+    field.blur?.();
+    if (next) next.focus();
+    field.dispatchEvent(fakeEvent("focusout", { relatedTarget: next }));
+    await settle();
+  };
+  const marked = () => html.hasAttribute("data-typing-sideways");
+  return { to, amount, memo, review, turn: settleTurn, keyboardSays, focus, leave, marked, html };
+}
+
+describe("a field typed in on a phone turned sideways", () => {
+  // Amélie's: sideways, she typed her memo into a box she couldn't see, under the keyboard and the Testnet band.
+  it("goes into the strip the keyboard leaves at the top, the band and the top bar giving it their room", async () => {
+    const page = sendTab();
+    await page.focus(page.memo);
+    await page.turn(true);
+    expect(page.marked()).toBe(true);
+    expect(page.memo.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+    expect(page.memo.getBoundingClientRect().bottom).toBeLessThanOrEqual(63);
+
+    // Another field next keeps it so; none, and the band and the top bar come back.
+    await page.leave(page.memo, page.to);
+    expect(page.marked()).toBe(true);
+    await page.leave(page.to);
+    expect(page.marked()).toBe(false);
+  });
+
+  // Amélie's, back upright: Memo and Review alone at the top of a black page until she swiped.
+  it("goes back where the page was before the keyboard as the phone turns upright, the field still above it", async () => {
+    const page = sendTab();
+    await page.focus(page.memo);
+    await page.turn(true);
+    await page.turn(false);
+    expect(page.marked()).toBe(false);
+    // The form from its top again, To on screen, Memo and Review in the half the keyboard leaves.
+    expect(page.to.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+    expect(page.memo.getBoundingClientRect().top).toBeGreaterThanOrEqual(12);
+    expect(page.review.getBoundingClientRect().bottom).toBeLessThanOrEqual(395);
+  });
+
+  // Amélie's, in Firefox's tab, which says what the keyboard covers: just turned upright, it still said the
+  // sideways keyboard's 62 px were all that showed, and Memo went to the top of a black page.
+  it("takes what the browser says of the keyboard only once it's said afresh after a turn", async () => {
+    const page = sendTab({ says: true });
+    await page.focus(page.memo);
+    await page.turn(true);
+    expect(page.memo.getBoundingClientRect().bottom).toBeLessThanOrEqual(62);
+    // Upright, and the browser still says 62 px show, then the upright keyboard's 468.
+    await page.turn(false, { seen: 62 });
+    await page.keyboardSays(468);
+    expect(page.to.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
+    expect(page.review.getBoundingClientRect().bottom).toBeLessThanOrEqual(468);
+  });
+
+  // Amélie's: back upright, the keyboard closed, Memo and Review alone at the top of a black page.
+  it("goes back where the page was before the keyboard came once it's gone, the field still typed in", async () => {
+    const page = sendTab({ says: true });
+    await page.focus(page.memo);
+    await page.keyboardSays(468);
+    expect(page.html.scrollTop).toBeGreaterThan(0);
+    await page.keyboardSays(790);
+    expect([page.html.scrollTop, page.to.getBoundingClientRect().top]).toEqual([0, 180]);
+    expect(page.html.style.getPropertyValue("--keyboard-room")).toBe("");
+  });
+
+  // Firefox's tab kept the page as short as the sideways keyboard left it (62 px) a moment after she turned upright.
+  it("goes by how the screen says the phone's held, not by the page's height, which a keyboard changes", async () => {
+    const page = sendTab({ says: true });
+    await page.focus(page.memo);
+    await page.turn(true);
+    expect(page.marked()).toBe(true);
+    await page.turn(false, { seen: 62, pageHeight: 62 });
+    expect(page.marked()).toBe(false);
+  });
+
+  it("leaves the page whole on a computer, whose window is wider than tall", async () => {
+    const desk = sendTab({ touch: false });
+    await desk.turn(true);
+    await desk.focus(desk.memo);
+    expect([desk.marked(), desk.html.scrollTop]).toEqual([false, 0]);
+  });
+});

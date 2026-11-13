@@ -79,6 +79,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept the field being typed in on show above the keyboard with a phone turned sideways, the Testnet band and the top bar out of its way, and showed the screen whole again once it's upright and the keyboard's gone.
 - Took a recovery phrase pasted into its boxes off the clipboard, where any app or page could read it, and said it's still there where the browser won't let it go.
 - Gave the tab Firefox for Android keeps the wallet running in Open the wallet, and said on it whether the last payment went through, is on its way or waits for the network, rather than a page with no way back.
 - Asked on Import wallet which network the wallet is for, Mainnet or Testnet, and opened it there, rather than on Mainnet with nothing in it.

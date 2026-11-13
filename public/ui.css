@@ -5766,3 +5766,15 @@ button.chain-link.text-btn--inline:not(:disabled):hover {
 .review-in-currency {
   text-align: center;
 }
+
+/* A phone turned sideways, a field typed in: the keyboard leaves a strip at
+   the top a box high, which the box gets. The test network's band and the
+   popup's top bar give it their room while the keyboard's up (keyboard.js). */
+:root[data-typing-sideways] .panel > .testnet-strip,
+:root[data-typing-sideways] body.page--popup .panel-header {
+  display: none;
+}
+
+:root[data-typing-sideways] body.page--full {
+  --strip-height: 0px;
+}
