@@ -44,6 +44,16 @@ resources from `src-tauri/icons/android`. That icon is made from `icons/app-icon
 `cargo tauri icon icons/app-icon.json -o <folder>`, then its `android` folder
 in place of `icons/android`.
 
+Payment links open the app's Send: `dusk:` links, and the testnet web wallet's
+request links (`https://apps.testnet.dusk.network/wallet/dashboard/send?…`)
+as verified Android App Links, declared in `tauri.conf.json`'s `deep-link`
+plugin and checked by Android against the `/.well-known/assetlinks.json` the
+web wallet serves, which names this package and the signing key's SHA-256
+(the debug key the test builds are signed with). **Mainnet:** add
+`apps.dusk.network` the same way only once its `assetlinks.json` names the
+release key's fingerprint; before Android 12, one host that fails
+verification leaves every host unverified.
+
 ### Running
 
 Make sure you have an emulator or device with debugging enabled
