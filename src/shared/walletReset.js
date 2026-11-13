@@ -32,6 +32,7 @@ import { storage, STORAGE_KEYS } from "./storage.js";
 import { clearTxs, forgetWalletTxs } from "./txStore.js";
 import { clearWaitingSends, forgetWalletUnsent } from "./waitingSends.js";
 import { forgetKeptBalances } from "./keptBalances.js";
+import { forgetLastSends } from "./lastSends.js";
 import { clearWallets } from "./wallets.js";
 import { forgetWalletRequests, keepOnlyRequestsOf } from "./paymentRequests.js";
 import { forgetAppArrivals } from "../platform/notices.js";
@@ -76,6 +77,8 @@ export async function clearWalletData({ keepContactsOf } = {}) {
     clearWaitingSends(),
     // The balances read last, shown where they can't be read.
     forgetKeptBalances(),
+    // Each wallet's last payment, said in the tab the wallet runs in.
+    forgetLastSends(),
     // Names checked and rates read, kept by account or by node, and the password on big sends.
     storage.remove([STORAGE_KEYS.VERIFIED_NAMES, STORAGE_KEYS.NETWORK_STATUS, STORAGE_KEYS.REWARD_RATES, STORAGE_KEYS.MEASURED_RATES, STORAGE_KEYS.SEND_PASSWORD]),
   ]);
@@ -142,6 +145,7 @@ export async function forgetWalletData({ walletId, accounts }) {
     forgetSendDrafts(id),
     forgetWalletUnsent(id),
     forgetKeptBalances(Array.isArray(accounts) ? accounts : []),
+    forgetLastSends(id),
   ]);
   return results.every((r) => r.status === "fulfilled");
 }

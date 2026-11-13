@@ -78,6 +78,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Gave the tab Firefox for Android keeps the wallet running in Open the wallet, and said on it whether the last payment went through, is on its way or waits for the network, rather than a page with no way back.
 - Asked on Import wallet which network the wallet is for, Mainnet or Testnet, and opened it there, rather than on Mainnet with nothing in it.
 - Picked the default gas price by both wallets' one rule: the network's median, read as the web wallet reads it, up to five times the minimum, saying on Review that the network is busy and the price can be raised when it's over that.
 - Saved a profile's name or a contact's that asks a question only once it's answered, with Yes, save it, asked about any .dusk name in a profile's name, a contact's or not, and about a contact's name another contact's starts as, as a plain "Lucas" beside "Lucas (petit-fils)", in both wallets' words.

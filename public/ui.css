@@ -2560,9 +2560,23 @@ button.network-pill.is-disabled .network-pill__chev {
 }
 
 /* The tab Firefox for Android shows for the wallet's engine: what it is, so it's left open. */
-.page--engine .engine-note {
-  margin: 24px 16px;
+.page--engine .engine-page {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 420px;
+  margin: 24px auto;
+  padding: 0 16px;
+}
+
+.page--engine .engine-note,
+.page--engine .engine-last {
+  margin: 0;
   color: var(--text-muted);
+}
+
+.page--engine .engine-last {
+  color: var(--text);
 }
 
 /* What the red dot means, in words, on a line of its own under the top bar,

@@ -1261,6 +1261,55 @@ describe("background Phoenix tx lifecycle flow", () => {
       }
     });
 
+    // Chen's on Firefox for Android: the tab the wallet runs in, the one left once the wallet's was closed, said
+    // nothing of the payment just made.
+    it("tells the tab the wallet runs in where its last payment within the hour stands, sent or waiting", async () => {
+      const { putTxMeta } = await import("../shared/txStore.js");
+      const { engineCall } = await import("../background/engineHost.js");
+      const page = { url: "chrome-extension://wallet/engine.html" };
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_LAST_SEND" }, page)).resolves.toEqual({ ok: true, result: null });
+
+      const at = Date.now() - 60_000;
+      await putTxMeta("0xlast", { walletId: "acct0", origin: "Wallet", nodeUrl: "https://testnet.nodes.dusk.network", kind: "transfer", status: "submitted", submittedAt: at });
+      await putTxMeta("0xold", { walletId: "acct0", origin: "Wallet", nodeUrl: "https://testnet.nodes.dusk.network", kind: "transfer", status: "executed", submittedAt: at - 2 * 60 * 60_000 });
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_LAST_SEND" }, page)).resolves.toEqual({ ok: true, result: { at, state: "submitted" } });
+
+      // A later one, waiting for the network.
+      engineCall.mockImplementation(async (method) => {
+        if (method === "dusk_cancelSend") return { cancelled: true };
+        if (method !== "dusk_sendTransaction") return true;
+        throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+      });
+      mocks.nodeAnswers = false;
+      try {
+        const response = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-0003", params }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0003", waits: true }));
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_LAST_SEND" }, page)).resolves.toMatchObject({ ok: true, result: { state: "waiting" } });
+        // Only for the wallet's own pages.
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_LAST_SEND" }, { url: "https://site.example/" })).resolves.toMatchObject({ error: { message: "Only the wallet can do that" } });
+        await sendBackgroundMessage({ type: "DUSK_UI_CANCEL_SEND", sendId: "send-0003" }, page);
+        await response;
+      } finally {
+        mocks.nodeAnswers = true;
+      }
+    });
+
+    // Astra's: once history had a payment, Activity forgot its record, and the tab said nothing of it, or an older one,
+    // well within its hour.
+    it("says where the wallet's last payment stands though Activity forgot its record once history had it", async () => {
+      const { forgetTxs } = await import("../shared/txStore.js");
+      const { engineCall } = await import("../background/engineHost.js");
+      engineCall.mockImplementation(async (method) => (method === "dusk_sendTransaction" ? { hash: "0xsettled" } : true));
+      const page = { url: "chrome-extension://wallet/engine.html" };
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params })).resolves.toMatchObject({ ok: true, result: { hash: "0xsettled" } });
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_LAST_SEND" }, page)).resolves.toMatchObject({ ok: true, result: { state: "submitted" } });
+      // In its block, then history has it: Activity forgets its record (settleSends).
+      await sendBackgroundMessage({ type: "DUSK_TX_EXECUTED", hash: "0xsettled", ok: true }, { url: "chrome-extension://wallet/offscreen.html" });
+      await vi.waitFor(async () => expect((await sendBackgroundMessage({ type: "DUSK_UI_LAST_SEND" }, page)).result).toMatchObject({ state: "executed" }));
+      await forgetTxs(["0xsettled"]);
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_LAST_SEND" }, page)).resolves.toMatchObject({ ok: true, result: { state: "executed" } });
+    });
+
     // Marek's and Lena's: the default price followed the median with no ceiling, and each wallet read its own median.
     it("goes at the network's median up to the ceiling, by both wallets' one rule, where Review left the price to the network", async () => {
       const { engineCall } = await import("../background/engineHost.js");

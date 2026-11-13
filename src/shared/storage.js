@@ -36,5 +36,6 @@ export const STORAGE_KEYS = {
   WALLETS: "dusk_wallets_v1", // { active: key, wallets: { [key]: { walletId, accounts, name? } } }: what the switcher shows of each wallet (wallets.js)
   NOTICE_TOKENS: "dusk_notice_tokens_v1", // { [hash]: { token, wallet, at } }: the app's arrival notices' tokens, each taken once (noticeTokens.js)
   KEPT_BALANCES: "dusk_kept_balances_v1", // { ["<nodeUrl>\n<account>"]: { balance, balanceAt, shieldedBalance, shieldedBalanceAt, staked, stakedAt } }: the balances read last, shown where they can't be read (keptBalances.js)
+  LAST_SENDS: "dusk_last_sends_v1", // { ["<walletId>\n<nodeUrl>"]: { hash, at, state } }: each wallet's last payment from its own pages, kept apart from Activity's records, for the tab the wallet runs in (lastSends.js)
   WAITING_SENDS: "dusk_waiting_sends_v1", // { [sendId]: { walletId, nodeUrl, profileIndex, privacy, to, toName?, lux, feeLux, memo, at, ended?, error? } }: payments from Send waiting for the network, or not sent (waitingSends.js)
 };

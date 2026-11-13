@@ -16,6 +16,7 @@ import {
 import { getSettings, normalizeAutoLock, normalizeSiteLasts, setSettings } from "../shared/settings.js";
 import { forgetSiteRecord, getSiteRecords, noteSiteLasts, noteSiteUse, siteLastsMs } from "../shared/siteRecords.js";
 import { storage, STORAGE_KEYS } from "../shared/storage.js";
+import { keepLastSend, lastSendOf, noteLastSendState } from "../shared/lastSends.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
@@ -191,6 +192,30 @@ async function ensureActivityTimestamp() {
   return now;
 }
 
+// The wallet's last payment within the hour, sent or waiting to go: null for
+// none, or while it's locked. Its own pages' last is kept apart (lastSends.js),
+// as Activity's record of it goes once history has it; a site's is read from
+// the records still kept.
+const LAST_SEND_WITHIN_MS = 60 * 60_000;
+async function lastSend() {
+  const status = await getEngineStatus();
+  if (!status.isUnlocked) return null;
+  const walletId = String(status.accounts?.[0] ?? "");
+  const { nodeUrl } = await getSettings();
+  const since = Date.now() - LAST_SEND_WITHIN_MS;
+  const records = await listTxs({ nodeUrl, walletId }).catch(() => []);
+  const [sent] = records.filter((tx) => Number(tx.submittedAt) >= since);
+  const kept = await lastSendOf({ walletId, nodeUrl }).catch(() => null);
+  const keptRecord = kept ? records.find((tx) => tx.hash === kept.hash) : null;
+  const waiting = (await waitingSendsOf({ walletId, nodeUrl }).catch(() => [])).filter((send) => Number(send.at) >= since).at(-1);
+  const last = [
+    sent && { at: Number(sent.submittedAt), state: String(sent.status ?? "submitted") },
+    kept && Number(kept.at) >= since && { at: Number(kept.at), state: String(keptRecord?.status ?? kept.state) },
+    waiting && { at: Number(waiting.at), state: waiting.waiting ? "waiting" : "not_sent" },
+  ].filter(Boolean);
+  return last.sort((a, b) => b.at - a.at)[0] ?? null;
+}
+
 // How the payments from Send that wait for the network reach the wallet: the
 // node asked whether it answers, the engine to call one off, the pages told
 // whether one waits (waitingSends.js).
@@ -286,6 +311,8 @@ async function updateDappActivity(request, context = null) {
 }
 
 async function emitUiTxStatus(payload) {
+  // The wallet's last payment's, where it's this one: kept for the tab the wallet runs in.
+  noteLastSendState(String(payload?.hash ?? ""), String(payload?.status ?? "")).catch(() => {});
   try {
     await runtimeSendMessage({
       type: "DUSK_UI_TX_STATUS",
@@ -475,7 +502,7 @@ async function paysFor(params, accountIndex, status) {
 }
 
 // Only the wallet's own pages' to send, whatever a content script is made to.
-const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE", "DUSK_UI_CANCEL_SEND", "DUSK_UI_DROP_UNSENT"]);
+const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE", "DUSK_UI_CANCEL_SEND", "DUSK_UI_DROP_UNSENT", "DUSK_UI_LAST_SEND"]);
 
 // For when a site last used its connection: anything but what any page can ask.
 const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId", "dusk_openPaymentLink"]);
@@ -1562,6 +1589,14 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // Where the wallet's last payment within the hour stands, for the tab the
+      // wallet runs in in Firefox (engine/keepOpenPage.js): when it was made,
+      // and "waiting" for the network, "not_sent", or its record's status.
+      if (message?.type === "DUSK_UI_LAST_SEND") {
+        sendResponse({ ok: true, result: await lastSend().catch(() => null) });
+        return;
+      }
+
       // Drop, or Send it now, on a payment from Send that wasn't sent.
       if (message?.type === "DUSK_UI_DROP_UNSENT") {
         sendResponse({ ok: true, result: { dropped: await dropUnsent(String(message.sendId ?? "")) } });
@@ -1626,6 +1661,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             if (hash) {
               const sent = { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(baseParams, status, await getSettings()) };
               await putTxMeta(hash, unclearTxMeta(baseParams, sent, walletSendFields(baseParams, message)), { epoch: txEpoch }).catch(() => {});
+              await keepLastSend({ walletId: sent.walletId, nodeUrl, hash, state: "unknown" }).catch(() => {});
             }
             throw error;
           });
@@ -1653,6 +1689,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
               submittedTxMeta(baseParams, { walletId: String(status?.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message)),
               { epoch: txEpoch }
             );
+            await keepLastSend({ walletId: String(status?.accounts?.[0] ?? ""), nodeUrl, hash, state: "submitted" }).catch(() => {});
           }
 
           await notifyTxSubmitted({ hash, origin: "Wallet", nodeUrl });
