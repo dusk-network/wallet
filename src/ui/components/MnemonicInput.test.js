@@ -124,6 +124,33 @@ describe("the recovery phrase's word boxes", () => {
     expect(words()).toEqual(TWELVE.split(" "));
   });
 
+  // Marek's: "Paste the whole phrase into any box", and the pasted phrase stayed on the phone's clipboard, where his
+  // own page read it back in full.
+  it("takes pasted words off the clipboard, in the paste's own tap, and says so once where the browser won't", async () => {
+    const { box, input, words } = mount();
+    const said = () => {
+      const note = input.el.querySelector(".srp-clipboard");
+      return note && isShown(note) ? note.textContent : "";
+    };
+    paste(box(1), OTHER);
+    expect(words()).toEqual(OTHER.split(" "));
+    expect(dom.clipboard.writeText).toHaveBeenCalledWith("");
+    await Promise.resolve();
+    expect(said()).toBe("");
+
+    // A browser that won't let the page write to the clipboard: the phrase is still there, and that's said.
+    dom.clipboard.writeText.mockRejectedValueOnce(new DOMException("Clipboard write was blocked", "NotAllowedError"));
+    paste(box(1), TWELVE);
+    await vi.waitFor(() => expect(said()).toBe("Your recovery phrase is still on the clipboard. Copy something else over it."));
+    expect(words()).toEqual(TWELVE.split(" "));
+
+    // No clipboard to write to at all, as in an old WebView: said too.
+    const bare = mount();
+    vi.stubGlobal("navigator", { language: "en-GB" });
+    paste(bare.box(1), OTHER);
+    await vi.waitFor(() => expect(bare.input.el.querySelector(".srp-clipboard").hidden).toBe(false));
+  });
+
   it("puts a few words where they're pasted, as before", () => {
     const { box, words } = mount();
     paste(box(4), "legal winner thank");
@@ -303,8 +330,8 @@ describe("the recovery phrase's word boxes", () => {
     const { input } = mount({ hint: "Paste the whole phrase into any box." });
     const hint = input.el.querySelector(".srp-hint");
     expect(hint.textContent).toBe("Paste the whole phrase into any box.");
-    // Above the boxes, under the 12 or 24 choice.
-    expect(input.el.children.map((el) => el.className)).toEqual(["tabs tabs--mini srp-toggle", "srp-hint", "box srp-box"]);
+    // Above the boxes, under the 12 or 24 choice; under them, what's said of the clipboard after a paste.
+    expect(input.el.children.map((el) => el.className)).toEqual(["tabs tabs--mini srp-toggle", "srp-hint", "box srp-box", "srp-clipboard"]);
     expect(input.el.getAttribute("aria-describedby")).toBe(hint.id);
     expect(mount().input.el.querySelector(".srp-hint")).toBeNull();
   });

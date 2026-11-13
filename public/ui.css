@@ -3036,6 +3036,14 @@ body.page--popup .brand-mark {
   line-height: 1.4;
 }
 
+/* A phrase pasted in that couldn't be taken off the clipboard: said under the boxes. */
+.srp-clipboard {
+  margin: 10px 0 0;
+  color: var(--dusk-warning);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 /* Boxes to type words in each have an edge, so they read as boxes; the
    words shown to write down have none. The box being typed in takes the
    focus ring, not the field inside it. */
