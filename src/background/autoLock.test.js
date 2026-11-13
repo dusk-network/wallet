@@ -148,6 +148,9 @@ vi.mock("../shared/permissions.js", () => ({
     grants: { publicAccount: true, shieldedReceiveAddress: false },
   })),
   getPermissions: vi.fn(async () => ({})),
+  endConnections: vi.fn(async () => []),
+  nextConnectionEnd: vi.fn(async () => null),
+  setConnectionLasts: vi.fn(async () => true),
   revokeOrigin: vi.fn(async () => true),
 }));
 
