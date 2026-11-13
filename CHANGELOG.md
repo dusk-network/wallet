@@ -40,6 +40,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Counted the deposit fees as part of what unstaked stDUSK cost in Rewards by year, at its average cost, said under the table, and showed a year's loss with its minus sign, in DUSK and in your currency.
 - Split Sozu's part of Rewards by year into what grew while held and what unstaking took out, saying where either couldn't be read.
 - Worded the question for an amount that could be two as "Is that 1 or 1000?".
 - Answered a site's request made while its last one waits with -32002, request already pending, rather than a refusal.
