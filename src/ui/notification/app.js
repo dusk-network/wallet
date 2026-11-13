@@ -7,7 +7,7 @@ import { UI_DISPLAY_DECIMALS, amountLocale, formatDuskExact, formatFee, groupTho
 import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
-import { getMinimumGas } from "../../shared/txDefaults.js";
+import { defaultGasPriceOf, getMinimumGas } from "../../shared/txDefaults.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
@@ -1355,11 +1355,13 @@ export async function renderNotification() {
         send({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" })
           .then((res) => {
             const stats = res?.result ?? res;
-            const price = String(stats?.median ?? stats?.average ?? "").trim();
-            if (/^\d+$/.test(price) && price !== "0") {
-              gasEditor.networkGas = { limit: String(gas.limit), price };
-              showSiteFee(price, gasEditor);
-            }
+            if (!/^\d+$/.test(String(stats?.median ?? "").trim())) return;
+            // Both wallets' one rule: the mempool's median, under a ceiling, said over it.
+            const rule = defaultGasPriceOf(stats);
+            const price = rule.price.toString();
+            gasEditor.networkGas = { limit: String(gas.limit), price };
+            gasEditor.busyMedian = rule.busy ? String(rule.median) : null;
+            showSiteFee(price, gasEditor);
           })
           .catch(() => {});
       }

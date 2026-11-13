@@ -10,6 +10,8 @@ import {
   applyTxDefaults,
   assertMinimumGas,
   isCompleteGas,
+  GAS_PRICE_BUSY,
+  defaultGasPriceOf,
 } from "./txDefaults.js";
 import { TX_KIND } from "./constants.js";
 
@@ -373,5 +375,18 @@ describe("isCompleteGas", () => {
     expect(isCompleteGas("string")).toBe(false);
     expect(isCompleteGas([])).toBe(false);
     expect(isCompleteGas(123)).toBe(false);
+  });
+});
+
+describe("the default gas price", () => {
+  // Marek's: the default followed the mempool's median with no ceiling, so a spammed mempool raised every default fee.
+  // Lena's: the extension's unstake paid price 2 where the web wallet's paid 1. Both wallets use app-core's one rule now.
+  it("follows the network's median up to a ceiling of five times the minimum, and says the network is busy over it", () => {
+    expect(defaultGasPriceOf({ median: "2" })).toMatchObject({ price: 2n, busy: false });
+    expect(defaultGasPriceOf({ median: "900", average: "400" })).toMatchObject({ price: 5n, busy: true, median: 900n });
+    // Never under the minimum; and without a median, as before the node answers, the minimum.
+    expect(defaultGasPriceOf({ median: "0" })).toMatchObject({ price: 1n, busy: false });
+    expect(defaultGasPriceOf(null)).toMatchObject({ price: 1n, busy: false });
+    expect(GAS_PRICE_BUSY).toBe("The network is busy. You can raise the gas price for it to go out sooner.");
   });
 });

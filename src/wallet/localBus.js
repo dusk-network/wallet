@@ -9,7 +9,7 @@ import { getSettings, normalizeAutoLock, rememberNodeChain, setSettings } from "
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearAllPermissions } from "../shared/permissions.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
-import { applyTxDefaults } from "../shared/txDefaults.js";
+import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem } from "../shared/securityPolicy.js";
@@ -726,11 +726,12 @@ export async function localSend(message) {
         // What this send and its watcher keep is dropped after a reset meanwhile.
         const txEpoch = await getTxEpoch();
         await ensureEngineConfigured();
-        // Fetch live gas price from node (cached for 30s) to use as default.
+        // The node's gas price (kept 30 s) by both wallets' one rule: its
+        // median, under a ceiling.
         let dynamicPrice;
         try {
           const gasData = await getCachedGasPrice();
-          dynamicPrice = gasData?.median;
+          dynamicPrice = defaultGasPriceOf(gasData).price.toString();
         } catch {
           // Ignore errors, will fall back to static default
         }

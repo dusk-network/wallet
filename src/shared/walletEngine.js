@@ -2330,18 +2330,19 @@ async function readSozuOf(network, idx, profile) {
  *          All values are stringified u64 (Lux, i.e. 1e-9 DUSK).
  *          Returns { average: "1", max: "1", median: "1", min: "1" } when mempool is empty.
  */
-export async function getGasPrice({ maxTransactions = 100 } = {}) {
+export async function getGasPrice({ maxTransactions } = {}) {
   await ensureNetwork();
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
 
   try {
-    // Rusk endpoint: POST /on/blocks/gas-price with body "<max_transactions>".
-    // w3sper exposes it via network.blocks.call["gas-price"]().
-    let n = Number(maxTransactions ?? 100);
-    if (!Number.isFinite(n) || n <= 0) n = 100;
-    const res = await state.network.blocks.call["gas-price"](String(Math.floor(n)), {
+    // Rusk endpoint: POST /on/blocks/gas-price, with a body "<max_transactions>"
+    // for the stats of that many of the best-paying, and without one, as the
+    // web wallet asks it (w3sper's blocks.gasPrice), of every transaction the
+    // node holds: the median both wallets' default price follows.
+    const n = Number(maxTransactions);
+    const res = await state.network.blocks.call["gas-price"](Number.isFinite(n) && n > 0 ? String(Math.floor(n)) : undefined, {
       headers: { Accept: "application/json" },
       signal: controller.signal,
     });

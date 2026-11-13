@@ -17,7 +17,7 @@ import { getSettings, normalizeAutoLock, normalizeSiteLasts, setSettings } from 
 import { forgetSiteRecord, getSiteRecords, noteSiteLasts, noteSiteUse, siteLastsMs } from "../shared/siteRecords.js";
 import { storage, STORAGE_KEYS } from "../shared/storage.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
-import { applyTxDefaults } from "../shared/txDefaults.js";
+import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { askNodeChainId, chainRefusal, listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem, isAllowedDappOrigin } from "../shared/securityPolicy.js";
@@ -1606,11 +1606,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // What this send and its watcher keep is dropped after a reset meanwhile.
           const txEpoch = await getTxEpoch();
           await ensureEngineConfigured();
-          // Fetch live gas price from node (cached for 30s) to use as default.
+          // The node's gas price (kept 30 s) by both wallets' one rule: its
+          // median, under a ceiling.
           let dynamicPrice;
           try {
             const gasData = await engineCall("dusk_getCachedGasPrice");
-            dynamicPrice = gasData?.median;
+            dynamicPrice = defaultGasPriceOf(gasData).price.toString();
           } catch {
             // Ignore errors, will fall back to static default
           }

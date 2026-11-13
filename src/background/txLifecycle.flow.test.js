@@ -1261,6 +1261,26 @@ describe("background Phoenix tx lifecycle flow", () => {
       }
     });
 
+    // Marek's and Lena's: the default price followed the median with no ceiling, and each wallet read its own median.
+    it("goes at the network's median up to the ceiling, by both wallets' one rule, where Review left the price to the network", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      let median = "900";
+      engineCall.mockImplementation(async (method) => {
+        if (method === "dusk_getCachedGasPrice") return { average: "300", max: "1000", median, min: "1" };
+        if (method === "dusk_sendTransaction") return { hash: "0xpriced" };
+        return true;
+      });
+      const sent = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction").at(-1)[1];
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params })).resolves.toMatchObject({ ok: true });
+      expect(sent().gas).toEqual({ limit: "2500000", price: "5" });
+      median = "2";
+      await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params });
+      expect(sent().gas).toEqual({ limit: "2500000", price: "2" });
+      // A price of your own is yours, over the ceiling too.
+      await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params: { ...params, gas: { limit: "2500000", price: "40" } } });
+      expect(sent().gas).toEqual({ limit: "2500000", price: "40" });
+    });
+
     it("goes from the wallet it was reviewed on, and a switch waits for it", async () => {
       const { engineCall } = await import("../background/engineHost.js");
       const { WALLET_LIFECYCLE_LOCK, withStorageLock } = await import("../shared/storageLock.js");

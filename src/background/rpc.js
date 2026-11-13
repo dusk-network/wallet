@@ -13,7 +13,7 @@ import { assertSiteSend, proveSiteSend } from "../shared/sendPassword.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { TX_KIND } from "../shared/constants.js";
-import { applyTxDefaults, isCompleteGas } from "../shared/txDefaults.js";
+import { applyTxDefaults, defaultGasPriceOf, isCompleteGas } from "../shared/txDefaults.js";
 import { chainIdFromNodeUrl, chainReferenceFromChainId } from "../shared/chain.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { readChainId } from "../shared/networkStatus.js";
@@ -806,8 +806,8 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
       let dynamicPrice;
       try {
         const gasData = await engineCall("dusk_getCachedGasPrice");
-        // Use median as a balanced default - not too aggressive, not too cheap
-        dynamicPrice = gasData?.median;
+        // Both wallets' one rule: the mempool's median, under a ceiling.
+        dynamicPrice = defaultGasPriceOf(gasData).price.toString();
       } catch {
         // Ignore errors, will fall back to static default
       }

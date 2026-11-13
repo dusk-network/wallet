@@ -205,6 +205,27 @@ describe("a send that fails, and whether it went out", () => {
   });
 });
 
+describe("the network's gas price", () => {
+  // Lena's: the extension's unstake paid gas price 2 where the web wallet's paid 1: the extension asked for the median
+  // of the 100 best-paying transactions, the web wallet for that of every one the node holds.
+  it("is asked of every transaction the node holds, as the web wallet asks it, and kept 30 seconds", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const asked = [];
+    const fetch = node.fetch;
+    vi.stubGlobal("fetch", async (input, init = {}) => {
+      if (new URL(String(input), "https://wallet.invalid").pathname === "/on/blocks/gas-price") {
+        asked.push(init.body ?? null);
+        return new Response(JSON.stringify({ average: 3, max: 9, median: 2, min: 1 }));
+      }
+      return fetch(input, init);
+    });
+    await expect(engine.getCachedGasPrice({ forceRefresh: true })).resolves.toEqual({ average: "3", max: "9", median: "2", min: "1" });
+    await engine.getCachedGasPrice();
+    expect(asked).toEqual([null]);
+  });
+});
+
 describe("a payment from Send, called off", () => {
   // Amélie's: the extension gave up on a send it couldn't get out, where the web wallet waits with Cancel. Cancel
   // and the hand-over are settled here, where the transaction is handed over: never both.

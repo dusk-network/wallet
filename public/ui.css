@@ -5725,3 +5725,10 @@ button.chain-link.text-btn--inline:not(:disabled) {
 button.chain-link.text-btn--inline:not(:disabled):hover {
   text-decoration-color: currentColor;
 }
+
+/* A busy network, under the fee on a Review: the price can be raised. */
+.gas-busy {
+  margin: 8px 2px 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+}

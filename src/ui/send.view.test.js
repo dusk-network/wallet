@@ -1197,6 +1197,32 @@ describe("review", () => {
     });
   });
 
+  // Marek's: the default followed the mempool's median with no ceiling, so a spammed mempool could raise every
+  // default fee; Lena's: the two wallets paid different prices for the same unstake. Both use app-core's one rule.
+  it("starts from the network's median up to a ceiling, saying the network is busy while the price in use is under its median", async () => {
+    const at = (median) => async (message) =>
+      message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median, max: "1000" } : { ok: true, result: { hash: "ab".repeat(32) } };
+    const busy = () => {
+      const note = dom.document.body.querySelector("dusk-gas-editor .gas-busy");
+      return note && isShown(note) ? note.textContent : "";
+    };
+    const fee = () => visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-fee"));
+
+    // A median of 900 over the ceiling of 5: the ceiling, and why.
+    review({ to: ALICE.account, privacy: "public" }, overview(), at("900"));
+    await settle();
+    expect(fee()).toBe("Network feeup to 0.0125 DUSKTotalup to 1.0125 DUSK");
+    expect(busy()).toBe("The network is busy. You can raise the gas price for it to go out sooner.");
+    // Raised to the median or over: the price is theirs, and nothing more is said.
+    typeInto(dom.document.body.querySelectorAll("dusk-gas-editor input")[1], "900");
+    expect(busy()).toBe("");
+
+    // A median of 2: the median, nothing said.
+    review({ to: ALICE.account, privacy: "public" }, overview(), at("2"));
+    await settle();
+    expect([fee(), busy()]).toEqual(["Network feeup to 0.005 DUSKTotalup to 1.005 DUSK", ""]);
+  });
+
   it("hides Use the network's price while the fee is the network's, custom gas from Settings that equals it too", async () => {
     // The node asks 2 LUX.
     const send = async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {});

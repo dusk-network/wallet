@@ -1,5 +1,5 @@
 import { UI_DISPLAY_DECIMALS } from "../../shared/amount.js";
-import { getDefaultGas, getMinimumGas } from "../../shared/txDefaults.js";
+import { defaultGasPriceOf, getDefaultGas, getMinimumGas } from "../../shared/txDefaults.js";
 import { h } from "../lib/dom.js";
 import { shortfallText } from "../lib/shortfall.js";
 import { sameGas } from "./GasEditor.js";
@@ -34,18 +34,31 @@ export function startingGas({ defaultGas, minLimit, customGas, gas } = {}) {
 }
 
 /**
- * The gas price the node asks now, as Review and Send's own fee both start
- * from it: its median, or null where it doesn't say. The wallet keeps it
- * 30 seconds, so the two agree.
+ * The gas price the network asks now, by both wallets' one rule (app-core's
+ * defaultGasPrice), as Review and Send's own fee both start from it: the
+ * node's mempool median, under a ceiling, with `busy` where the median is
+ * over it and `median` then; null where the node doesn't say. The wallet
+ * keeps it 30 seconds, so the two agree.
+ * @param {object} actions
+ * @returns {Promise<{ price: string, busy: boolean, median: string } | null>}
+ */
+export async function networkGasRule(actions) {
+  const response = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
+  if (response?.error) throw new Error(response.error.message ?? "Gas price unavailable");
+  const stats = response?.result ?? response;
+  if (!/^\d+$/.test(String(stats?.median ?? "").trim())) return null;
+  const rule = defaultGasPriceOf(stats);
+  return { price: rule.price.toString(), busy: rule.busy, median: String(rule.median ?? "") };
+}
+
+/**
+ * The gas price a Review and Send's own fee start from (networkGasRule's):
+ * null where the node doesn't say.
  * @param {object} actions
  * @returns {Promise<string | null>}
  */
 export async function networkGasPrice(actions) {
-  const response = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
-  if (response?.error) throw new Error(response.error.message ?? "Gas price unavailable");
-  const stats = response?.result ?? response;
-  const price = String(stats?.median ?? stats?.average ?? "").trim();
-  return /^\d+$/.test(price) && price !== "0" ? price : null;
+  return (await networkGasRule(actions))?.price ?? null;
 }
 
 /** A gas's fee at most: limit times price, in Lux; 0 without gas. */
@@ -95,13 +108,15 @@ export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice,
   else if (fallback) gasEditor.setGas(fallback);
 
   (async () => {
-    const price = await networkGasPrice(actions);
-    if (!defaultLimit || !price) return;
-    const network = { limit: String(defaultLimit), price };
+    const rule = await networkGasRule(actions);
+    if (!defaultLimit || !rule) return;
+    const network = { limit: String(defaultLimit), price: rule.price };
     // Gas the user set, here, in Settings or before going back, stays theirs.
     const untouched = !gas && !custom && sameGas(gasEditor.getGasInputs(), gasEditor.networkGas);
     gasEditor.networkGas = network;
     if (untouched) gasEditor.setGas(network);
+    // Over the ceiling: said while the price in use is under the median.
+    gasEditor.busyMedian = rule.busy ? rule.median : null;
   })().catch(() => {});
 }
 

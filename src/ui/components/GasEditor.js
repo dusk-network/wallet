@@ -1,5 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { h, setChildren } from "../lib/dom.js";
+import { GAS_PRICE_BUSY } from "../../shared/txDefaults.js";
 import { balance } from "./Balance.js";
 import { fieldLabel, integerInput } from "./FormControls.js";
 
@@ -12,7 +13,10 @@ import { fieldLabel, integerInput } from "./FormControls.js";
 // and a "dusk-gas-validity" event tells the page (submitOnGasEnter keeps its
 // button off). A "dusk-gas-fee" event gives the most the gas comes to as it
 // changes, `detail.feeLux`, null while the gas won't do or isn't set, for a
-// page that shows it elsewhere too.
+// page that shows it elsewhere too. Where the network is busy (`busyMedian`,
+// the mempool's median over the default price's ceiling), it says so under
+// the fee while the price in use is under that median, and that the price can
+// be raised for it to go out sooner.
 
 function maxFeeFromGasStrings(limitStr, priceStr) {
   const l = String(limitStr ?? "").trim();
@@ -68,6 +72,8 @@ export class DuskGasEditor extends HTMLElement {
   #resetBtn = null;
   #editContent = [];
   #editSlot = null;
+  #busyMedian = null;
+  #busyNote = null;
 
   connectedCallback() {
     if (this.#initialized) return;
@@ -124,6 +130,13 @@ export class DuskGasEditor extends HTMLElement {
   }
 
   /** The lowest gas limit this transaction takes: a limit under it says so while it's typed. */
+  /** The mempool's median where the network is busy (digits), else null: said while the price is under it. */
+  set busyMedian(v) {
+    const median = String(v ?? "").trim();
+    this.#busyMedian = /^\d+$/.test(median) ? BigInt(median) : null;
+    if (this.#initialized) this.updatePreview();
+  }
+
   set minLimit(v) {
     const s = String(v ?? "").trim();
     this.#minLimit = /^\d+$/.test(s) ? BigInt(s) : null;
@@ -267,7 +280,10 @@ export class DuskGasEditor extends HTMLElement {
       h("div", { class: "kv" }, [h("span", { class: "kv-label", text: "Total" }), this.#totalValue]),
     ]);
 
+    this.#busyNote = h("p", { class: "muted gas-busy", role: "note", hidden: true, text: GAS_PRICE_BUSY });
+
     this.appendChild(group);
+    this.appendChild(this.#busyNote);
     this.appendChild(this.#details);
 
     // Live preview
@@ -312,6 +328,9 @@ export class DuskGasEditor extends HTMLElement {
 
     // Back to the network's price, once the gas is your own.
     if (this.#resetBtn) this.#resetBtn.hidden = !this.#networkGas || sameGas({ limit, price }, this.#networkGas);
+
+    // A busy network, the price in use under its median: said, with what to do.
+    if (this.#busyNote) this.#busyNote.hidden = !(this.#busyMedian !== null && /^\d+$/.test(String(price ?? "").trim()) && BigInt(price) < this.#busyMedian);
 
     // What it comes to, exactly, under the fields.
     this.#maxLine.textContent = feeLux !== null && !error ? `At most ${formatDuskExact(feeLux)} DUSK` : "";
