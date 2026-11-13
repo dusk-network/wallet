@@ -49,10 +49,19 @@ const PUBLIC_NOTE = "People who send to alice.dusk reach this public account.";
 const SHIELDED_NOTE =
   "People who pay alice.dusk choose public or shielded. Anyone can see this address belongs to alice.dusk.";
 
+// DUSK's price now as CoinGecko gives it, the one place a mainnet screen reads it from (app-core's /prices):
+// nothing in these tests leaves the machine.
+const coingecko = vi.fn(async (url) => {
+  if (!String(url).startsWith("https://api.coingecko.com/api/v3/coins/dusk-network?")) throw new TypeError("Nothing else answers in this test");
+  const market_data = { current_price: { eur: 0.060722, gbp: 0.0529, usd: 0.0703 }, last_updated: new Date().toISOString() };
+  return { ok: true, status: 200, text: async () => JSON.stringify({ market_data }) };
+});
+
 let dom;
 
 beforeEach(() => {
   dom = installFakeDom();
+  vi.stubGlobal("fetch", coingecko);
   lookupPrimaryName.mockReset();
   lookupShieldedName.mockReset();
   lookupPrimaryName.mockResolvedValue(null);
@@ -256,6 +265,28 @@ describe("receive", () => {
     view.button("Copy request link").click();
     await settle();
     expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`https://apps.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1&network=mainnet`);
+  });
+
+  // Sofía's first wish for three rounds: her clients to see what they pay in their own money, euros.
+  it("says what a request asks comes to in your currency on mainnet, with the price's time, the link still in DUSK, and nothing on testnet", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "es-ES" });
+    const shown = (selector) => {
+      const el = dom.document.body.querySelector(selector);
+      return el && isShown(el) ? el.textContent : "";
+    };
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "30", memo: "Factura 2026-133" } };
+    const view = await receive("public", { state, ov: { ...overview, nodeUrl: "https://nodes.dusk.network" } });
+    await vi.waitFor(() => expect(shown(".receive-in-currency")).toMatch(/^≈ 1,82\s€ · price at \d{2}:\d{2}$/));
+    view.button("Copy request link").click();
+    await settle();
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`https://apps.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=30&memo=Factura+2026-133&network=mainnet`);
+    // The request kept in the list says it too.
+    await vi.waitFor(() => expect(shown(".request-row__in-currency")).toMatch(/^≈ 1,82\s€ · price at /));
+
+    // Test DUSK has no value: nothing said, nothing asked.
+    coingecko.mockClear();
+    await receive("public", { state });
+    expect([shown(".receive-in-currency"), coingecko.mock.calls]).toEqual(["", []]);
   });
 
   it("asks for the amount a decimal comma writes", async () => {

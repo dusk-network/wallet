@@ -5732,3 +5732,15 @@ button.chain-link.text-btn--inline:not(:disabled):hover {
   font-size: 12.5px;
   line-height: 1.4;
 }
+
+/* What an amount comes to in your currency, beside the DUSK: a request's,
+   and the payer's Send and Review. */
+.in-currency {
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.send-in-currency,
+.review-in-currency {
+  text-align: center;
+}

@@ -21,6 +21,7 @@ import { safeTextEl } from "../../components/SafeText.js";
 import { h } from "../../lib/dom.js";
 import { activityKey, activityRows, activitySince, lookForPayments, selected } from "../activity.js";
 import { whenAtText } from "./txRow.js";
+import { inCurrencyLine } from "../../lib/inCurrency.js";
 
 /** How often the history is read again while a request shown waits. */
 export const LOOK_MS = 30_000;
@@ -162,7 +163,7 @@ function refundsOf(requests, matches, rows) {
   );
 }
 
-function requestRow(request, match, { hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, refunds, linkOf, earlier = false }) {
+function requestRow(request, match, { ov, hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, refunds, linkOf, earlier = false }) {
   // The payments with all a request asks, after the one that paid it: paid twice, or more.
   const again = match?.state === "paid" ? (match.more ?? []).filter((payment) => payment.matched === "amount-memo") : [];
   // A request of any amount says what came in, plainly: a lux is no green Paid.
@@ -239,11 +240,15 @@ function requestRow(request, match, { hidden, address, state, actions, walletId,
       .then((list) => requestKept(state, list))
       .catch(() => actions?.showToast?.("Couldn't remove the request. Try again."))
       .finally(() => actions?.render?.()?.catch?.(() => {}));
+  // What it asks comes to in your currency now, on mainnet, hidden with the balances.
+  const inCurrency = inCurrencyLine(ov, "request-row__in-currency");
+  inCurrency.set(hidden ? null : request.lux);
   return h("li", { class: "request-row" }, [
     h("div", { class: "request-row__head" }, [
       h("span", { class: "request-row__amount" }, request.lux === null ? ["Any amount"] : [balance(hidden, formatDuskExact(request.lux)), " DUSK"]),
       h("span", { class: `request-state request-state--${tone}` }, [word].flat()),
     ]),
+    inCurrency.el,
     h("div", { class: "request-row__sub" }, [
       request.memo ? h("span", { class: "request-row__memo" }, ["“", safeTextEl(request.memo), "” · "]) : null,
       `${request.to === address ? "Shielded" : "Public"}, asked ${whenAtText(request.at)}`,
@@ -322,7 +327,7 @@ export function requestsSection(ov, { state, actions } = {}) {
       "ul",
       { class: "group request-list" },
       shown.map((request) =>
-        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { hidden, address, state, actions, walletId: kept.walletId, rows, rowOf, rowBack, context: activityKey(ov), refunds, linkOf, earlier: earlier(request) })
+        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { ov, hidden, address, state, actions, walletId: kept.walletId, rows, rowOf, rowBack, context: activityKey(ov), refunds, linkOf, earlier: earlier(request) })
       )
     ),
   ]);

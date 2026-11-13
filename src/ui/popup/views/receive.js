@@ -14,6 +14,7 @@ import { formatDuskPlain } from "@dusk-network/app-core/amounts";
 import { displayText } from "@dusk-network/app-core/text";
 import { requestFileName, stamped } from "../../lib/fileNames.js";
 import { shortAddress } from "../../lib/strings.js";
+import { inCurrencyLine } from "../../lib/inCurrency.js";
 import { makePaymentLink } from "@dusk-network/app-core/payment-links";
 import { rememberRequest } from "../../../shared/paymentRequests.js";
 import { requestKept, requestNetwork, requestsSection } from "./requests.js";
@@ -181,6 +182,8 @@ export function receiveView(ov, { state, actions } = {}) {
     onEnter: () => copyRequestBtn.click(),
   });
   const amountErr = h("div", { class: "field-error receive-amount-error", role: "alert", hidden: true });
+  // What it asks comes to in your currency, on mainnet: the link stays in DUSK.
+  const amountInCurrency = inCurrencyLine(ov, "receive-in-currency");
   const memoErr = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
   // A memo with what changes how it reads, or digits that may not read as they
   // look: as the payer will see it, its codes and what to check, under the field.
@@ -228,6 +231,7 @@ export function receiveView(ov, { state, actions } = {}) {
         fieldLabel(amountInput, "Amount"),
         amountInput,
         amountErr,
+        amountInCurrency.el,
         fieldLabel(memoInput, "Memo"),
         memoInput,
         memoErr,
@@ -447,6 +451,7 @@ export function receiveView(ov, { state, actions } = {}) {
     memoShown.hidden = !flagged;
     const hasReq = !!memoVal || made.lux !== null;
     curLux = made.lux;
+    amountInCurrency.set(made.ok ? made.lux : null);
     curMemo = memoVal;
     const asked = curLink;
 

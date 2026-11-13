@@ -128,10 +128,19 @@ const overview = (over = {}) => ({
   ...over,
 });
 
+// DUSK's price now as CoinGecko gives it, the one place a mainnet screen reads it from (app-core's /prices):
+// nothing in these tests leaves the machine.
+const coingecko = vi.fn(async (url) => {
+  if (!String(url).startsWith("https://api.coingecko.com/api/v3/coins/dusk-network?")) throw new TypeError("Nothing else answers in this test");
+  const market_data = { current_price: { eur: 0.060722, gbp: 0.0529, usd: 0.0703 }, last_updated: new Date().toISOString() };
+  return { ok: true, status: 200, text: async () => JSON.stringify({ market_data }) };
+});
+
 let dom;
 
 beforeEach(() => {
   dom = installFakeDom();
+  vi.stubGlobal("fetch", coingecko);
   lookupPrimaryName.mockReset();
   lookupPrimaryName.mockImplementation(async () => null);
   isAccount.mockReset();
@@ -2192,6 +2201,32 @@ describe("a request link", () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent("https://phish.example/x")}` });
     vi.resetModules();
     expect((await import("./popup/state.js")).state.draft).toBeNull();
+  });
+});
+
+describe("a payment's amount in your own currency", () => {
+  // Sofía's: a client sees what they're paying in their money, on Send and on Review; testnet has none.
+  it("says what the amount comes to in your currency on mainnet, on Send as it's typed and on Review, with the price's time", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-US" });
+    const shown = (selector) => {
+      const el = dom.document.body.querySelector(selector);
+      return el && isShown(el) ? el.textContent : "";
+    };
+    const mainnet = overview({ nodeUrl: "https://nodes.dusk.network" });
+    const form = mount(newState(), mainnet);
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "30");
+    await vi.waitFor(() => expect(shown(".send-in-currency")).toMatch(/^≈ \$2\.11 · price at \d{1,2}:\d{2}\s?[AP]M$/));
+    typeInto(form.amount, "");
+    expect(shown(".send-in-currency")).toBe("");
+
+    mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "30", amountLux: "30000000000", memo: "" } }, mainnet);
+    await vi.waitFor(() => expect(shown(".review-in-currency")).toMatch(/^≈ \$2\.11 · price at /));
+
+    // Test DUSK: nothing.
+    mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "30", amountLux: "30000000000", memo: "" } });
+    await settle();
+    expect(shown(".review-in-currency")).toBe("");
   });
 });
 

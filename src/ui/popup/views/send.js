@@ -58,6 +58,7 @@ import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
 import { sameWaiting, waitingLux } from "../../lib/waiting.js";
+import { inCurrencyLine } from "../../lib/inCurrency.js";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
 
 // A pasted EVM address, which a Dusk transfer can't pay.
@@ -257,6 +258,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
   const available = h("div", { class: "amount-avail", hidden: true }, [availText, maxBtn]);
   const feeNote = h("div", { class: "amount-fee-note", hidden: true });
+  // What the amount comes to in your currency, on mainnet, once it reads.
+  const inCurrency = inCurrencyLine(ov, "send-in-currency");
 
   // Review is off while the recipient won't do, or an amount typed won't: the
   // field says why. An empty one leaves it on, for it to say what's missing.
@@ -274,6 +277,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     const lux = readAmount(opts);
     amountOff = lux == null && Boolean(String(amount.value ?? "").trim());
     syncReview();
+    // Not for an amount Max filled in while balances are hidden.
+    inCurrency.set(lux != null && !field.isMasked() ? lux : null);
     return lux;
   }
 
@@ -1180,7 +1185,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       selfNote,
       blockedNote,
       fieldLabel(amount, "Amount"),
-      h("div", { class: "amount-entry send-amount" }, [field.el, field.error, available, feeNote]),
+      h("div", { class: "amount-entry send-amount" }, [field.el, field.error, inCurrency.el, available, feeNote]),
       fieldLabel(memo, "Memo"),
       memo,
       memoError,
@@ -1403,6 +1408,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
 
   // What Max filled in stays hidden with the balances; an amount typed shows.
   const amountMasked = balancesHidden(ov) && Boolean(d.amountMasked);
+  // What it comes to in your currency, on mainnet, beside the DUSK.
+  const reviewInCurrency = inCurrencyLine(ov, "review-line review-in-currency");
+  reviewInCurrency.set(amountMasked ? null : safeBigInt(d.amountLux, 0n));
   // The network's gas price by default; Custom fee for gas of your own.
   const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
     kind: TX_KIND.TRANSFER,
@@ -1503,6 +1511,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           balance(amountMasked, formatDuskExact(d.amountLux)),
           h("span", { class: "balance-unit", text: " DUSK" }),
         ]),
+        reviewInCurrency.el,
         // To the bridge: what arrives on the other chain, once it takes its fee.
         service && !amountMasked ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
         // What a public send shows everyone; a shielded one has no such line.
