@@ -2250,7 +2250,11 @@ describe("a request link", () => {
     await settle();
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "0.03"]);
     typeInto(form.to, BOB.account);
+    // Back asks first, the scan's: Leave goes.
     dom.document.body.querySelector(".subnav-back").click();
+    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears the payment the QR code filled in.StayLeave");
+    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    await settle();
     expect(state.route).toBe("home");
     expect(keptSendDraft(overview())).toBeNull();
 

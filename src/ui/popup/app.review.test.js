@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { accessibleName, fakeEvent, installFakeDom, pastClickGuard, settle } from "../testing/fakeDom.js";
+import { accessibleName, fakeEvent, installFakeDom, pastClickGuard, settle, visibleText } from "../testing/fakeDom.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 // Deposits' arrivals, read as the popup draws: held for wallet B, to stop a
@@ -597,7 +597,25 @@ describe("a request's Send", () => {
     await flush();
     expect(values()).toEqual([B, "0.02", "satay twice"]);
     expect(t.app.textContent).toContain("Filled in from the link");
+    // Amélie's and Chen's: the phone's Back threw the link's payment away without a word. It asks.
+    const question = () => t.dom.document.querySelector("[role=alertdialog]");
     history.back();
+    await flush();
+    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.StayLeave");
+    // The question's own Back is Stay: the payment stays.
+    history.back();
+    await flush();
+    expect([question(), t.state.route, ...values(), history.closed]).toEqual([null, "send", B, "0.02", "satay twice", false]);
+    // Asked again, Stay keeps it too.
+    t.app.querySelector(".subnav-back").click();
+    await flush();
+    [...question().querySelectorAll("button")].find((b) => b.textContent === "Stay").click();
+    await flush();
+    expect([question(), t.state.route, ...values()]).toEqual([null, "send", B, "0.02", "satay twice"]);
+    // Leave: Home, and none of it in the next Send.
+    history.back();
+    await flush();
+    [...question().querySelectorAll("button")].find((b) => b.textContent === "Leave").click();
     await flush();
     expect(t.state.route).toBe("home");
     await openSend();
@@ -719,6 +737,9 @@ describe("a request link the extension's tab opened with", () => {
     expect(history.url).toContain("link=");
 
     button("← Back").click();
+    await settled();
+    // It asks first; Leave goes.
+    [...t.dom.document.querySelectorAll("[role=alertdialog] button")].find((b) => b.textContent === "Leave").click();
     await settled();
     expect(t.state.route).toBe("home");
     expect(history.url).toBe("/full.html");
@@ -945,8 +966,10 @@ describe("the app on a phone", () => {
     expect(values(back)).toEqual([B, "0.01", "Deep link test"]);
     expect(back.app.querySelector(".send-filled-note")?.textContent).toContain("Filled in from the link");
 
-    // Left with Back: the next Send, begun by hand on Home, is empty.
+    // Left with Back, once Leave is pressed: the next Send, begun by hand on Home, is empty.
     back.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    await flush();
+    [...back.dom.document.querySelectorAll("[role=alertdialog] button")].find((b) => b.textContent === "Leave").click();
     await flush();
     expect(back.state.route).toBe("home");
     back.app.querySelectorAll("button.action-btn").find((b) => b.textContent.trim() === "Send").click();
@@ -1520,6 +1543,37 @@ describe("the phone's Back in the app, as Android hands it over", () => {
       expect([done.join(" "), t.state.route, history.length, history.closed]).toEqual([done.join(" "), route, 1, false]);
     }
     expect(bridge.invoke.mock.calls.filter(([cmd]) => cmd === "move_to_back")).toHaveLength(toBackground);
+  });
+
+  // Chen's: Back on the Send a link filled in went straight to the dashboard, the payment gone.
+  it("asks before a link's payment goes, and Back on the question keeps it", async () => {
+    let backButton;
+    const bridge = tauriBridge({
+      "plugin:app|register_listener": (args) => {
+        if (args?.event === "back-button") backButton = args.handler;
+        return null;
+      },
+      move_to_back: () => true,
+    });
+    const filled = { to: B, amountDusk: "0.04", memo: "laksa", requestChainId: "dusk:2", filledFrom: "link", filledIn: "link" };
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: filled }, undefined, { tauri: bridge });
+    await vi.waitFor(() => expect(backButton).toBeDefined());
+    const values = () => ["To", "Amount", "Memo"].map((name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name)?.value);
+    const question = () => t.dom.document.querySelector("[role=alertdialog]");
+    const back = async () => {
+      backButton.onmessage({ canGoBack: false });
+      await flush();
+    };
+    await back();
+    expect([t.state.route, visibleText(question())]).toEqual(["send", "Leave this payment?This clears the payment the link filled in.StayLeave"]);
+    // Back on the question: Stay.
+    await back();
+    expect([question(), t.state.route, ...values()]).toEqual([null, "send", B, "0.04", "laksa"]);
+    await back();
+    [...question().querySelectorAll("button")].find((b) => b.textContent === "Leave").click();
+    await flush();
+    expect(t.state.route).toBe("home");
+    expect(bridge.invoke.mock.calls.filter(([cmd]) => cmd === "move_to_back")).toHaveLength(0);
   });
 });
 

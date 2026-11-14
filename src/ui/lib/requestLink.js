@@ -42,7 +42,7 @@ export function readPastedRequest(text, nodeUrl) {
  * Send refuses for another network. One that can't be read fills in nothing and says
  * why. Null for no link, or what isn't one.
  * @param {string} search - the page's query
- * @returns {{ to: string, amountDusk: string, memo: string, requestChainId?: string, refusedProblem?: string, filledFrom?: "link", filledIn?: true } | null}
+ * @returns {{ to: string, amountDusk: string, memo: string, requestChainId?: string, refusedProblem?: string, filledFrom?: "link", filledIn?: "link" } | null}
  */
 export function requestDraftOf(search) {
   const read = readRequestLink(new URLSearchParams(search).get("link") ?? "");
@@ -50,7 +50,7 @@ export function requestDraftOf(search) {
   if (!read.link) return { to: "", amountDusk: "", memo: "", refusedProblem: read.problem };
   const { link } = read;
   // Its amount as typing reads it (app-core's linkAmount): a link's 2.125 asks, as typed 2.125 does.
-  return { to: link.to, amountDusk: linkAmount(link).field, memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: true };
+  return { to: link.to, amountDusk: linkAmount(link).field, memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: "link" };
 }
 
 // The pages whose request link went, paid or left (forgetRequestLink).

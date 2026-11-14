@@ -44,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
 - Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.
 - Said one thing at a time of a payment that waited, on Home: Not sent yet while it waits and Sending as it goes out, and listed it in Activity as it went out, rather than in neither for a while; and in Firefox for Android that it goes on while the Keep open tab stays open.
 - Gave each request its own Share in the Android app, beside its Copy, in Request payment and in the list, with Share by the address for the address alone, and brought Request payment into view at its Amount as it's opened.

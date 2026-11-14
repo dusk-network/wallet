@@ -7,10 +7,11 @@ let ids = 0;
  * wallet's own words and look rather than the browser's grey box: Cancel
  * (Escape too, and a phone's Back) or the action. Cancel has the focus.
  *
- * @param {{ title: string, text: string, action: string, destructive?: boolean }} opts
+ * @param {{ title: string, text: string, action: string, cancel?: string, destructive?: boolean }} opts -
+ *   `cancel`: what Cancel is named, where another word says it better (Stay)
  * @returns {Promise<boolean>} true once the action is pressed
  */
-export function askConfirm({ title, text, action, destructive = false }) {
+export function askConfirm({ title, text, action, cancel: cancelText = "Cancel", destructive = false }) {
   return new Promise((resolve) => {
     const opener = document.activeElement;
     const finish = (answer) => {
@@ -19,7 +20,7 @@ export function askConfirm({ title, text, action, destructive = false }) {
       opener?.focus?.();
       resolve(answer);
     };
-    const cancel = h("button", { class: "btn-outline", type: "button", text: "Cancel", "data-back": "", onclick: () => finish(false) });
+    const cancel = h("button", { class: "btn-outline", type: "button", text: cancelText, "data-back": "", onclick: () => finish(false) });
     const go = h("button", { class: destructive ? "btn-destructive" : "btn-primary", type: "button", text: action, onclick: () => finish(true) });
     const id = `wallet-dialog-${++ids}`;
     const dialog = h("div", { class: "wallet-dialog", role: "alertdialog", "aria-modal": "true", "aria-labelledby": id, "aria-describedby": `${id}-text` }, [
