@@ -281,7 +281,7 @@ const bal = await dusk.request({ method: "dusk_getPublicBalance" });
 // → { nonce: "42", value: "123000000000" }
 ```
 
-Params naming an account (`{ account }`, or the account alone) or a profile (`{ profileId }`) are taken only for the connected profile: any other is rejected with `4100`, never answered with the connected profile's balance.
+Params naming an account (`{ account }`, or the account alone) or a profile (`{ profileId }`) are taken only for the connected profile: any other is rejected with `4100`, never answered with the connected profile's balance. Any other parameter, under any other key, is rejected with `-32602`.
 
 ---
 

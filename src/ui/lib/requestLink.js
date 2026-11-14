@@ -1,6 +1,5 @@
-import { readPaymentLink } from "@dusk-network/app-core/payment-links";
+import { linkAmount, readPaymentLink } from "@dusk-network/app-core/payment-links";
 
-import { amountForInput } from "../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../shared/chain.js";
 import { chainIdForNode } from "../../shared/nodeNetwork.js";
 
@@ -36,7 +35,8 @@ export function requestDraftOf(search) {
   if (!read) return null;
   if (!read.link) return { to: "", amountDusk: "", memo: "", refusedProblem: read.problem };
   const { link } = read;
-  return { to: link.to, amountDusk: amountForInput(link.amountDusk), memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: true };
+  // Its amount as typing reads it (app-core's linkAmount): a link's 2.125 asks, as typed 2.125 does.
+  return { to: link.to, amountDusk: linkAmount(link).field, memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: true };
 }
 
 // The pages whose request link went, paid or left (forgetRequestLink).

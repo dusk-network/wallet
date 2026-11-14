@@ -60,17 +60,27 @@ export { GAS_PRICE_BUSY };
 
 /**
  * The default gas price by both wallets' one rule (app-core's
- * defaultGasPrice), from the node's gas price stats as the engine reads them
- * (`median`, digits): the mempool's median, at least the network's minimum
- * and at most its ceiling, where `busy` says the median is above it. Without
- * a median, the minimum.
- * @param {{ median?: unknown } | null | undefined} stats
+ * defaultGasPrice), from what waits in the node's mempool as the engine reads
+ * it (`mempool`, getCachedGasPrice): the network's minimum while it all fits
+ * in the next block, as one transaction waiting alone at 2 does; else its
+ * median, at least the minimum and at most the ceiling, where `busy` says the
+ * median is above it. A `median` alone, as the node's stats give it, is read
+ * as before. Without either, the minimum.
+ * @param {{ mempool?: Array<{ gasPrice?: unknown, gasLimit?: unknown }>, median?: unknown } | null | undefined} stats
  * @returns {{ price: bigint, busy: boolean, median: bigint | null, minimum: bigint, ceiling: bigint }}
  */
 export function defaultGasPriceOf(stats) {
+  if (Array.isArray(stats?.mempool)) return defaultGasPrice({ mempool: stats.mempool });
   const median = String(stats?.median ?? "").trim();
   return defaultGasPrice(/^\d+$/.test(median) ? { median: BigInt(median) } : {});
 }
+
+/**
+ * Whether the node said what its gas price is worked out from (what waits in
+ * its mempool, or a median): else the wallet's own default stands in.
+ * @param {unknown} stats
+ */
+export const gasStatsRead = (stats) => Array.isArray(stats?.mempool) || /^\d+$/.test(String(stats?.median ?? "").trim());
 
 export const DEFAULT_TRANSFER_GAS_BY_PRIVACY = Object.freeze({
   public: Object.freeze({

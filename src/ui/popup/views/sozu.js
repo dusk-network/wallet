@@ -1,7 +1,6 @@
 import {
   UI_DISPLAY_DECIMALS,
   amountLocale,
-  amountProblem,
   formatDusk,
   formatDuskExact,
   formatFee,
@@ -706,7 +705,8 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     try {
       lux = safeBigInt(parseAmountLux(raw), 0n);
     } catch (e) {
-      field.setError(/greater than 0/.test(String(e?.message)) ? "Enter an amount greater than 0." : amountProblem(raw, { whole: "10", decimal: "10.5" }));
+      if (/greater than 0/.test(String(e?.message))) field.setError("Enter an amount greater than 0.");
+      else field.setProblem(raw, { whole: "10", decimal: "10.5" });
       reviewBtn.disabled = true;
       return null;
     }

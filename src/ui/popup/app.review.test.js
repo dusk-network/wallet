@@ -1053,6 +1053,107 @@ describe("the app on a phone", () => {
     opened = { hash: "" };
   });
 
+  // Sofía's: no notice when a client paid her. Android's job tells money that came in (android/ArrivalJob.kt); its
+  // tap opens that payment, in the profile it came to, once the wallet is open, and only with the wallet's token.
+  it("opens a notice of money that came in on its payment, in the profile it came to, after the unlock where it's locked", async () => {
+    const HASH = "9e".repeat(32);
+    const TOKEN = "c6".repeat(16);
+    const TO = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
+    let opened = { hash: "" };
+    const bridge = tauriBridge({ notices: (args) => (args?.action === "opened" ? { allowed: true, ...opened } : { allowed: true }) });
+    const answer = async (message, t) => {
+      if (message.type === "DUSK_UI_TX_NOTICED") {
+        // The wallet's token for those notices, to one of its profiles, while it's open.
+        const ok = t.open.isUnlocked && message.hash === HASH && message.token === TOKEN && message.account === TO;
+        return { ok: true, result: ok ? { incoming: true, profileIndex: 1 } : null };
+      }
+      if (message.type === "DUSK_UI_SET_ACCOUNT_INDEX") {
+        t.open = { ...t.open, selectedAccountIndex: message.index };
+        return { ok: true };
+      }
+      return undefined;
+    };
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, answer, { tauri: bridge });
+    const comeBack = async () => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+
+    // Another app's forged tap, without the wallet's token: nothing opens.
+    opened = { hash: HASH, outcome: "executed", block: 4851300, token: "d5".repeat(16), account: TO };
+    await comeBack();
+    await flush();
+    expect([t.state.route, t.asked("DUSK_UI_SET_ACCOUNT_INDEX")]).toEqual(["home", []]);
+
+    // Locked as the app was left: opened once it's unlocked, in Profile 2, where it came.
+    t.open = { ...t.open, isUnlocked: false };
+    await t.render({ forceRefresh: true });
+    opened = { hash: HASH, outcome: "executed", block: 4851300, token: TOKEN, account: TO };
+    await comeBack();
+    await flush();
+    expect(t.state.route).not.toBe("tx");
+    t.open = { ...t.open, isUnlocked: true };
+    await t.render({ forceRefresh: true });
+    await vi.waitFor(() => expect(t.state.route).toBe("tx"));
+    expect(t.asked("DUSK_UI_SET_ACCOUNT_INDEX")).toEqual([expect.objectContaining({ index: 1 })]);
+    expect(t.state.txDetailHash).toBe(HASH);
+    // Its row comes with the history read for it: till then, it's looked for, never "isn't in your activity".
+    expect(t.app.textContent).toContain("Looking for this transaction");
+    opened = { hash: "" };
+  });
+
+  // Chen's, again: the tap showed the Sent screen left, "Looking it up again…", for 2 to 6 s on the phone, while the
+  // wallet wrote the notice's news on the send's record. Android knows its own notice's token: opened at once.
+  it("opens the app's own notice at once, as the notice knew it, before the send's record is written", async () => {
+    const HASH = "9f".repeat(32);
+    const TOKEN = "c7".repeat(16);
+    let opened = { hash: "" };
+    const bridge = tauriBridge({ notices: (args) => (args?.action === "opened" ? { allowed: true, ...opened } : { allowed: true }) });
+    const record = { hash: HASH, kind: "transfer", privacy: "public", to: B, amount: "10000000", status: "submitted", submittedAt: Date.now() - 30_000, profileIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network" };
+    // The wallet's word on the tap waits, as it did on the phone just back.
+    const noticed = [];
+    const answer = async (message) => {
+      if (message.type === "DUSK_UI_TX_NOTICED") return new Promise((resolve) => noticed.push(resolve));
+      if (message.type === "DUSK_UI_RECHECK_TX" || message.type === "DUSK_UI_CHECK_NODE") return new Promise(() => {});
+      return undefined;
+    };
+    const sent = { phase: "sent", status: "submitted", hash: HASH, title: "Send", amountLux: "10000000", feeCapLux: "2500000", sentAt: Date.now() - 30_000, startedAt: Date.now() - 31_000 };
+    const t = await popupOn("sent", { addressBook: { loaded: true, items: [] }, sent }, answer, { tauri: bridge });
+    t.open = { ...t.open, txs: [record] };
+    await t.render({ forceRefresh: true });
+    const leaveAndComeBack = async () => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+
+    // A tap Android doesn't know as its notice's: nothing opens before the wallet says so.
+    opened = { hash: HASH, outcome: "executed", block: 4851400, token: TOKEN, ours: false };
+    await leaveAndComeBack();
+    await flush();
+    expect(t.state.route).toBe("sent");
+    noticed.splice(0).forEach((resolve) => resolve({ ok: true, result: null }));
+    await flush();
+    expect(t.state.route).toBe("sent");
+
+    // Its own: the payment's page, Completed, while the wallet's word still waits.
+    opened = { hash: HASH, outcome: "executed", block: 4851400, token: TOKEN, ours: true };
+    await leaveAndComeBack();
+    await vi.waitFor(() => expect(t.app.querySelector(".subnav-title")?.textContent).toBe("Transaction"));
+    expect(noticed).toHaveLength(1);
+    expect(t.app.textContent).toContain("Completed");
+    expect(t.app.textContent).not.toContain("Looking it up again");
+    noticed.splice(0).forEach((resolve) => resolve({ ok: true, result: { patched: true } }));
+    await flush();
+    expect(t.state.route).toBe("tx");
+    opened = { hash: "" };
+  });
+
   it("opens on Home after it was ended with Send open but sent, or for another profile", async () => {
     const kept = new Map();
     vi.stubGlobal("localStorage", { getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => kept.set(k, String(v)), removeItem: (k) => kept.delete(k) });

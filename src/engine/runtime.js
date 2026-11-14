@@ -28,6 +28,9 @@ import {
   sealContactsRecord,
   sendTransaction,
   cancelSend,
+  resendSend,
+  forgetHandedOver,
+  sendUnderWay,
   selectAccountIndex,
   signAuth,
   signMessage,
@@ -171,11 +174,11 @@ async function watchTxExecuted(hash, epoch) {
   }
 }
 
-// A payment that waited for the network is kept with its transaction's ID in
-// the background before it's handed to the node (waitingSends.js): nothing
-// is handed over without the background's word that it's kept.
-setHandOverHook(async ({ sendId, hash }) => {
-  const kept = await runtimeSendMessage({ type: "DUSK_ENGINE_HANDING_OVER", sendId, hash });
+// A payment from Send is kept with its transaction's ID and nonce in the
+// background before it's handed to the node, on every try (waitingSends.js):
+// nothing is handed over without the background's word that it's kept.
+setHandOverHook(async ({ sendId, hash, nonce }) => {
+  const kept = await runtimeSendMessage({ type: "DUSK_ENGINE_HANDING_OVER", sendId, hash, ...(nonce ? { nonce } : {}) });
   if (kept?.ok !== true) throw new Error("Not kept");
 });
 
@@ -475,6 +478,30 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // Cancel on a payment from Send: called off unless it was handed over (waitingSends.js).
         case "dusk_cancelSend": {
           sendResponse({ id, result: cancelSend(params ?? {}) });
+          return;
+        }
+
+        // A public payment from Send the node never had, after a hand-over
+        // with no clear answer: sent again as it was made, then watched as a
+        // send is (waitingSends.js).
+        case "dusk_resendSend": {
+          const { txEpoch, ...resendParams } = params ?? {};
+          const result = await resendSend(resendParams);
+          sendResponse({ id, result: { hash: result.hash, nonce: result.nonce?.toString?.() ?? String(result.nonce) } });
+          watchTxExecuted(result.hash, Number.isInteger(txEpoch) ? txEpoch : undefined).catch(() => {});
+          return;
+        }
+
+        // One the node never had that won't be sent again: its nonce free again.
+        case "dusk_forgetHandedOver": {
+          sendResponse({ id, result: forgetHandedOver(params ?? {}) });
+          return;
+        }
+
+        // Whether one is being handed to the node now, as the background,
+        // started again, asks before it says one wasn't sent.
+        case "dusk_sendUnderWay": {
+          sendResponse({ id, result: sendUnderWay(params ?? {}) });
           return;
         }
 

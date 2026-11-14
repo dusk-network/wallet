@@ -15,10 +15,11 @@ import { displayText } from "@dusk-network/app-core/text";
 import { requestFileName, stamped } from "../../lib/fileNames.js";
 import { shortAddress } from "../../lib/strings.js";
 import { inCurrencyLine } from "../../lib/inCurrency.js";
-import { makePaymentLink } from "@dusk-network/app-core/payment-links";
+import { makePaymentLink, requestMessage } from "@dusk-network/app-core/payment-links";
 import { rememberRequest } from "../../../shared/paymentRequests.js";
 import { requestKept, requestNetwork, requestsSection } from "./requests.js";
-import { amountForInput, formatDuskExact } from "../../../shared/amount.js";
+import { amountChoices, amountForInput, formatDuskExact } from "../../../shared/amount.js";
+import { amountQuestionEls } from "../../components/AmountQuestion.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
 import { safeText } from "../../../shared/safeText.js";
@@ -47,16 +48,6 @@ const testNetworkOf = (ov) => {
  * what it asks and its memo, and whom it pays.
  * @param {{ lux: bigint | null, memo: string, to: string, name?: string, network?: string }} asked
  */
-/**
- * What Share sends with a request's picture and link, for whoever gets it: that
- * it's a request, on which test network, and what it asks, its memo too.
- * @param {{ lux: bigint | null, memo: string, network?: string, link: string }} asked
- */
-export function requestShareText({ lux, memo, network = "", link }) {
-  const asks = [lux === null || lux === undefined ? "" : `${formatDuskExact(lux)} DUSK`, memo ? displayText(memo, { isolate: true }).text : ""].filter(Boolean).join(" · ");
-  return [`Dusk payment request${network ? ` · ${network}` : ""}`, asks, link].filter(Boolean).join("\n");
-}
-
 export function requestCaption({ lux, memo, to, name = "", network = "" }) {
   return [
     { size: 44, weight: 600, text: `Dusk payment request${network ? ` · ${network}` : ""}` },
@@ -205,11 +196,24 @@ export function receiveView(ov, { state, actions } = {}) {
       .catch(() => {});
   };
 
-  // The request link's copy, which Enter in the memo presses; on once the QR
+  // What Share and Copy give for a request, in both wallets' words
+  // (app-core's requestMessage): who asks, what for, on which test network,
+  // its memo, then the link. Who asks: the profile's verified .dusk name,
+  // else the name given it here, else no one by name.
+  const requestText = () =>
+    requestMessage({
+      name: shownName || String(ov?.accountNames?.[String(idx)] ?? "").trim() || null,
+      lux: curLux,
+      memo: curMemo,
+      link: curLink,
+      network: testNetworkOf(ov),
+    });
+
+  // The request's copy, which Enter in the memo presses; on once the QR
   // holds a request. On a phone it stays above the keyboard with the field
   // being typed in (keyboard.js), as Send's Review does.
   const copyRequestBtn = copyButton({
-    value: () => (wantRequest ? curLink : ""),
+    value: () => (wantRequest ? requestText() : ""),
     label: "Copy request link",
     text: "Copy request link",
     className: "btn-outline",
@@ -344,7 +348,7 @@ export function receiveView(ov, { state, actions } = {}) {
         class: "btn-outline",
         text: "Share",
         onclick: async () => {
-          const shareValue = wantRequest && curLink ? curLink : curRecipient;
+          const shareValue = wantRequest && curLink ? requestText() : curRecipient;
           if (!shareValue) return;
 
           // The phone's share sheet: the app's own, else the browser's. A
@@ -360,7 +364,7 @@ export function receiveView(ov, { state, actions } = {}) {
             } catch {
               // Its words and link alone.
             }
-            shared = await shareText(requestShareText({ lux: curLux, memo: curMemo, network, link: curLink }), "Dusk payment request", picture);
+            shared = await shareText(shareValue, "Dusk payment request", picture);
           } else {
             shared = await shareText(shareValue, "Dusk address");
           }
@@ -440,7 +444,23 @@ export function receiveView(ov, { state, actions } = {}) {
     // The checks Send has, so the link is one the payer can use. Said only with the panel open.
     const made = makePaymentLink({ to: curRecipient, amount: amountInput.value, memo: memoInput.value, network: chainId });
     const valid = made.ok;
-    sayUnder(amountErr, requestDetails.open ? made.problems.amount ?? "" : "");
+    // An amount that could be read two ways: the question, with a button for each reading.
+    const twoWays = requestDetails.open && made.problems.amount ? amountChoices(amountInput.value) : null;
+    if (twoWays) {
+      amountErr.replaceChildren(
+        ...amountQuestionEls(twoWays, {
+          onPick: (picked) => {
+            amountInput.value = picked;
+            r.amountDusk = picked;
+            amountInput.focus();
+            update();
+          },
+        })
+      );
+      amountErr.hidden = false;
+    } else {
+      sayUnder(amountErr, requestDetails.open ? made.problems.amount ?? "" : "");
+    }
     sayUnder(memoErr, requestDetails.open ? made.problems.memo ?? "" : "");
     sayUnder(linkErr, requestDetails.open && curRecipient ? made.problems.to ?? "" : "");
 

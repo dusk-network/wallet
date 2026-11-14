@@ -755,16 +755,17 @@ describe("send's amount", () => {
     typeInto(last.amount, "0.0000000001");
     expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("Is that 1.2340 or 1234? Write the one you mean.");
+    expect(last.amountError()).toBe("Is that 1.2340 or 1234?1.2340 DUSK1234 DUSK");
   });
 
   // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
   // decimal; where the comma is, "1.000" asks, in the web wallet's words. And
   // the question's "1.000" read as a thousand to her: it names 1 and 1000.
+  // Nandini's and Chen's: the question had no buttons, and asked to retype.
   it.each([
-    ["de-DE", "1.000", "Is that 1 or 1000? Write the one you mean."],
-    ["nl-NL", "1.000", "Is that 1 or 1000? Write the one you mean."],
-    ["en-GB", "1,000", "Is that 1 or 1000? Write the one you mean."],
+    ["de-DE", "1.000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
+    ["nl-NL", "1.000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
+    ["en-GB", "1,000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
     ["es-ES", "1 234,5", "Leave out the space: 1234,5."],
   ])("asks which amount is meant where it could be two, in the language's reading: %s %s", (language, typed, asked) => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language });
@@ -772,6 +773,22 @@ describe("send's amount", () => {
     typeInto(form.to, ALICE.account);
     typeInto(form.amount, typed);
     expect([form.amountError(), form.review.disabled]).toEqual([asked, true]);
+  });
+
+  it("puts the reading tapped in the field, which reads it then, with Review on; typing stays as it was", () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
+    const form = mount(newState());
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "2.125");
+    const choices = () => dom.document.body.querySelectorAll(".amount-question__choice");
+    expect(choices().map((b) => b.textContent)).toEqual(["2.1250 DUSK", "2125 DUSK"]);
+    // 2125: read as that, which is more than there is.
+    choices()[1].click();
+    expect([form.amount.value, choices().length]).toEqual(["2125", 0]);
+    expect(form.amountError()).toMatch(/^That's .* more than your public balance/);
+    typeInto(form.amount, "2.125");
+    choices()[0].click();
+    expect([form.amount.value, form.amountError(), form.review.disabled]).toEqual(["2.1250", "", false]);
   });
 
   it("keeps Review off while an amount typed won't do, and on for an empty one to say what's missing", () => {
@@ -1165,6 +1182,71 @@ describe("review", () => {
     expect(sent[0].params.memo).toBe(memo);
   });
 
+  // Chen's, Sofía's, Nandini's and Amélie's: Home's Send it now opens Review with the payment Home said wasn't sent,
+  // and Confirm sends it in that one's place, which Home keeps saying till it's handed over.
+  it("sends a payment from Home's Send it now in the place of the one Home said wasn't sent", async () => {
+    const sent = [];
+    const send = async (message) => {
+      if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+      return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "1", max: "1" } : { ok: true, result: { hash: "ab".repeat(32) } };
+    };
+    const here = overview();
+    const reviewedFor = `${here.accounts[0]} ${Number(here.selectedAccountIndex ?? 0)} ${here.nodeUrl}`;
+    review({ to: ALICE.account, privacy: "public", memo: "Factura 141", replaces: "send-kept-1", reviewedFor }, here, send);
+    await settle();
+    pastClickGuard();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await settle();
+    expect(sent).toEqual([expect.objectContaining({ replaces: "send-kept-1", params: expect.objectContaining({ memo: "Factura 141" }) })]);
+  });
+
+  // Astra's: Send it now, Back to the form and Review again sent it, and Home kept saying the first wasn't sent.
+  it("keeps sending it in the place of the one Home said wasn't sent after Back and Review, while it's that payment", async () => {
+    const here = overview();
+    const draft = { to: ALICE.account, privacy: "public", amountLux: "10000000", amountDusk: "0.01", memo: "Factura 141", replaces: "send-kept-1", reviewedFor: `${here.accounts[0]} ${Number(here.selectedAccountIndex ?? 0)} ${here.nodeUrl}` };
+    const backAndReview = async (change) => {
+      const state = { ...newState(), draft: { ...draft } };
+      const form = mount(state, here);
+      await settle();
+      change?.(form);
+      form.review.click();
+      await settle();
+      return state;
+    };
+    expect((await backAndReview()).draft).toMatchObject({ amountLux: "10000000", memo: "Factura 141", replaces: "send-kept-1" });
+    // Another amount: another payment, sent as itself.
+    const changed = await backAndReview((form) => typeInto(form.amount, "0.02"));
+    expect([changed.route, changed.draft.amountLux, changed.draft.replaces]).toEqual(["confirm", "20000000", undefined]);
+  });
+
+  // Astra's: after Send it now, another profile, wallet or network chosen (here or in another window), its Review
+  // sent it from there, in the place of the first, whose record went.
+  it("sends a payment Home said wasn't sent again only from where it was made, else goes back to Home", async () => {
+    const here = overview();
+    const context = `${here.accounts[0]} ${Number(here.selectedAccountIndex ?? 0)} ${here.nodeUrl}`;
+    const sent = [];
+    const send = async (message) => {
+      if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+      return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "1", max: "1" } : { ok: true, result: { hash: "ab".repeat(32) } };
+    };
+    const retry = { to: ALICE.account, privacy: "public", amountLux: "10000000", amountDusk: "0.01", memo: "Factura 141", replaces: "send-kept-1", reviewedFor: context };
+    for (const elsewhere of [{ selectedAccountIndex: 1 }, { nodeUrl: "https://nodes.dusk.network" }, { accounts: ["another-wallet", ...here.accounts.slice(1)] }]) {
+      const state = { ...newState(), route: "confirm", draft: { ...retry } };
+      const view = mount(state, { ...here, ...elsewhere }, send);
+      expect([state.route, state.draft], JSON.stringify(elsewhere)).toEqual(["home", null]);
+      expect(view.actions.showToast).toHaveBeenCalledWith("The wallet, profile or network changed. Check the send again.", 3000);
+      expect(dom.document.body.querySelectorAll("button").some((b) => b.textContent === "Confirm")).toBe(false);
+    }
+    expect(sent).toEqual([]);
+    // Back to the form from its Review, then another profile: Review again sends it as a payment of its own.
+    const state = { ...newState(), draft: { ...retry } };
+    const form = mount(state, { ...here, selectedAccountIndex: 1 });
+    await settle();
+    form.review.click();
+    await settle();
+    expect([state.route, state.draft.replaces]).toEqual(["confirm", undefined]);
+  });
+
   it("says on Review when a memo's number may not read as its digits do", async () => {
     // Marek's memo, from a link: an Arabic-Indic zero in 105.
     review({ to: ALICE.account, privacy: "public", memo: "Invoice 1\u06605" }, overview());
@@ -1230,6 +1312,31 @@ describe("review", () => {
     review({ to: ALICE.account, privacy: "public" }, overview(), at("2"));
     await settle();
     expect([fee(), busy()]).toEqual(["Network feeup to 0.005 DUSKTotalup to 1.005 DUSK", ""]);
+  });
+
+  // Lena's, three rounds: a default worked out from the mempool's median made one waiting transaction everyone's
+  // price, as Sozu's activation at 2 after a stake. What waits fits in a block: the minimum.
+  it.each([
+    ["a public transfer", () => ({ to: ALICE.account, privacy: "public" })],
+    ["a shielded transfer", () => ({ to: ALICE.address, privacy: "shielded" })],
+  ])("starts %s from the minimum with one transaction waiting at 2, and from the capped median with a full mempool", async (_, draft) => {
+    const priceSent = async (stats) => {
+      const sent = [];
+      const send = async (message) => {
+        if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+        return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? stats : { ok: true, result: { hash: "ab".repeat(32) } };
+      };
+      review(draft(), overview({ shieldedBalance: { value: "5000000000", spendable: "5000000000" } }), send);
+      await settle();
+      const busy = visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
+      pastClickGuard();
+      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+      await settle();
+      return [sent[0]?.params.gas?.price, busy];
+    };
+    expect(await priceSent({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] })).toEqual(["1", ""]);
+    const full = { mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) };
+    expect(await priceSent(full)).toEqual(["5", "The network is busy. You can raise the gas price for it to go out sooner."]);
   });
 
   it("hides Use the network's price while the fee is the network's, custom gas from Settings that equals it too", async () => {
@@ -1899,6 +2006,21 @@ describe("a request link", () => {
     await settle();
     expect(again.to.value).toBe(ALICE.account);
     expect(again.amount.value).toBe("1,5");
+  });
+
+  // Nandini's and Chen's: a link's amount=2.125 was filled in as 2.1250 without a question, where typing 2.125 asks.
+  it("reads a link's amount as typing does: 2.125 asks, with a button for each reading; a wallet's 2.1250 doesn't", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
+    const form = mount(newState());
+    paste(form, httpsLink(`to=${ALICE.account}&amount=2.125&memo=laksa&network=testnet`));
+    await settle();
+    expect(form.amount.value).toBe("2.125");
+    expect([form.amountError(), form.review.disabled]).toEqual(["Is that 2.1250 or 2125?2.1250 DUSK2125 DUSK", true]);
+
+    const made = mount(newState());
+    paste(made, httpsLink(`to=${ALICE.account}&amount=2.1250&memo=laksa&network=testnet`));
+    await settle();
+    expect([made.amount.value, made.amountError()]).toEqual(["2.1250", ""]);
   });
 
   // Sofía's, in the app: Chen picked from Contacts in place of the link's recipient, and the line stayed.

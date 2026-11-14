@@ -54,8 +54,9 @@ async fn fingerprint(app: tauri::AppHandle, action: String, args: serde_json::Va
 /// leave to show them, asked only when the person taps Tell me when it arrives),
 /// notify (`args` title, body and the transaction's hash), watch (a send to
 /// look for once the app leaves the screen), settled, forget (a wallet's
-/// sends, or every wallet's) or opened (the transaction a notice's tap opened
-/// the app on). `{ allowed: false }` elsewhere.
+/// sends, or every wallet's), incoming (the accounts to look at for money
+/// coming in) or opened (the transaction a notice's tap opened the app on).
+/// `{ allowed: false }` elsewhere.
 #[tauri::command]
 async fn notices(app: tauri::AppHandle, action: String, args: serde_json::Value) -> Result<serde_json::Value, String> {
   #[cfg(target_os = "android")]

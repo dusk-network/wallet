@@ -212,9 +212,14 @@ test("keeps a contact's address at the field's whole width, its chip on a line a
 // Chen's: an x between two digits drawn as a ×, by the font's contextual alternates.
 test("draws addresses and amounts without the font's contextual alternates, so an x is never a ×", async ({ page }) => {
   await popupOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "1", memo: "" } });
+  // Read in one go in the page, as it's drawn now: Activity draws Send again a moment after it opens, and a
+  // field found before that and read after it is no longer on the page, with no style at all.
+  const ligaturesOf = (selector) => page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    return el ? getComputedStyle(el).fontVariantLigatures : "";
+  }, selector);
   for (const selector of [".to-input-wrap textarea", "input.amount-field__input"]) {
-    const ligatures = await page.locator(selector).first().evaluate((el) => getComputedStyle(el).fontVariantLigatures);
-    expect(ligatures).toMatch(/no-contextual|none/);
+    await expect.poll(() => ligaturesOf(selector), { message: selector }).toMatch(/no-contextual|none/);
   }
 });
 

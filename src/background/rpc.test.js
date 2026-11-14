@@ -879,6 +879,40 @@ describe("background rpc handler", () => {
     }
   });
 
+  // Marek's: {address: <Profile 2>}, {accountId: …}, {to: …} and six more forms got the connected profile's balance,
+  // as only `account` and `profileId` were read.
+  it("dusk_getPublicBalance refuses what it doesn't take, under any key, whatever it holds", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+    const ask = (params) => handleRpc("https://dapp.example", { method: "dusk_getPublicBalance", params });
+    const forms = [
+      { address: "acct1" },
+      { address: "nonsense" },
+      { accountId: "acct1" },
+      { to: "acct1" },
+      { publicKey: "acct1" },
+      { Account: "acct1" },
+      { profileId: "account:0:acct0", address: "acct1" },
+      { account: "acct0", extra: true },
+      JSON.parse('{"__proto__": "acct1"}'),
+      { account: ["acct1"] },
+      { account: { value: "acct1" } },
+      ["acct0", "acct1"],
+      [["acct1"]],
+      [{ address: "acct1" }],
+      42,
+      true,
+    ];
+    for (const params of forms) {
+      engineCall.mockClear();
+      await expect(ask(params), JSON.stringify(params)).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+      expect(engineCall).not.toHaveBeenCalledWith("dusk_getPublicBalance", expect.anything());
+    }
+  });
+
   it("does not read a replacement wallet balance after context capture", async () => {
     vi.resetModules();
     const [{ handleRpc }, { WALLET_LIFECYCLE_LOCK, withStorageLock }] = await Promise.all([
@@ -1118,6 +1152,27 @@ describe("background rpc handler", () => {
     const gas = { limit, price: "3" };
     expect(requestUserApproval).toHaveBeenCalledWith("send_tx", "https://dapp.example", expect.objectContaining({ gas }), SHOWN, SENDS);
     expect(engineCall).toHaveBeenCalledWith("dusk_sendTransaction", expect.objectContaining({ gas }));
+  });
+
+  // Lena's, three rounds: the default followed the mempool's median, which one transaction waiting alone at 2, as
+  // Sozu's activation after a stake, made everyone's price. What waits fits in a block: a site's send pays the minimum.
+  it.each([
+    ["a public transfer", { kind: "transfer", privacy: "public", to: PUBLIC_ACCOUNT, amount: "1", gas: { limit: "3000000" } }],
+    ["a contract call", { kind: "contract_call", privacy: "public", contractId: `0x${"02".repeat(32)}`, fnName: "deposit", fnArgs: "0x00", deposit: "5", gas: { limit: "5000000" } }],
+  ])("dusk_sendTransaction pays the minimum for %s while what waits fits in a block, and the capped median once it doesn't", async (_label, params) => {
+    const priced = async (stats) => {
+      vi.resetModules();
+      requestUserApproval.mockClear();
+      const { handleRpc } = await import("./rpc.js");
+      perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+      vaultValue = { v: 1 };
+      engineStatus = { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"] };
+      gasPriceStats = stats;
+      await handleRpc("https://dapp.example", { method: "dusk_sendTransaction", params });
+      return requestUserApproval.mock.calls.at(-1)?.[2]?.gas?.price;
+    };
+    expect(await priced({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] })).toBe("1");
+    expect(await priced({ mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) })).toBe("5");
   });
 
   it("dusk_sendTransaction can unlock in the approval window", async () => {

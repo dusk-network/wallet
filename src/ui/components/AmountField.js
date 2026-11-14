@@ -1,6 +1,8 @@
 import { h } from "../lib/dom.js";
 import { HIDDEN_BALANCE } from "./Balance.js";
 import { decimalInput } from "./FormControls.js";
+import { amountChoices, amountProblem } from "../../shared/amount.js";
+import { amountQuestionEls } from "./AmountQuestion.js";
 
 let fieldSeq = 0;
 
@@ -17,7 +19,7 @@ let fieldSeq = 0;
  * @param {boolean} [opts.masked] - the value shows as dots until something's typed
  * @param {() => void} [opts.onInput]
  * @param {() => void} [opts.onEnter]
- * @returns {{ el: HTMLElement, input: HTMLInputElement, error: HTMLElement, setError: (text: string) => void, setValue: (value: string, opts?: { masked?: boolean }) => void, isMasked: () => boolean, focus: () => void }}
+ * @returns {{ el: HTMLElement, input: HTMLInputElement, error: HTMLElement, setError: (text: string) => void, setProblem: (raw: string, example?: { whole?: string, decimal?: string }) => void, setValue: (value: string, opts?: { masked?: boolean }) => void, isMasked: () => boolean, focus: () => void }}
  */
 export function amountField({ label, value = "", unit = "DUSK", disabled = false, masked = false, onInput, onEnter } = {}) {
   const errorId = `amount-error-${++fieldSeq}`;
@@ -78,11 +80,9 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
     onInput?.();
   });
 
-  const setError = (text) => {
-    // An alert reads out again on every change: write only a new message.
-    if ((error.textContent || "") === (text || "") && error.hidden === !text) return;
-    error.textContent = text || "";
-    error.hidden = !text;
+  // What the error line says now, its question's choices too: an alert reads out again on every change.
+  let said = "";
+  const mark = (text) => {
     el.classList.toggle("is-invalid", Boolean(text));
     for (const field of [input, cover]) {
       if (text) {
@@ -94,6 +94,14 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
       }
     }
   };
+  const setError = (text) => {
+    // An alert reads out again on every change: write only a new message.
+    if (said === (text || "") && error.hidden === !text) return;
+    said = text || "";
+    error.textContent = text || "";
+    error.hidden = !text;
+    mark(text);
+  };
 
   const setValue = (next, { masked: maskIt = false } = {}) => {
     input.value = String(next ?? "");
@@ -101,7 +109,33 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
     fit();
   };
 
+  // What's wrong with what's typed, under the field: for an amount that could
+  // be read two ways, its question with a button for each reading, which puts
+  // it in the field and reads it again; else in words (amount.js).
+  const setProblem = (raw, example) => {
+    const asked = amountChoices(raw);
+    if (!asked) {
+      setError(amountProblem(raw, example));
+      return;
+    }
+    const key = `${asked.question}\n${asked.choices.map((choice) => choice.field).join("\n")}`;
+    if (said === key && !error.hidden) return;
+    said = key;
+    error.replaceChildren(
+      ...amountQuestionEls(asked, {
+        unit,
+        onPick: (picked) => {
+          setValue(picked);
+          focus();
+          onInput?.();
+        },
+      })
+    );
+    error.hidden = false;
+    mark(asked.question);
+  };
+
   setMasked(masked && Boolean(input.value));
 
-  return { el, input, error, setError, setValue, isMasked, focus };
+  return { el, input, error, setError, setProblem, setValue, isMasked, focus };
 }

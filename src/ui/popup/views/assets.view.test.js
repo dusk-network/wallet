@@ -275,6 +275,50 @@ describe("a token send's Review", () => {
     expect(rows(ov([{ key: "w1", n: 1, active: true }])).filter((r) => r.startsWith("From"))).toEqual([]);
   });
 
+  // Lena's, three rounds: the default followed the mempool's median, which one transaction waiting alone at 2 made
+  // everyone's price. What waits fits in a block: a token's transfer starts from the minimum too.
+  it("starts a token's transfer from the minimum with one transaction waiting at 2, and the capped median with a full mempool", async () => {
+    const { installFakeDom, pastClickGuard, settle, visibleText } = await import("../../testing/fakeDom.js");
+    const { vi } = await import("vitest");
+    const { document } = installFakeDom();
+    const { assetTokenConfirmView } = await import("./assets.js");
+    const { reviewOf } = await import("./sent.js");
+    const TOKEN = `0x${"cd".repeat(32)}`;
+    const TO = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
+    const ov = { isUnlocked: true, nodeUrl: "http://127.0.0.1:8080", accounts: ["acct"], selectedAccountIndex: 0 };
+    const priceSent = async (stats) => {
+      const state = {
+        route: "asset_token_confirm",
+        assetTxDraft: {
+          op: "transfer",
+          token: { contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 },
+          params: { kind: "contract_call", privacy: "public", contractId: TOKEN, fnName: "transfer", fnArgs: "0x00", amount: "0", deposit: "0" },
+          asset: { type: "DRC20", op: "transfer", symbol: "TKN", name: "Token", decimals: 2, valueUnits: "150", to: TO },
+        },
+      };
+      const sent = [];
+      const send = vi.fn(async (message) => {
+        if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+        return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? stats : { ok: true, result: { hash: "ab".repeat(32) } };
+      });
+      document.body.replaceChildren(...assetTokenConfirmView(ov, { state, actions: { send, render: vi.fn(async () => {}), showToast: vi.fn(), announce: vi.fn(), review: reviewOf(ov, state) } }));
+      await settle();
+      const busy = visibleText(document.body.querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
+      pastClickGuard();
+      document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+      await settle();
+      return [sent[0]?.params.gas?.price, busy];
+    };
+    try {
+      expect(await priceSent({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] })).toEqual(["1", ""]);
+      const full = { mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) };
+      expect(await priceSent(full)).toEqual(["5", "The network is busy. You can raise the gas price for it to go out sooner."]);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("ignores a click on Confirm the moment it's up, and sends one a moment later", async () => {
     const { installFakeDom, pastClickGuard, settle } = await import("../../testing/fakeDom.js");
     const { vi } = await import("vitest");

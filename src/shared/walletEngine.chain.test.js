@@ -206,23 +206,36 @@ describe("a send that fails, and whether it went out", () => {
 });
 
 describe("the network's gas price", () => {
-  // Lena's: the extension's unstake paid gas price 2 where the web wallet's paid 1: the extension asked for the median
-  // of the 100 best-paying transactions, the web wallet for that of every one the node holds.
-  it("is asked of every transaction the node holds, as the web wallet asks it, and kept 30 seconds", async () => {
+  // Lena's, three rounds: the extension's unstake paid gas price 2 where the web wallet's paid 1. Sozu's operator
+  // sends its activation at 2 just after a stake, and the extension read the median of the mempool while that waited
+  // there alone. What waits is read as the web wallet reads it, for app-core's rule to work the price out from.
+  it("is worked out from what waits in the node's mempool, as the web wallet reads it, and kept 30 seconds", async () => {
     await addNode(TESTNET);
     await engine.unlockWithMnemonic(MNEMONIC);
     const asked = [];
     const fetch = node.fetch;
     vi.stubGlobal("fetch", async (input, init = {}) => {
-      if (new URL(String(input), "https://wallet.invalid").pathname === "/on/blocks/gas-price") {
-        asked.push(init.body ?? null);
-        return new Response(JSON.stringify({ average: 3, max: 9, median: 2, min: 1 }));
+      const path = new URL(String(input), "https://wallet.invalid").pathname;
+      if (path === "/on/blocks/gas-price") asked.push("gas-price");
+      if (path === "/graphql" && String(init.body ?? "").includes("mempoolTxs")) {
+        asked.push(JSON.parse(init.body).query);
+        return new Response(JSON.stringify({ data: { mempoolTxs: [{ gasPrice: 2, gasLimit: 6000000 }] } }));
       }
       return fetch(input, init);
     });
-    await expect(engine.getCachedGasPrice({ forceRefresh: true })).resolves.toEqual({ average: "3", max: "9", median: "2", min: "1" });
+    await expect(engine.getCachedGasPrice({ forceRefresh: true })).resolves.toEqual({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] });
     await engine.getCachedGasPrice();
-    expect(asked).toEqual([null]);
+    expect(asked).toEqual(["query { mempoolTxs { gasPrice gasLimit } }"]);
+  });
+
+  it("is the minimum where the node can't list what waits", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const fetch = node.fetch;
+    vi.stubGlobal("fetch", async (input, init = {}) =>
+      new URL(String(input), "https://wallet.invalid").pathname === "/graphql" ? new Response("", { status: 503 }) : fetch(input, init)
+    );
+    await expect(engine.getCachedGasPrice({ forceRefresh: true })).resolves.toEqual({});
   });
 });
 
@@ -230,6 +243,9 @@ describe("a payment from Send, called off", () => {
   // Amélie's: the extension gave up on a send it couldn't get out, where the web wallet waits with Cancel. Cancel
   // and the hand-over are settled here, where the transaction is handed over: never both.
   const payment = (sendId) => ({ ...KINDS["a public transfer"](), sendId });
+  // Each try kept with its ID before it's handed over, as the wallet keeps it.
+  beforeEach(() => engine.setHandOverHook(async () => {}));
+  afterEach(() => engine.setHandOverHook(null));
 
   it("never reaches the node once called off, also as the node is checking it, and says nothing was sent", async () => {
     await addNode(TESTNET);
@@ -264,11 +280,12 @@ describe("a payment from Send, called off", () => {
   });
 });
 
-describe("a payment from Send that waited for the network", () => {
-  const payment = (sendId, waited = false) => ({ ...KINDS["a public transfer"](), sendId, ...(waited ? { sendKept: true } : {}) });
+describe("a payment from Send, as it's handed over", () => {
+  const payment = (sendId) => ({ ...KINDS["a public transfer"](), sendId });
 
   // Astra's: a payment that waited and reached the node as the wallet stopped was said not sent once it was back.
-  it("is told of with its ID before it's handed over, which waits for it; one that can't be told of isn't handed over", async () => {
+  // Sofía's: one whose first try was cut short by Android ending the app vanished; every try is told of now.
+  it("is told of with its ID and nonce before it's handed over, on every try; one that can't be told of isn't handed over", async () => {
     await addNode(TESTNET);
     await engine.unlockWithMnemonic(MNEMONIC);
     const asked = [];
@@ -281,22 +298,146 @@ describe("a payment from Send that waited for the network", () => {
     const told = [];
     engine.setHandOverHook(async (sent) => told.push({ ...sent, handedOver: handedOver() }));
 
-    const sent = await engine.sendTransaction(payment("send-waited", true));
-    expect(told).toEqual([{ sendId: "send-waited", hash: sent.hash, handedOver: 0 }]);
+    // Being handed over from the word till the node answers, as a background started again asks (sendUnderWay).
+    const underWay = [];
+    engine.setHandOverHook(async (sent) => {
+      told.push({ ...sent, handedOver: handedOver() });
+      underWay.push(engine.sendUnderWay({ sendId: sent.sendId }).underWay);
+    });
+    const sent = await engine.sendTransaction(payment("send-first"));
+    expect(told).toEqual([{ sendId: "send-first", hash: sent.hash, nonce: "1", handedOver: 0 }]);
     expect(handedOver()).toBe(1);
-
-    // A first try, which waited for nothing, isn't told of.
-    await engine.sendTransaction(payment("send-first"));
-    expect([told.length, handedOver()]).toEqual([1, 2]);
+    expect([underWay, engine.sendUnderWay({ sendId: "send-first" })]).toEqual([[true], { underWay: false }]);
 
     // Not told, as when what's kept can't be written: never handed over, and nothing went out.
     engine.setHandOverHook(async () => {
       throw new Error("Storage is full");
     });
-    const error = await engine.sendTransaction(payment("send-untold", true)).catch((e) => e);
+    const error = await engine.sendTransaction(payment("send-untold")).catch((e) => e);
     expect(error.data).toMatchObject({ sent: false });
-    expect(handedOver()).toBe(2);
+    expect(handedOver()).toBe(1);
     engine.setHandOverHook(null);
+  });
+});
+
+describe("a public payment from Send handed over without a clear answer", () => {
+  // Chen's: confirmed as the Wi-Fi died, the node never had it, and the wallet said it may have reached the network.
+  const payment = (sendId) => ({ ...KINDS["a public transfer"](), sendId });
+  const nonces = [];
+  beforeEach(() => {
+    nonces.length = 0;
+    engine.setHandOverHook(async ({ sendId, nonce }) => nonces.push(`${sendId} ${nonce}`));
+  });
+  afterEach(() => engine.setHandOverHook(null));
+
+  it("goes out again as the very transaction made for it, once the node turns out never to have had it", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = /\/propagate$/;
+    const lost = await engine.sendTransaction(payment("send-lost")).catch((e) => e);
+    expect(lost.data).toMatchObject({ sent: "unknown", hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    const made = node.signed.at(-1);
+
+    node.drops = null;
+    const again = await engine.resendSend({ sendId: "send-lost" });
+    expect(again).toEqual({ hash: lost.data.hash, nonce: 1n });
+    // Checked and handed over as it was: the same bytes, nothing signed anew.
+    expect(node.signed.slice(-2)).toEqual([made, made]);
+    expect(nonces).toEqual(["send-lost 1", "send-lost 1"]);
+    // Once is all: nothing of it is kept to send a third time.
+    await expect(engine.resendSend({ sendId: "send-lost" })).rejects.toMatchObject({ data: { sent: false, gone: true } });
+  });
+
+  it("is followed by the next transaction's nonce, never shares it; forgotten, its nonce is free again", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = /\/propagate$/;
+    await engine.sendTransaction(payment("send-lost")).catch(() => {});
+    node.drops = null;
+    // It may be in the node's mempool: the next one comes after it.
+    await engine.sendTransaction(payment("send-next"));
+    expect(nonces).toEqual(["send-lost 1", "send-next 2"]);
+
+    node.drops = /\/propagate$/;
+    await engine.sendTransaction(payment("send-lost-2")).catch(() => {});
+    node.drops = null;
+    expect(engine.forgetHandedOver({ sendId: "send-lost-2" })).toEqual({ forgotten: true });
+    await engine.sendTransaction(payment("send-after"));
+    expect(nonces.slice(-2)).toEqual(["send-lost-2 3", "send-after 3"]);
+  });
+
+  // Astra's: signed for Testnet, it went to Mainnet's node once Mainnet was chosen as it waited, and was refused there.
+  it("waits for the network it was made for, never handed to another, and goes out there once it's chosen again", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = /\/propagate$/;
+    const lost = await engine.sendTransaction(payment("send-lost")).catch((e) => e);
+    await addNode("https://nodes.dusk.network");
+    const held = await engine.resendSend({ sendId: "send-lost" }).catch((e) => e);
+    expect(held.data).toMatchObject({ sent: false, unreachable: true });
+    expect(node.signed).toEqual([]);
+    await addNode(TESTNET);
+    await expect(engine.resendSend({ sendId: "send-lost" })).resolves.toEqual({ hash: lost.data.hash, nonce: 1n });
+    expect(node.signed).toHaveLength(2);
+  });
+
+  it("can't be sent again once the wallet locked", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = /\/propagate$/;
+    await engine.sendTransaction(payment("send-lost")).catch(() => {});
+    engine.lock();
+    await engine.unlockWithMnemonic(MNEMONIC);
+    node.drops = null;
+    const signed = node.signed.length;
+    await expect(engine.resendSend({ sendId: "send-lost" })).rejects.toMatchObject({ data: { sent: false, gone: true } });
+    expect(node.signed).toHaveLength(signed);
+  });
+});
+
+// Astra's: a site's transfer or a contract call that lost its connection before the node had it kept its nonce
+// taken: the next transaction skipped it (the chain at 0, the next at 2) and waited behind one that never came.
+describe("a public transaction of a site's, or a contract call, handed over without a clear answer", () => {
+  const nonces = [];
+  // The node, as its GraphQL and its account status answer: whether it has the transaction (`has`), by its ID.
+  const asks = { has: null };
+  const answering = () => {
+    const fetch = node.fetch;
+    vi.stubGlobal("fetch", async (input, init = {}) => {
+      const url = new URL(String(input), "https://wallet.invalid");
+      const body = String(init.body ?? "");
+      if (url.pathname === "/on/graphql/query" && body.includes("tx(hash")) return new Response(JSON.stringify({ tx: null }));
+      if (url.pathname === "/on/graphql/query" && body.includes("mempoolTxs")) return new Response(JSON.stringify({ mempoolTxs: asks.has ? [{ id: asks.has }] : [] }));
+      if (/\/on\/account:[^/]+\/status$/.test(url.pathname)) return new Response(JSON.stringify({ balance: 1, nonce: Number(node.balance.nonce), next_nonce: Number(node.balance.nonce) + 1 }));
+      return fetch(input, init);
+    });
+  };
+  beforeEach(() => {
+    nonces.length = 0;
+    asks.has = null;
+    engine.setHandOverHook(async ({ sendId, nonce }) => nonces.push(`${sendId} ${nonce}`));
+  });
+  afterEach(() => engine.setHandOverHook(null));
+
+  it("frees its nonce once the node is known not to have it, and keeps it taken where the node has it", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    answering();
+    node.drops = /\/propagate$/;
+    const call = await engine.sendTransaction(KINDS["a public contract call, as Sozu's and a token's"]()).catch((e) => e);
+    expect(call.data).toMatchObject({ sent: "unknown", hash: expect.stringMatching(/^[0-9a-f]{64}$/) });
+    node.drops = null;
+    // The node never had it, and the account's nonce is still 0: the next one takes its nonce.
+    await engine.sendTransaction({ ...KINDS["a public transfer"](), sendId: "send-next" });
+    expect(nonces).toEqual(["send-next 1"]);
+
+    // Lost again, but in the node's mempool this time: its nonce stays taken.
+    node.drops = /\/propagate$/;
+    const kept = await engine.sendTransaction(KINDS["a public contract call, as Sozu's and a token's"]()).catch((e) => e);
+    node.drops = null;
+    asks.has = kept.data.hash;
+    await engine.sendTransaction({ ...KINDS["a public transfer"](), sendId: "send-after" });
+    expect(nonces).toEqual(["send-next 1", "send-after 3"]);
   });
 });
 

@@ -167,6 +167,19 @@ export function unclearAmountText(text) {
 }
 
 /**
+ * The question for an amount that could be read two ways, and the two
+ * readings, the decimal one first, each as its field should hold it
+ * (app-core's readAmount), for a button each; null for any other amount.
+ * @param {string} text - as typed
+ * @returns {{ question: string, choices: Array<{ field: string, lux: bigint }> } | null}
+ */
+export function amountChoices(text) {
+  if (!unclearAmount(text)) return null;
+  const { question, choices } = readAmount(text);
+  return question && Array.isArray(choices) && choices.length ? { question, choices } : null;
+}
+
+/**
  * What's wrong with an amount of DUSK that can't be read, for the line under
  * its field: that it could be two amounts, that it has spaces to leave out, that
  * it has too many decimals, else what an amount looks like.

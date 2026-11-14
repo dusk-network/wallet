@@ -2,7 +2,8 @@
 // question for leave to show them, asked only when the person taps Tell me
 // when it arrives, a payment's notice once they may show, the sends to look
 // for once the app leaves the screen (ArrivalJob.kt), forgotten with their
-// wallet, and the transaction a notice's tap opened the app on.
+// wallet, the accounts to look at for money coming in (`incoming`), and the
+// transaction a notice's tap opened the app on.
 //
 // Copied into the generated Android project by build.rs, as the icon is, and
 // registered by src/android.rs as the plugin "dusk-notices". Each command
@@ -28,6 +29,7 @@ import app.tauri.plugin.Plugin
 class NoticeArgs {
   var title: String = ""
   var body: String = ""
+  var publicBody: String = ""
   var hash: String = ""
   var token: String = ""
 }
@@ -39,8 +41,15 @@ class WatchArgs {
   var title: String = ""
   var failTitle: String = ""
   var body: String = ""
+  var publicBody: String = ""
   var wallet: String = ""
   var token: String = ""
+}
+
+@InvokeArg
+class IncomingArgs {
+  // What to look for, as JSON (ArrivalJob.kt's Incoming.watch): "" for nothing.
+  var setup: String = ""
 }
 
 @InvokeArg
@@ -59,6 +68,9 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   private var openedOutcome = ""
   private var openedBlock = 0L
   private var openedToken = ""
+  private var openedAccount = ""
+  // Its token, the one this app's notice carried: checked here, for the page to open it at once.
+  private var openedOurs = false
 
   private fun answer(invoke: Invoke, allowed: Boolean) {
     val out = JSObject()
@@ -71,21 +83,26 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
     val outcome = intent.getStringExtra(Arrivals.EXTRA_OUTCOME) ?: ""
     val block = intent.getLongExtra(Arrivals.EXTRA_BLOCK, 0L)
     val token = intent.getStringExtra(Arrivals.EXTRA_TOKEN) ?: ""
+    val account = intent.getStringExtra(Arrivals.EXTRA_ACCOUNT) ?: ""
     intent.removeExtra(Arrivals.EXTRA_TX)
     intent.removeExtra(Arrivals.EXTRA_OUTCOME)
     intent.removeExtra(Arrivals.EXTRA_BLOCK)
     intent.removeExtra(Arrivals.EXTRA_TOKEN)
+    intent.removeExtra(Arrivals.EXTRA_ACCOUNT)
     // No notice's without a transaction's ID and a token as the wallet writes them.
     if (!Arrivals.isHash(hash) || !Arrivals.isToken(token)) return
     opened = hash
     openedOutcome = if (outcome == "executed" || outcome == "failed") outcome else ""
     openedBlock = if (block > 0L) block else 0L
     openedToken = token
+    openedAccount = if (account.length <= 200) account else ""
+    openedOurs = Arrivals.isOurs(activity.applicationContext, hash, token, openedAccount)
   }
 
   // Started by a notice's tap, or brought back by one.
   override fun load(webView: WebView) {
     take(activity.intent)
+    Incoming.front(activity.applicationContext)
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -96,6 +113,11 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   // its way is looked for by the job.
   override fun onStop() {
     Arrivals.away(activity.applicationContext)
+  }
+
+  // Back on the screen: money coming in shows there, not as a notice.
+  override fun onResume() {
+    Incoming.front(activity.applicationContext)
   }
 
   /** Whether notices may show. */
@@ -123,14 +145,14 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun notify(invoke: Invoke) {
     val args = invoke.parseArgs(NoticeArgs::class.java)
-    answer(invoke, Arrivals.post(activity.applicationContext, args.title, args.body, args.hash, token = args.token))
+    answer(invoke, Arrivals.post(activity.applicationContext, args.title, args.body, args.hash, token = args.token, publicBody = args.publicBody))
   }
 
   /** A send to look for once the app leaves the screen, with its notice for either outcome. */
   @Command
   fun watch(invoke: Invoke) {
     val args = invoke.parseArgs(WatchArgs::class.java)
-    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body, args.wallet, args.token)
+    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body, args.wallet, args.token, args.publicBody)
     answer(invoke, Arrivals.allowed(activity))
   }
 
@@ -139,6 +161,20 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   fun forget(invoke: Invoke) {
     val args = invoke.parseArgs(ForgetArgs::class.java)
     Arrivals.forget(activity.applicationContext, args.wallet)
+    Incoming.forget(activity.applicationContext, args.wallet)
+    answer(invoke, Arrivals.allowed(activity))
+  }
+
+  /** The accounts to look at for money coming in, and the notice's words: none ("") for nothing. */
+  @Command
+  fun incoming(invoke: Invoke) {
+    val args = invoke.parseArgs(IncomingArgs::class.java)
+    val setup = try {
+      if (args.setup.isEmpty()) null else org.json.JSONObject(args.setup)
+    } catch (_: Exception) {
+      null
+    }
+    Incoming.watch(activity.applicationContext, setup)
     answer(invoke, Arrivals.allowed(activity))
   }
 
@@ -164,10 +200,14 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
     out.put("outcome", openedOutcome)
     out.put("block", openedBlock)
     out.put("token", openedToken)
+    out.put("account", openedAccount)
+    out.put("ours", openedOurs)
     opened = ""
     openedOutcome = ""
     openedBlock = 0L
     openedToken = ""
+    openedAccount = ""
+    openedOurs = false
     invoke.resolve(out)
   }
 }

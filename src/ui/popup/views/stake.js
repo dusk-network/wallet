@@ -6,7 +6,6 @@ import {
   formatDuskExact,
   formatFee,
   amountLocale,
-  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   groupThousands,
@@ -901,7 +900,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(amountProblem(raw, { whole: "1000", decimal: "1000.5" }));
+      field.setProblem(raw, { whole: "1000", decimal: "1000.5" });
       reviewBtn.disabled = true;
       return null;
     }

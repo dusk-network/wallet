@@ -11,6 +11,8 @@ vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () =>
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: vi.fn(async (account) => (account.startsWith("26FCH7") ? "alice.dusk" : null)),
+  // Whose each .dusk name in a name is: none looked up, unless a test says.
+  duskNameOwners: vi.fn(async () => new Map()),
 }));
 
 const ACCOUNTS = [
@@ -220,6 +222,79 @@ describe("profile names", () => {
     }
     expect(setAccountName).not.toHaveBeenCalled();
     listAddressBook.mockResolvedValue([]);
+  });
+
+  // Marek's: Yes, save it took sofiadesign.dusk, Sofía's, as his Profile 2's name, and History then gave his own
+  // transfers her name. A .dusk name is looked up first: another account's is refused, not asked; this profile's
+  // own needs no question. And Dav1d beside David, Wendv beside Wendy, went by.
+  it("refuse a .dusk name registered to another account, take this profile's own without asking, and refuse digit and v-for-y look-alikes", async () => {
+    const SOFIA = "sEeMSo7oiV2rxo6aZD3H75XGFZD95BtrmgFD3AezyUkC5W9bUyRwqFr6VuybvuvmvX5kTRt4STaSKbE6FEeMGoPDZNaX1LL82rGzN6BDbajY8qJcweu1mp7m1budNv9kgd7";
+    const { duskNameOwners } = await import("../shared/duskNames.js");
+    duskNameOwners.mockImplementation(async (typed) => {
+      const said = new Map();
+      if (/sofiadesign\.dusk/i.test(typed)) said.set("sofiadesign.dusk", { account: SOFIA });
+      if (/mine\.dusk/i.test(typed)) said.set("mine.dusk", { account: ACCOUNTS[1] });
+      return said;
+    });
+    listAddressBook.mockResolvedValue([
+      { id: "d", name: "David", address: `${SOFIA.slice(0, -1)}8` },
+      { id: "w", name: "Wendy", address: `${SOFIA.slice(0, -1)}9` },
+    ]);
+    setAccountName.mockClear();
+    await settings();
+    const shownError = (n) => {
+      const id = label(n).getAttribute("aria-describedby");
+      return id ? dom.document.getElementById(id).textContent : "";
+    };
+    const question = (n) => label(n).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.querySelector(".contact-note__words").textContent);
+    const name = async (n, typed) => {
+      typeInto(label(n), typed);
+      label(n).dispatchEvent(fakeEvent("blur"));
+      await settle();
+    };
+    try {
+      await name(2, "sofiadesign.dusk");
+      expect([shownError(2), question(2)]).toEqual(["sofiadesign.dusk belongs to another account. Choose another name.", []]);
+      expect(duskNameOwners).toHaveBeenLastCalledWith("sofiadesign.dusk", { nodeUrl: "https://testnet.nodes.dusk.network" });
+      await name(2, "Dav1d");
+      expect(shownError(2)).toBe("That looks like your contact David. Choose another name.");
+      await name(2, "Wendv");
+      expect(shownError(2)).toBe("That looks like your contact Wendy. Choose another name.");
+      expect(setAccountName).not.toHaveBeenCalled();
+      // This profile's own: saved, nothing asked.
+      await name(2, "mine.dusk");
+      expect([shownError(2), question(2), setAccountName.mock.calls]).toEqual(["", [], [[ACCOUNTS[0], 1, "mine.dusk"]]]);
+    } finally {
+      duskNameOwners.mockImplementation(async () => new Map());
+      listAddressBook.mockResolvedValue([]);
+    }
+  });
+
+  // Amélie's: Enter, Enter saved a stranger's account as Lucas in the web wallet, its second Enter on Yes, save it.
+  it("never answer the question with Enter: the field keeps the focus, Enter asks again, and only Yes, save it saves", async () => {
+    listAddressBook.mockResolvedValue([{ id: "l", name: "Lucas (petit-fils)", address: ACCOUNTS[1].replace(/.$/, "x") }]);
+    setAccountName.mockClear();
+    await settings();
+    const question = () => label(2).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.querySelector(".contact-note__words").textContent);
+    const enter = async () => {
+      label(2).focus();
+      label(2).dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+      label(2).dispatchEvent(fakeEvent("change"));
+      await settle();
+    };
+    try {
+      typeInto(label(2), "Lucas");
+      await enter();
+      expect(question()).toEqual(["You have a contact called Lucas (petit-fils). Is this someone else?"]);
+      expect(dom.document.activeElement).toBe(label(2));
+      await enter();
+      expect([question().length, setAccountName.mock.calls]).toEqual([1, []]);
+      label(2).parentNode.querySelectorAll(".contact-note button").find((b) => b.textContent === "Yes, save it").click();
+      await settle();
+      expect(setAccountName.mock.calls).toEqual([[ACCOUNTS[0], 1, "Lucas"]]);
+    } finally {
+      listAddressBook.mockResolvedValue([]);
+    }
   });
 
   // Amélie's: her profile named Lucas beside her grandson's contact "Lucas (petit-fils)".
@@ -950,10 +1025,15 @@ describe("wallets", () => {
 
 // The app on a phone: Auto-lock's Immediately, and fingerprint unlock, as phone wallets have them.
 describe("security in the app on a phone", () => {
-  const onPhone = ({ available = true, on = false, enroll = false } = {}) => {
+  const onPhone = ({ available = true, on = false, enroll = false, notices = () => false } = {}) => {
     const asked = [];
     dom.window.__TAURI_INTERNALS__ = {
       invoke: vi.fn(async (cmd, args) => {
+        // The phone's notices: whether they may show, and Android's question.
+        if (cmd === "notices") {
+          if (args.action === "ask") asked.push(["notices: ask"]);
+          return { allowed: notices(args.action) };
+        }
         if (cmd !== "fingerprint") return null;
         asked.push([args.action, args.args?.secret]);
         return args.action === "status" ? { ok: true, available, on, enroll } : { ok: true };
@@ -993,6 +1073,31 @@ describe("security in the app on a phone", () => {
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["disable", undefined]));
   });
 
+  // Chen's, 3 of 3: the box for the password closed, and the switch went off, at the first letter typed: Settings
+  // is drawn again once the typing stops, and drew the row anew.
+  it("keeps the password being typed to turn it on, and the switch, through Settings' redraws", async () => {
+    const { asked } = onPhone();
+    const view = await settings({}, { app: true });
+    await vi.waitFor(() => expect(isShown(finger())).toBe(true));
+    finger().checked = true;
+    finger().dispatchEvent(fakeEvent("change"));
+    typeInto(dom.document.body.querySelector("#fingerprint-password"), "r");
+    view.draw();
+    await settle();
+    const pwd = dom.document.body.querySelector("#fingerprint-password");
+    expect([finger().checked, pwd && isShown(pwd), pwd?.value]).toEqual([true, true, "r"]);
+    typeInto(pwd, "right one");
+    view.draw();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Turn on").click();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "right one"]));
+
+    // Left and opened again: drawn anew, no password kept.
+    dom.document.body.replaceChildren();
+    view.draw();
+    await settle();
+    expect(dom.document.body.querySelector("#fingerprint-password")).toBeNull();
+  });
+
   // Astra's: Turn on pressed, the switch off and on while the password was checked, and Turn on again:
   // two turnings on, each making the Keystore key anew, could leave neither working.
   it("starts one turning on at a time, whatever's switched or pressed while one is under way", async () => {
@@ -1020,6 +1125,45 @@ describe("security in the app on a phone", () => {
     await vi.waitFor(() => expect(asked.filter(([action]) => action === "enable")).toHaveLength(1));
     await settle();
     expect(asked.filter(([action]) => action === "enable" || action === "disable")).toEqual([["enable", "right one"]]);
+  });
+
+  // Sofía's: no notice when a client paid her with the app in the background, and Settings had nothing for notices.
+  it("has Tell me when money comes in, on while notices are allowed, saying it can take 15 minutes, and turns it off and on", async () => {
+    let allowed = true;
+    const { asked } = onPhone({ notices: () => allowed });
+    const view = await settings({}, { app: true });
+    const toggle = () => dom.document.body.querySelector("#incoming-notices");
+    await vi.waitFor(() => expect(toggle().checked).toBe(true));
+    const section = view.section("Notices");
+    expect(visibleText(section)).toBe("[Notices]Tell me when money comes inIt can take up to about 15 minutes.");
+    expect(dom.document.getElementById(toggle().getAttribute("aria-describedby")).textContent).toBe("It can take up to about 15 minutes.");
+
+    toggle().checked = false;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_INCOMING_NOTICES", on: false }));
+    expect(view.ov.incomingNotices).toBe(false);
+
+    // On again with notices not allowed: Android's question, and a no leaves it off, saying what to do.
+    allowed = false;
+    view.actions.send.mockClear();
+    toggle().checked = true;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(asked).toContainEqual(["notices: ask"]));
+    await settle();
+    expect([toggle().checked, view.actions.send.mock.calls]).toEqual([false, []]);
+    expect(dom.document.getElementById("incoming-note").textContent).toBe("Allow notices for Dusk Wallet in your phone's settings first.");
+    // A yes: on.
+    allowed = true;
+    toggle().checked = true;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_INCOMING_NOTICES", on: true }));
+    expect(toggle().checked).toBe(true);
+  });
+
+  it("has no notices for money coming in in the extension", async () => {
+    const view = await settings();
+    expect(view.section("Notices")).toBeUndefined();
+    expect(dom.document.body.querySelector("#incoming-notices")).toBeNull();
   });
 
   // Chen's, Sofía's and Lena's: nothing said fingerprint unlock was there until a fingerprint was added.
@@ -1062,6 +1206,68 @@ describe("security in the app on a phone", () => {
     await settle();
     expect(body.querySelectorAll(".srp-word-text").map((w) => w.textContent)).toEqual(MNEMONIC.split(" "));
     expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RECOVERY_PHRASE", password: "the password" });
+    press("Done");
+    expect(view.state.route).toBe("options");
+  });
+
+  // Amélie's, the seventh time: a way to check the paper, typing the words and hearing they match.
+  it("checks three of the recovery words behind the password, in the extension too, and shows the words where they don't match", async () => {
+    const view = await settings();
+    const security = view.section("Security");
+    security.querySelectorAll("button").find((b) => b.textContent.includes("Check your recovery words")).click();
+    await settle();
+    expect(view.state.route).toBe("check_words");
+
+    const MNEMONIC = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const asked = [];
+    view.actions.send.mockImplementation(async (m) => {
+      if (m.type !== "DUSK_UI_CHECK_RECOVERY_WORDS") return {};
+      asked.push(m.words ? m.words.map(([place]) => place) : "count");
+      if (m.password !== "the password") return { error: { message: "Incorrect password" } };
+      if (!m.words) return { ok: true, count: 12 };
+      const words = MNEMONIC.split(" ");
+      return m.words.every(([place, word]) => words[place - 1] === word) ? { ok: true, match: true } : { ok: true, match: false, phrase: MNEMONIC };
+    });
+    const { checkWordsView } = await import("./popup/views/wallets.js");
+    const draw = () => dom.document.body.replaceChildren(...checkWordsView(view.ov, { state: view.state, actions: view.actions }));
+    draw();
+    const body = dom.document.body;
+    const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with");
+    const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
+    const boxes = () => body.querySelectorAll("input").filter((i) => /^Word \d+$/.test(accessibleName(i)));
+    typeInto(password(), "not it");
+    press("Next");
+    await settle();
+    expect(visibleText(body)).toContain("Incorrect password");
+    expect(boxes()).toEqual([]);
+    typeInto(password(), "the password");
+    press("Next");
+    await settle();
+    // Three of its twelve words, by their places, as Import's boxes are.
+    expect(boxes()).toHaveLength(3);
+    const places = boxes().map((i) => Number(accessibleName(i).slice(5)));
+    expect(places.every((p) => p >= 1 && p <= 12)).toBe(true);
+    for (const input of boxes()) expect([input.getAttribute("autocomplete"), input.getAttribute("spellcheck")]).toEqual(["off", "false"]);
+    press("Check");
+    await settle();
+    expect(visibleText(body)).toContain("Enter the three words.");
+    for (const input of boxes()) typeInto(input, MNEMONIC.split(" ")[Number(accessibleName(input).slice(5)) - 1]);
+    press("Check");
+    await settle();
+    expect(visibleText(body)).toContain("Your recovery words match.");
+    expect(body.querySelector(".srp-grid")).toBeNull();
+    expect(asked).toEqual(["count", "count", places]);
+
+    // Again, a word wrong: said, and the words shown.
+    draw();
+    typeInto(password(), "the password");
+    press("Next");
+    await settle();
+    for (const input of boxes()) typeInto(input, "zoo");
+    press("Check");
+    await settle();
+    expect(visibleText(body)).toContain("Those words don't match. These are this wallet's words, in order:");
+    expect(body.querySelectorAll(".srp-word-text").map((w) => w.textContent)).toEqual(MNEMONIC.split(" "));
     press("Done");
     expect(view.state.route).toBe("options");
   });

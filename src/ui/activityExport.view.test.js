@@ -45,6 +45,7 @@ const NOW = new Date("2026-10-23T09:00:00Z");
 // When a file saved now was made, in its name (UTC here).
 const MADE = "2026-10-23-0900";
 const NODE = "https://testnet.nodes.dusk.network";
+
 const ACCOUNT = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
 const SAVINGS = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
 const ADDRESS = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
@@ -105,6 +106,9 @@ function page(pathname) {
     if (e.target?.localName === "a" && e.target.getAttribute("download")) saved.at(-1).name = e.target.getAttribute("download");
   });
 }
+
+// Mainnet, where DUSK has a price, for the values a file can add.
+const ON_MAINNET = { ov: { nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" }, shielded: { walletId: ACCOUNT, nodeUrl: "https://nodes.dusk.network", entries: [], profileIndex: 0 } };
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
@@ -216,13 +220,9 @@ describe("Activity's Export", () => {
       "Q1 2025",
       "Choose dates",
     ]);
-    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual([
-      "Period",
-      "Add my contact names",
-      // A British browser's: in pounds.
-      "Add each payment's value in British pounds, from CoinGecko's prices",
-      "For Excel: keep accents as it opens",
-    ]);
+    // On Testnet: no value to add, and that's said where it would be.
+    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual(["Period", "Add my contact names", "For Excel: keep accents as it opens"]);
+    expect(visibleText(panel())).toContain("Test DUSK has no value, so the file gives none.");
     expect(visibleText(panel())).toContain("One profile's file for tax tools such as Koinly: exact amounts, times in UTC, transfers between your profiles marked.");
     // Before the list and its filters.
     expect(body().querySelector(".activity-page").children[0]).toBe(panel());
@@ -536,8 +536,10 @@ describe("Activity's Export", () => {
         return { ok: true, status: 200, json: async () => ({ prices }) };
       })
     );
-    const { actions } = setup();
+    const { actions } = setup(ON_MAINNET);
     button("Export").click();
+    // A British browser's would say pounds: this one's, in euros.
+    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toContain("Add each payment's value in euros, from CoinGecko's prices");
     button("Save CSV").click();
     await settle();
     expect(asked).toEqual([]);
@@ -564,7 +566,7 @@ describe("Activity's Export", () => {
     page("/full.html");
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) })));
-    const { actions } = setup({ entries: WHOLE.slice(0, 1) });
+    const { actions } = setup({ ...ON_MAINNET, entries: WHOLE.slice(0, 1) });
     button("Export").click();
     choose("activity-export-value");
     button("Save CSV").click();
@@ -589,7 +591,7 @@ describe("Activity's Export", () => {
         return { ok: false, status: 429, json: async () => ({}) };
       })
     );
-    const { actions } = setup({ entries: WHOLE.slice(0, 1) });
+    const { actions } = setup({ ...ON_MAINNET, entries: WHOLE.slice(0, 1) });
     button("Export").click();
     expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain(`Add each payment's value in ${name}, from CoinGecko's prices`);
     choose("activity-export-value");
@@ -598,6 +600,24 @@ describe("Activity's Export", () => {
     expect(asked.length).toBeGreaterThan(0);
     for (const url of asked) expect(url).toContain(`vs_currency=${vs}&from=`);
     expect(actions.showToast.mock.calls.at(-1)[0]).toContain(`no ${one} value`);
+  });
+
+  // Amélie's: a testnet export, euros ticked, gave test DUSK a euro value in a file for her tax return.
+  it("gives test DUSK no value: none to add on Testnet, said so, and none in the file, ticked on Mainnet before or not", async () => {
+    page("/full.html");
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "fr-FR" });
+    const asked = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => (init?.body ? rpc(url, init) : (asked.push(String(url)), { ok: true, status: 200, json: async () => ({ prices: [[SUMMER, 0.25]] }) }))));
+    const { state } = setup();
+    button("Export").click();
+    // Ticked before, as on Mainnet: Testnet's file has none all the same.
+    state.activityExport.fiat = true;
+    expect(body().querySelector("#activity-export-value")).toBeNull();
+    expect(visibleText(panel())).toContain("Test DUSK has no value, so the file gives none.");
+    button("Save CSV").click();
+    await settle();
+    expect(asked).toEqual([]);
+    expect((await linesOf()).every((l) => l["Net Worth Amount"] === "" && l["Net Worth Currency"] === "")).toBe(true);
   });
 
   it("starts the file with a BOM only for Excel", async () => {

@@ -10,6 +10,7 @@
 // checks it against the sha256 of its pinned release. Nothing else is fetched.
 
 import { nameToShow, toDuskName } from "@duskdomains/sdk/names";
+import { nameDuskNames } from "@dusk-network/app-core/names";
 import { PINNED_RELEASES } from "@duskdomains/sdk/releases";
 import { createMulticallFetch } from "@hdauven/dusk-multicall";
 
@@ -279,6 +280,26 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
     failed(PINNED_RELEASES[network], error, reader);
     return fail("lookup_failed");
   }
+}
+
+/**
+ * Whose each .dusk name in a name is, for a profile's name to be checked
+ * against (app-core's profileNameCheck `owners`): by the name as the name
+ * service writes it (`nameDuskNames`), its account and address where it's
+ * registered, null where it isn't or has expired; one whose lookup failed is
+ * left out, and is asked about. Never throws.
+ * @param {string} name - the name typed
+ * @param {{ nodeUrl?: string }} [opts]
+ * @returns {Promise<Map<string, { account?: string, address?: string } | null>>}
+ */
+export async function duskNameOwners(name, { nodeUrl } = {}) {
+  const owners = new Map();
+  for (const dusk of nameDuskNames(name)) {
+    const found = await resolveDuskName(dusk, { nodeUrl }).catch(() => null);
+    if (found?.ok && (found.account || found.address)) owners.set(dusk, { account: found.account, address: found.address });
+    else if (found?.reason === "not_registered" || found?.reason === "expired") owners.set(dusk, null);
+  }
+  return owners;
 }
 
 /**

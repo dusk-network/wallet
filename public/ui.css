@@ -2071,6 +2071,11 @@ button.balance-refresh:hover {
   pointer-events: none;
 }
 
+/* Nothing picked yet: no tab shows as chosen. */
+.tabs.tabs--none::before {
+  visibility: hidden;
+}
+
 .tabs.tabs--mini .tab {
   height: 30px;
   font-size: 12.5px;
@@ -2368,6 +2373,21 @@ p.field-hint {
   color: var(--text-muted);
   font-size: 13px;
   line-height: 1.4;
+}
+
+/* An amount that could be read two ways: the question, then a button for each reading. */
+.amount-question__text {
+  display: block;
+}
+.amount-question__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.amount-question__choice {
+  min-height: 44px;
+  padding: 0 16px;
 }
 
 .field-error {
@@ -4586,6 +4606,38 @@ button.tx-open:focus-visible::after {
   overflow: hidden;
   overflow-wrap: anywhere;
   color: var(--text);
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
+/* A stranger's memo: their words, muted and in quotes, never bold, under who
+   it's from. */
+.tx-memo.tx-memo--theirs {
+  display: flex;
+  flex-direction: column;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.tx-memo--theirs .tx-memo__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.tx-memo__from,
+.memo-theirs__from {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+.memo-theirs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.memo-theirs__text {
+  color: var(--text-muted);
+  font-weight: 400;
   direction: ltr;
   unicode-bidi: isolate;
 }

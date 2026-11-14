@@ -4,7 +4,6 @@ import {
   formatDuskExact,
   formatFee,
   amountForInput,
-  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
@@ -55,9 +54,10 @@ import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
 import { whenAtText } from "./txRow.js";
 import { sendFromReview } from "./sent.js";
-import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
+import { MAX_MEMO_BYTES, chainLabel, linkAmount, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
-import { sameWaiting, waitingLux } from "../../lib/waiting.js";
+import { reviewContextOf, sameWaiting, waitingLux } from "../../lib/waiting.js";
+import { homeView } from "./home.js";
 import { inCurrencyLine } from "../../lib/inCurrency.js";
 import { networkTextOf } from "../../../shared/nodeNetwork.js";
 
@@ -294,7 +294,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(amountProblem(raw));
+      field.setProblem(raw);
       return null;
     }
     if (lux <= 0n) {
@@ -399,12 +399,13 @@ export function sendFormView(ov, { state, actions } = {}) {
     to.value = req.to;
 
     if (isDuskReq) {
-      // A full dusk: request link should define the form values.
-      field.setValue(amountForInput(req.amountDusk || ""));
+      // A full dusk: request link should define the form values, its amount
+      // as typing reads it (app-core's linkAmount): 2.125 asks, as typed does.
+      field.setValue(linkAmount(req).field);
       memo.value = req.memo || "";
     } else {
       // A raw recipient QR should not clobber what the user already typed.
-      if (req.amountDusk) field.setValue(amountForInput(req.amountDusk));
+      if (req.amountDusk) field.setValue(linkAmount(req).field);
       if (req.memo) memo.value = req.memo;
     }
 
@@ -1138,6 +1139,17 @@ export function sendFormView(ov, { state, actions } = {}) {
           filledFrom: state.draft?.filledFrom,
           filledIn: state.draft?.filledIn,
           reviewedFor: reviewedFor(ov),
+          // Sent again from Home's Send it now, back from its Review: still in
+          // the place of the one Home said wasn't sent, while it's that payment
+          // from where it was made.
+          ...(draft.replaces &&
+          draft.reviewedFor === reviewedFor(ov) &&
+          draft.to === recipient &&
+          draft.amountLux === amtLux &&
+          String(draft.memo ?? "") === memoVal &&
+          (draft.privacy ?? privacy) === privacy
+            ? { replaces: draft.replaces }
+            : {}),
         };
         state.route = "confirm";
         await actions?.render?.();
@@ -1229,7 +1241,7 @@ export function chainMismatchText(reqChain, nodeUrl) {
 // What leaving a Review for a switch of wallet, profile or network says.
 const notSentNotice = (actions) => actions?.showToast?.("The wallet, profile or network changed. Check the send again.", 3000);
 
-const reviewedFor = (ov) => `${ov?.accounts?.[0] ?? ""} ${Number(ov?.selectedAccountIndex ?? 0) || 0} ${ov?.nodeUrl ?? ""}`;
+const reviewedFor = reviewContextOf;
 
 /**
  * What a public send shows everyone, for Review: "Visible to everyone:
@@ -1253,6 +1265,14 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // A .dusk name resolved through another node is looked up again first, and
   // a switch of wallet, profile or network means who pays changed: back to
   // the form, rather than a Review that quietly says something else.
+  // A payment Home said wasn't sent, sent again: only from where it was made,
+  // else back to Home, where it's still listed.
+  if (d?.replaces && d.reviewedFor !== reviewedFor(ov)) {
+    state.draft = null;
+    state.route = "home";
+    notSentNotice(actions);
+    return homeView(ov, { state, actions });
+  }
   if (!d || (duskName && duskName.nodeUrl !== String(ov?.nodeUrl ?? "")) || (d.reviewedFor && d.reviewedFor !== reviewedFor(ov))) {
     state.route = "send";
     const form = sendFormView(ov, { state, actions });
@@ -1461,6 +1481,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         },
         // Activity names the recipient as typed.
         toName: duskName?.name || undefined,
+        // Sent again from Home's Send it now: in the place of the one it said wasn't sent.
+        ...(d.replaces ? { replaces: String(d.replaces) } : {}),
       },
       summary: {
         title: "Send",

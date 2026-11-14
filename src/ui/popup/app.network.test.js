@@ -426,6 +426,28 @@ describe("money coming in while the wallet shows", () => {
     }
   });
 
+  // Lena's, in the Android app, twice: opened with no signal, her payments showed as a bare address, and the names
+  // came back neither with the signal nor with Refresh, only once the app was started again.
+  it("names who each payment is with once the network's back, where it couldn't while offline, without a Refresh", async () => {
+    const view = await home(60 * 60_000);
+    const { lookupRecipientNames } = await import("../../shared/duskNames.js");
+    try {
+      lookupRecipientNames.mockImplementation(async () => new Map());
+      await view.render();
+      await vi.waitFor(() => expect(view.rows()).toHaveLength(4), { timeout: 3_000 });
+      await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalled(), { timeout: 3_000 });
+      await settle();
+      expect(view.rows().some((row) => row.includes("sofiadesign.dusk"))).toBe(false);
+
+      lookupRecipientNames.mockImplementation(async (accounts) => new Map(accounts.map((a) => [a, "sofiadesign.dusk"])));
+      globalThis.window.dispatchEvent(new Event("online"));
+      await vi.waitFor(() => expect(view.rows().some((row) => row.includes("sofiadesign.dusk"))).toBe(true), { timeout: 3_000 });
+    } finally {
+      lookupRecipientNames.mockImplementation(async () => new Map());
+      view.state.route = "options";
+    }
+  });
+
   it("has Refresh read the history along with the balance", async () => {
     // Sofía's: Refresh made the balance right; the payment came into Activity only minutes later, after another send.
     const view = await home(60 * 60_000);

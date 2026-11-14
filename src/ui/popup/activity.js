@@ -140,7 +140,9 @@ const counterparties = (a, entries = a.entries) => [
 ];
 
 // The shown counterparties' names, checked again: one Multicall query for up
-// to 32. Of the page's, or those of `entries`.
+// to 32. Of the page's, or those of `entries`. One whose lookup failed, as
+// with no signal, keeps the name it had and is looked up again with the next
+// read, as once the network's back or on Refresh.
 async function checkNames(a, entries = a.entries) {
   const scope = duskNamesScope(a.nodeUrl);
   const due = counterparties(a, entries).filter((c) => !a.checked.has(c));
@@ -149,7 +151,7 @@ async function checkNames(a, entries = a.entries) {
   const names = await lookupRecipientNames(due, { nodeUrl: a.nodeUrl });
   for (const c of due) {
     if (names.has(c)) a.names.set(c, names.get(c));
-    else a.names.delete(c);
+    else a.checked.delete(c);
   }
   const epoch = await a.epoch;
   if (epoch !== undefined) await putCounterpartyNames(scope, names, { epoch }).catch(() => {});

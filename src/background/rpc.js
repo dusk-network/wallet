@@ -60,6 +60,29 @@ import {
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
+// What dusk_getPublicBalance takes: nothing, the account alone (or as the
+// one item of a list), or an object with `account` and `profileId`, each a
+// string. Anything else, a key it doesn't take whatever it holds, is refused
+// rather than read past.
+const BALANCE_KEYS = new Set(["account", "profileId"]);
+function balanceAsked(params) {
+  const refuse = () => {
+    throw rpcError(ERROR_CODES.INVALID_PARAMS, "dusk_getPublicBalance takes only the connected profile's account or profileId");
+  };
+  if (params === undefined || params === null) return {};
+  let asked = params;
+  if (Array.isArray(params)) {
+    if (params.length > 1) refuse();
+    if (!params.length) return {};
+    asked = params[0];
+  }
+  if (typeof asked === "string") return { account: asked };
+  if (!asked || typeof asked !== "object" || Array.isArray(asked)) refuse();
+  if (Object.keys(asked).some((key) => !BALANCE_KEYS.has(key))) refuse();
+  if ([asked.account, asked.profileId].some((value) => value !== undefined && typeof value !== "string")) refuse();
+  return { account: asked.account, profileId: asked.profileId };
+}
+
 export async function handleRpc(origin, request, { pressed, approvalKey = "", resume = false, tabId } = {}) {
   // Each approval this request asks for, by the site's request (`approvalKey`):
   // asked again after the background stopped (`resume`), it takes up the one
@@ -706,10 +729,9 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
       const approvalContext = await captureApprovalContext(perm);
       if (!approvalContext.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
       // The connected profile's balance alone: a site that names another
-      // account or profile is refused, never answered with this one's.
-      const asked = Array.isArray(params) ? params[0] : params;
-      const askedAccount = typeof asked === "string" ? asked : asked && typeof asked === "object" ? asked.account : undefined;
-      const askedProfile = asked && typeof asked === "object" ? asked.profileId : undefined;
+      // account or profile is refused, never answered with this one's, and
+      // so is one asking with anything the method doesn't take.
+      const { account: askedAccount, profileId: askedProfile } = balanceAsked(params);
       if (
         (askedAccount !== undefined && String(askedAccount) !== approvalContext.account) ||
         (askedProfile !== undefined && String(askedProfile) !== approvalContext.permissionProfileId)

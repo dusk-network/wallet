@@ -2,7 +2,6 @@ import {
   formatDusk,
   formatDuskExact,
   formatFee,
-  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
@@ -90,7 +89,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(amountProblem(raw));
+      field.setProblem(raw);
       return null;
     }
     if (lux <= 0n) {

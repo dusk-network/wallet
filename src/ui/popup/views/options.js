@@ -11,7 +11,7 @@ import { setAccountName } from "../../../shared/accountNames.js";
 import { siteLastSeen } from "../../../shared/siteRecords.js";
 import { normalizeWalletName, walletLabel } from "../../../shared/wallets.js";
 import { clearAddressBook, listAddressBook } from "../../../shared/addressBook.js";
-import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
+import { duskNameOwners, duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
 import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
@@ -27,6 +27,8 @@ import { setNetworkSwitching } from "../../components/NetworkMenu.js";
 import { fieldLabel, integerInput, passwordInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
 import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
+import { appNoticesAllowed, askAppNotices } from "../../../platform/notices.js";
+import { watchIncomingAgain } from "../incoming.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
 import { resetKeptText } from "./wallets.js";
@@ -37,6 +39,12 @@ import { resetKeptText } from "./wallets.js";
 
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
+
+// The fingerprint row Settings shows, kept through Settings' own redraws while
+// it shows, as one comes once typing stops: the password being typed to turn
+// it on, and the switch with it, would go with a row drawn anew. Gone once
+// Settings is left: a row not on the screen any more is drawn anew.
+let shownFingerRow = null;
 
 // Settings' Unlock with fingerprint: the switch, and while it's being turned
 // on, the password, checked against the vault, then the fingerprint.
@@ -109,6 +117,51 @@ function fingerprintRow({ actions }) {
     actions?.showToast?.("Fingerprint unlock is off.");
   });
   return row;
+}
+
+/** What Settings says of the notices for money coming in. */
+export const INCOMING_NOTE = "It can take up to about 15 minutes.";
+
+// The app on Android: a notice for money that came in, told by Android about
+// every 15 minutes while the app is away (android/ArrivalJob.kt). On while the
+// phone allows notices, unless it's turned off here; turned on, the phone's
+// question where it has one.
+function incomingRow(ov, { actions }) {
+  const toggle = h("input", { id: "incoming-notices", type: "checkbox", "aria-describedby": "incoming-note" });
+  const note = h("p", { class: "settings-note", id: "incoming-note", text: INCOMING_NOTE });
+  const wanted = ov?.incomingNotices !== false;
+  appNoticesAllowed()
+    .then((allowed) => {
+      toggle.checked = wanted && allowed;
+    })
+    .catch(() => {});
+  toggle.addEventListener("change", async () => {
+    const on = toggle.checked;
+    toggle.disabled = true;
+    try {
+      if (on && (await askAppNotices()) !== "on") {
+        toggle.checked = false;
+        note.textContent = "Allow notices for Dusk Wallet in your phone's settings first.";
+        return;
+      }
+      const res = await actions?.send?.({ type: "DUSK_UI_SET_INCOMING_NOTICES", on });
+      if (res?.error) throw new Error(res.error.message ?? "Couldn't save that");
+      note.textContent = INCOMING_NOTE;
+      if (ov) ov.incomingNotices = on;
+      // Android's job told at once, as the page draws again.
+      watchIncomingAgain();
+      actions?.render?.({ cached: true })?.catch?.(() => {});
+    } catch (e) {
+      toggle.checked = !on;
+      actions?.showToast?.(e?.message ?? String(e), 2500);
+    } finally {
+      toggle.disabled = false;
+    }
+  });
+  return h("div", { class: "settings-incoming" }, [
+    h("label", { class: "settings-switch", for: "incoming-notices" }, [toggle, h("span", { text: "Tell me when money comes in" })]),
+    note,
+  ]);
 }
 
 export function optionsView(ov, { state, actions } = {}) {
@@ -265,10 +318,12 @@ export function optionsView(ov, { state, actions } = {}) {
               // The one check both wallets make at Save (app-core): refused, said under the
               // field; asked, said under it with Yes, save it, and saved only then. Each
               // profile by its label and its verified .dusk name; each contact by its name and
-              // the .dusk name it was saved from.
+              // the .dusk name it was saved from; each .dusk name in it by whose it is, looked
+              // up first: another account's is refused, not asked.
               if (label) {
                 const profiles = displayAccounts.map((account, j) => ({ account: String(account ?? ""), address: String(ov?.addresses?.[j] ?? ""), name: profileLabelOf(ov, j), duskName: verified.get(j) || undefined }));
-                const said = profileNameCheck(label, { profiles, contacts: await contactsNow(), self: String(acct ?? "") });
+                const owners = await duskNameOwners(label, { nodeUrl: ov?.nodeUrl });
+                const said = profileNameCheck(label, { profiles, contacts: await contactsNow(), self: String(acct ?? ""), owners });
                 // Typed again meanwhile: what's said is of the name as it is now.
                 if (input.value !== value) return;
                 if (said?.refused) {
@@ -453,6 +508,26 @@ export function optionsView(ov, { state, actions } = {}) {
         })
       : null;
 
+  // Check your recovery words: three of them, behind the password, in the extension and the app.
+  const checkWordsRow = ov?.isUnlocked
+    ? h(
+        "button",
+        {
+          class: "list-row settings-row",
+          type: "button",
+          onclick: async () => {
+            state.route = "check_words";
+            await actions?.render?.();
+          },
+        },
+        [
+          h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg("check") }),
+          h("span", { class: "row-main" }, [h("span", { class: "row-title", text: "Check your recovery words" })]),
+          h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
+        ]
+      )
+    : null;
+
   // The open wallet's recovery phrase again, behind the password, in the app.
   const phraseRow =
     ov?.isUnlocked && platform.isTauri
@@ -544,8 +619,10 @@ export function optionsView(ov, { state, actions } = {}) {
   // fingerprint; off at once. Shown once the phone says it can, and on one
   // that could with a fingerprint, off, with what to do first; the password's
   // field is there only while it's being turned on.
-  const fingerRow = inApp && ov?.isUnlocked ? fingerprintRow({ actions }) : null;
-  if (fingerRow) {
+  const shown = inApp && ov?.isUnlocked && shownFingerRow?.isConnected ? shownFingerRow : null;
+  const fingerRow = shown ?? (inApp && ov?.isUnlocked ? fingerprintRow({ actions }) : null);
+  shownFingerRow = fingerRow;
+  if (fingerRow && !shown) {
     fingerprintStatus().then(({ available, enroll, on }) => {
       if (!available && !on && !enroll) return;
       const fingerSwitch = fingerRow.querySelector("#fingerprint-unlock");
@@ -1073,8 +1150,9 @@ export function optionsView(ov, { state, actions } = {}) {
       fingerRow,
       changePasswordBtn,
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
-      sendPasswordRow || phraseRow ? h("div", { class: "group" }, [phraseRow, sendPasswordRow].filter(Boolean)) : null,
+      sendPasswordRow || phraseRow || checkWordsRow ? h("div", { class: "group" }, [phraseRow, checkWordsRow, sendPasswordRow].filter(Boolean)) : null,
     ]),
+    inApp && ov?.isUnlocked ? section("Notices", [incomingRow(ov, { actions })]) : null,
     sitesSection ? section("Connected sites", sitesSection) : null,
     section("Contacts", [h("div", { class: "group" }, [contactsRow])]),
     section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), switchError, nodeDetails]),

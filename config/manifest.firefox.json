@@ -38,7 +38,8 @@
     "notifications",
     "storage",
     "tabs",
-    "tabHide"
+    "tabHide",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "http://*/*",

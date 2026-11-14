@@ -50,6 +50,9 @@ const offline = () => globalThis.navigator?.onLine === false;
 const waitingText = () =>
   `${offline() ? "You're offline." : "The network isn't answering."} Nothing has left your wallet yet. It goes out once the network answers.`;
 
+/** What's said of a payment from Send handed to the network without a clear answer: it's looked up, and sent once if it didn't go. */
+export const UNCLEAR_TEXT = "It may have gone out already. If it didn't, it goes out once the network answers.";
+
 // "13:21 CET": when it was sent, with the time zone it shows in.
 function clock(ts) {
   return zonedClockText(Number(ts) || Date.now());
@@ -136,8 +139,15 @@ export function sentSteps(sent, ov) {
     ];
   }
   if (phase === "sending") {
-    // A payment from Send waits for the network; any other send is tried once.
-    const sub = sent?.waits || (offline() && sent?.sendId) ? waitingText() : offline() ? "You're offline, so it can't reach the network." : "Signing it and handing it to the network";
+    // A payment from Send waits for the network; any other send is tried
+    // once. One handed over may have gone out, whatever the network does now.
+    const sub = sent?.handedOver && (sent?.waits || offline())
+      ? `${offline() ? "You're offline. " : ""}${UNCLEAR_TEXT}`
+      : sent?.waits || (offline() && sent?.sendId)
+        ? waitingText()
+        : offline()
+          ? "You're offline, so it can't reach the network."
+          : "Signing it and handing it to the network";
     return [
       { label: "Sending", state: "current", sub },
       { label: "Sent to the network", state: "upcoming", sub: "" },
@@ -334,9 +344,11 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     nodeUrl: String(review?.nodeUrl ?? ""),
     backRoute,
     doneRoute,
-    // A payment that waits for the network, by which it's called off; and whether it waits now.
+    // A payment that waits for the network, by which it's called off; whether
+    // it waits now; and whether it was handed over, from when it may have gone.
     sendId: canWait ? newSendId() : "",
     waits: false,
+    handedOver: false,
   };
   state.sent = sent;
   state.route = "sent";
@@ -373,8 +385,9 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     sent.phase = went === false ? "not_sent" : "unconfirmed";
     if (went === "unknown" && res?.error?.data?.hash) sent.hash = String(res.error.data.hash);
     // Said here, a payment that waited and then failed isn't said again on
-    // Home; one the wallet stopped as it locked or switched is, once it's open.
-    if (sent.sendId && went === false && !res?.error?.data?.cancelled) {
+    // Home; one the wallet stopped as it locked or switched is, once it's open,
+    // and one sent again from Home's Send it now stays said there.
+    if (sent.sendId && went === false && !res?.error?.data?.cancelled && !message?.replaces) {
       Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: sent.sendId })).catch(() => {});
     }
   } else {
@@ -641,9 +654,9 @@ export function sentView(ov, { state, actions, sozu } = {}) {
     : null;
   // The phone's Back: back to review when nothing went, else Done.
   (notSent ? back : done).setAttribute("data-back", "");
-  // A payment waiting for the network: called off from here, until it goes.
+  // A payment waiting for the network: called off from here, until it's handed over.
   const cancel =
-    phase === "sending" && sent.sendId && (sent.waits || offline())
+    phase === "sending" && sent.sendId && (sent.waits || offline()) && !sent.handedOver
       ? h("button", {
           class: "btn-outline sent-secondary sent-cancel",
           type: "button",

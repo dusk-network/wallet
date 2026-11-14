@@ -11,12 +11,12 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { keptSendDraft } from "../../lib/sendDraft.js";
 import { shortAddress } from "../../lib/strings.js";
 import { contactNameText } from "../../lib/contactNames.js";
-import { unsentOf, waitingOf } from "../../lib/waiting.js";
+import { reviewContextOf, unsentOf, waitingOf } from "../../lib/waiting.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
 import { whenAtText } from "./txRow.js";
-import { reasonText } from "./sent.js";
+import { UNCLEAR_TEXT, reasonText } from "./sent.js";
 
 // In the wallet's words: what a node says of it is that node's to choose.
 const BALANCE_UNREAD = "Couldn't read your balance from this node. Try again in a moment.";
@@ -317,8 +317,9 @@ function staleNote(ov, hasBalance) {
  * The payments from Send that wait for the network, each with what it pays,
  * to whom, its memo and when it was made, to tell them apart, and Cancel; and
  * those that stopped waiting without going out, said plainly, with Send it
- * now, which takes it to Review again, and Drop. None goes out by itself once
- * it's said not sent.
+ * now, which takes it straight to Review, and Don't send. None goes out by
+ * itself once it's said not sent, and each is said until it's sent again and
+ * handed over, or Don't send drops it.
  * @returns {HTMLElement | null}
  */
 function waitingSection(ov, { state, actions } = {}) {
@@ -358,12 +359,22 @@ function waitingSection(ov, { state, actions } = {}) {
       },
     });
 
+  // One handed over without a clear answer may have gone out: it's looked up,
+  // and has no Cancel.
+  const waitingNote = (send) =>
+    send.unclear && send.checks
+      ? "It may have gone out already. The wallet checks once the network answers."
+      : send.unclear && send.waits
+        ? UNCLEAR_TEXT
+        : send.waits
+          ? "It goes out once the network answers."
+          : "It's being sent.";
   const waitingBox = (send) =>
     h("div", { class: "callout home-waiting", role: "status" }, [
-      h("div", { class: "callout-title" }, ["Not sent yet: ", ...what(send)]),
+      h("div", { class: "callout-title" }, [send.unclear ? "Not confirmed: " : "Not sent yet: ", ...what(send)]),
       madeLine(send),
-      h("p", { class: "muted home-waiting__note", text: send.waits ? "It goes out once the network answers." : "It's being sent." }),
-      h("div", { class: "home-waiting__actions" }, [
+      h("p", { class: "muted home-waiting__note", text: waitingNote(send) }),
+      send.unclear ? null : h("div", { class: "home-waiting__actions" }, [
         button("Cancel", async () => {
           const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null);
           actions?.showToast?.(
@@ -376,7 +387,7 @@ function waitingSection(ov, { state, actions } = {}) {
           refresh();
         }),
       ]),
-    ]);
+    ].filter(Boolean));
 
   const unsentBox = (send) =>
     h("div", { class: "callout warn home-waiting home-waiting--unsent", role: "status" }, [
@@ -387,18 +398,29 @@ function waitingSection(ov, { state, actions } = {}) {
         text: NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
       }),
       h("div", { class: "home-waiting__actions" }, [
-        // To Review again, through Send, with what it paid filled in.
+        // Straight to Review, with what it pays: sent from there in its
+        // place, which it keeps till the payment's handed over.
         button(
           "Send it now",
           async () => {
-            await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: send.sendId })).catch(() => {});
-            state.route = "send";
-            state.draft = { to: String(send.to ?? ""), amountDusk: formatLuxForInput(safeBigInt(send.lux, 0n)), amountMasked: hidden, memo: String(send.memo ?? "") };
+            const lux = safeBigInt(send.lux, 0n);
+            state.draft = {
+              to: String(send.to ?? ""),
+              privacy: send.privacy === "shielded" ? "shielded" : "public",
+              amountLux: lux.toString(),
+              amountDusk: formatLuxForInput(lux),
+              amountMasked: hidden,
+              memo: String(send.memo ?? ""),
+              replaces: String(send.sendId ?? ""),
+              // From the wallet, profile and network it was made on, as Home lists it: Review refuses it from any other.
+              reviewedFor: reviewContextOf(ov),
+            };
+            state.route = "confirm";
             actions?.render?.()?.catch?.(() => {});
           },
           "btn-primary"
         ),
-        button("Drop", async () => {
+        button("Don't send", async () => {
           await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: send.sendId })).catch(() => {});
           refresh();
         }),

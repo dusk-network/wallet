@@ -9,6 +9,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Check your recovery words: right after a wallet's words are shown, three of them asked for at random, with Check and Skip for now, showing the words again where they don't match; and in Settings, behind the password, in the extension and the Android app.
+- Notices in the Android app for money that comes in while it's in the background or closed, saying how much and from whom and opening that payment, with Tell me when money comes in in Settings to turn them off; they can take up to about 15 minutes.
 - Opened the testnet web wallet's request links in the Android app where it's installed, as Android App Links, once the web wallet serves the file that names the app.
 - Said what a request asks comes to in your currency on mainnet, with the price's time, as it's made and in Receive's list, and what an amount comes to on Send and Review; the link stays in DUSK.
 - Added the recovery phrase and Change password to the Android app's Settings, each behind the password.
@@ -42,9 +44,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said how much was paid and to whom in the Android app's notice that a payment arrived, keeping that off a locked screen that hides what notices say.
+- Showed a memo on a payment from an address that isn't one of your profiles or contacts as the sender's words, muted and in quotes, under “From an address not in your contacts” or their .dusk name, in Activity, on Home and in its details.
+- Asked Firefox for the clipboardWrite permission, which it lists at install as “Input data to the clipboard”, to take a pasted recovery phrase off the clipboard there too.
 - Counted the deposit fees as part of what unstaked stDUSK cost in Rewards by year, at its average cost, said under the table, and showed a year's loss with its minus sign, in DUSK and in your currency.
 - Split Sozu's part of Rewards by year into what grew while held and what unstaking took out, saying where either couldn't be read.
-- Worded the question for an amount that could be two as "Is that 1 or 1000?".
+- Worded the question for an amount that could be two as "Is that 1 or 1000?", with a button for each, which puts that amount in the field, on Send, Staking, Shield and Request.
+- Read a link's amount as typing does, so a link's 2.125 asks which it is, as typing 2.125 does, where a wallet's own link writes 2.1250 and asks nothing.
 - Answered a site's request made while its last one waits with -32002, request already pending, rather than a refusal.
 - Told a site its request ended as the wallet locked with 4100, wallet locked, rather than a refusal.
 - Showed the bar with Connect only for a site that asked the wallet for something or is connected.
@@ -54,7 +60,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Returned to the screen left after the Android app's Immediately lock, with what was typed on it.
 - Kept a half-typed Send for its next opening after Back.
 - Said the network a link or a QR code fills Send in to pay on.
-- Shared a request from the Android app as a few words of what it asks, its QR code's picture and its link.
+- Shared and copied a request as a line a person reads, in both wallets' words, "Sofía asks you to pay 0.03 DUSK · Invoice 141", then "Pay here:" and its link, with its QR code's picture when shared from the Android app.
 - Put Review's Confirm after its details on a phone turned sideways.
 - Said on a phone's Sent that its notice comes while the wallet stays open.
 - Said "Your payment arrived" in a phone's notices, without the amount, and opened the payment in the wallet from it.
@@ -79,16 +85,29 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept a warning said as a field is typed in, such as that the same payment is waiting or that the recovery phrase is still on the clipboard, above a phone's keyboard with the button after it, in Firefox for Android and the app.
+- Looked for a send every 10 to 30 seconds for its first two minutes once the Android app is left, so its notice comes within moments of its block rather than minutes after.
+- Opened a tapped payment notice in the Android app on its payment at once, rather than after seconds of the screen left behind.
+- Looked up again the .dusk names Activity couldn't look up without a signal, once the network is back and on Refresh, rather than only after a restart.
+- Kept the password box for turning fingerprint unlock on in the Android app open while the password is typed, rather than closing it at the first letter.
+- Refused a profile's name that is a .dusk name registered to another account, looked up first, rather than asking, and took one that is the profile's own without a question; asked about a name with a digit for a letter, as Dav1d beside David, or a v for a y, as Wendv beside Wendy.
+- Left a currency value out of a test network's export, saying where the choice would be that test DUSK has no value.
+- Counted Sozu's deposit fees in what grew while held too, at the same average cost as what unstaking took out, so one is part of the other and a loss shows in both.
+- Took Send it now on a payment Home says wasn't sent straight to Review, to send from there, kept the notice until the payment is handed over, and called Drop Don't send, as the web wallet does.
+- Kept a payment from Send on the device the moment it's confirmed, so one the Android app is ended on before it goes out comes back on Home as not sent, rather than vanishing.
+- Asked the node about a payment handed over just as the signal went, by its ID, its queue and the account's nonce: one it never had goes out once more as the same transaction, or, where the wallet stopped meanwhile, is said not sent with Send it now; none shows in Activity as sent before the node has it.
+- Said on Sent and on Home that a payment handed over without an answer may have gone out already, rather than that nothing had left the wallet, with no Cancel.
+- Sent a payment waiting for the network as soon as the Android app is open again, rather than up to a minute after.
 - Kept the field being typed in on show above the keyboard with a phone turned sideways, the Testnet band and the top bar out of its way, and showed the screen whole again once it's upright and the keyboard's gone.
 - Took a recovery phrase pasted into its boxes off the clipboard, where any app or page could read it, and said it's still there where the browser won't let it go.
 - Gave the tab Firefox for Android keeps the wallet running in Open the wallet, and said on it whether the last payment went through, is on its way or waits for the network, rather than a page with no way back.
-- Asked on Import wallet which network the wallet is for, Mainnet or Testnet, and opened it there, rather than on Mainnet with nothing in it.
-- Picked the default gas price by both wallets' one rule: the network's median, read as the web wallet reads it, up to five times the minimum, saying on Review that the network is busy and the price can be raised when it's over that.
+- Asked on Import wallet which network the wallet is for, Mainnet or Testnet, neither picked until one is and Import waiting for it, and opened it there, rather than on Mainnet with nothing in it.
+- Picked the default gas price by both wallets' one rule, for every kind of transaction: the network's minimum while what waits in the node's mempool fits in the next block, as Sozu's activation waiting alone after a stake does, else what waits' median, up to five times the minimum, saying on Review that the network is busy and the price can be raised when it's over that.
 - Saved a profile's name or a contact's that asks a question only once it's answered, with Yes, save it, asked about any .dusk name in a profile's name, a contact's or not, and about a contact's name another contact's starts as, as a plain "Lucas" beside "Lucas (petit-fils)", in both wallets' words.
 - Showed the balance read last, said to be out of date with when it was read, where it can't be read now, as when the wallet opens with no signal, rather than a dash, and named the part the node couldn't give, as the stake.
 - Opened a payment from its notice in the Android app at once, as the notice knew it, without waiting for the network to come back, and said a payment on Sent is being looked up, never that it's taking long, until the node answers.
 - Sent a payment that couldn't reach the network at Confirm once the network answers, as the web wallet does, with Cancel on its screen and on Home until then, and payments that waited one at a time, in their order.
-- Said on Home that a payment waiting for the network wasn't sent once the wallet closed or locked before it went, with Send it now and Drop, never sending it by itself.
+- Said on Home that a payment waiting for the network wasn't sent once the wallet closed or locked before it went, with Send it now and Don't send, never sending it by itself.
 - Listed each payment waiting for the network on Home with its amount, recipient, memo and time, and said on Send and Review when the same payment is waiting already.
 - Left payments waiting for the network out of Send's Available and Max.
 - Showed money that came in on Home and in Activity by itself while the wallet shows, read again every 30 seconds, and had Refresh read Activity too.
@@ -107,7 +126,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said a request was paid already on Send's form as soon as a link fills it in, pasted or opened, not only on Review, and named another profile of the wallet's by its own name there.
 - Said there's no connection on a send's Sending step while the browser is offline.
 - Kept every letter typed in Activity's search and Send's fields on a phone, in their order, by drawing the screen again only once the typing stops.
-- Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, rather than answering with the connected profile's balance.
+- Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, or with anything else the method doesn't take, under any key, rather than answering with the connected profile's balance.
 - Opened Home on reloading the extension's tab after a request link was paid or left, rather than the same payment filled in again.
 - Dropped what a link or a QR code filled in once Send is left, rather than bringing it back in the next Send, and its Filled in from line once another recipient is picked in Contacts.
 - Typed a recovery phrase's words on a phone in boxes no browser offers to keep as a password, still unseen and kept from the keyboard's learning, and emptied them, and the passwords beside them, as the screen is left.

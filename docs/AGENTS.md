@@ -116,11 +116,12 @@ const DEFAULT_GAS_BY_KIND = {
   // ...
 };
 
-// 2. Dynamic gas price (30s cache)
-const livePrice = await getCachedGasPrice();
+// 2. Dynamic gas price (30s cache): what waits in the node's mempool, priced by
+//    app-core's one rule (the minimum while it fits in the next block)
+const livePrice = defaultGasPriceOf(await getCachedGasPrice()).price;
 
 // 3. Merge: user params > dynamic price > static default
-const finalParams = applyTxDefaults(params, { dynamicPrice: livePrice.median });
+const finalParams = applyTxDefaults(params, { dynamicPrice: livePrice.toString() });
 ```
 
 ### Vault / Secret Storage
@@ -311,7 +312,7 @@ const result = await sendTransaction({
   gas: { limit: "2000000", price: "1" }
 });
 
-// Get gas price
+// What waits in the node's mempool, for the default gas price (txDefaults.js defaultGasPriceOf)
 import { getCachedGasPrice } from "./shared/walletEngine.js";
-const { average, median, min, max } = await getCachedGasPrice();
+const { mempool } = await getCachedGasPrice();
 ```

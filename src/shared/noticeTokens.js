@@ -5,7 +5,10 @@
 // taken once. Kept apart from the transactions' records, which history's
 // sync forgets once a send is in it, though its notice may be tapped later;
 // each with the wallet its send is from, whose removal forgets it, and every
-// one goes with a reset (walletReset.js). The newest 50 are kept.
+// one goes with a reset (walletReset.js). The newest 50 are kept. And each
+// wallet's token for its notices of money coming in, which Android's job
+// posts (android/ArrivalJob.kt): made once, kept apart from the 50, and
+// checked, never taken, as each of those notices carries it.
 
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
@@ -13,6 +16,8 @@ import { withStorageLock } from "./storageLock.js";
 const KEY = STORAGE_KEYS.NOTICE_TOKENS;
 const KEPT = 50;
 const TOKEN = /^[0-9a-f]{32}$/;
+// A wallet's token for money coming in is kept by this key and the wallet.
+const INCOMING = "in:";
 
 async function read() {
   const all = (await storage.get(KEY))?.[KEY];
@@ -33,12 +38,42 @@ export function noticeTokenFor(hash, wallet = "") {
     const all = await read();
     if (TOKEN.test(String(all[hash]?.token ?? ""))) return all[hash].token;
     const token = randomToken();
-    const newest = Object.entries({ ...all, [hash]: { token, wallet: String(wallet ?? ""), at: Date.now() } })
+    const entries = Object.entries({ ...all, [hash]: { token, wallet: String(wallet ?? ""), at: Date.now() } });
+    const newest = entries
+      .filter(([key]) => !key.startsWith(INCOMING))
       .sort(([, a], [, b]) => (Number(b?.at) || 0) - (Number(a?.at) || 0))
       .slice(0, KEPT);
-    await storage.set({ [KEY]: Object.fromEntries(newest) });
+    await storage.set({ [KEY]: Object.fromEntries([...entries.filter(([key]) => key.startsWith(INCOMING)), ...newest]) });
     return token;
   });
+}
+
+/**
+ * The token of `wallet`'s notices for money coming in: the one made for it,
+ * else a new one.
+ * @param {string} wallet - its first public account
+ * @returns {Promise<string>}
+ */
+export function incomingNoticeToken(wallet) {
+  const key = `${INCOMING}${wallet}`;
+  return withStorageLock(KEY, async () => {
+    const all = await read();
+    if (TOKEN.test(String(all[key]?.token ?? ""))) return all[key].token;
+    const token = randomToken();
+    await storage.set({ [KEY]: { ...all, [key]: { token, wallet: String(wallet ?? ""), at: Date.now() } } });
+    return token;
+  });
+}
+
+/**
+ * Whether `token` is `wallet`'s for its notices of money coming in.
+ * @param {string} wallet
+ * @param {string} token
+ * @returns {Promise<boolean>}
+ */
+export async function isIncomingNoticeToken(wallet, token) {
+  if (!wallet || !TOKEN.test(String(token ?? ""))) return false;
+  return (await read())[`${INCOMING}${wallet}`]?.token === token;
 }
 
 /**

@@ -378,10 +378,53 @@ describe("the Activity view", () => {
     expect(search("ILUSTRACIÓN")).toEqual(["Factura 2026-074 Ilustraci\u00f3n"]);
     expect(search("gouter")).toEqual(["Le go\u00fbter du mercredi"]);
     // What can't be seen in a memo shows as its code, as everywhere a memo shows, and its button says it.
-    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", "Fac\\u202etura"]);
+    // The last one came in from an address that isn't a contact's: the sender's words, said so.
+    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", "“Fac\\u202etura”From an address not in your contacts"]);
     expect(visibleText(body())).not.toContain("\u202e");
     const opened = body().querySelectorAll(".tx-row button.tx-open").map(accessibleName);
     expect(opened.every((name) => /, memo /.test(name))).toBe(true);
+  });
+
+  // Chen's and Marek's: a stranger's "URGENT: wallet suspended - pay now to restore" read like the wallet's own words,
+  // in Activity, on Home and in its details.
+  it("says a stranger's memo is theirs: muted and in quotes, under who it's from, a contact's as ever, and search finds it", () => {
+    const urgent = "URGENT: wallet suspended - pay now to restore";
+    const { state, draw } = setup({ route: "activity" });
+    const at = state.activity.entries.findIndex((entry) => entry.direction === "in" && String(entry.counterparty ?? "") === SENDER);
+    expect(at).toBeGreaterThanOrEqual(0);
+    state.activity.entries = state.activity.entries.map((entry, i) => (i === at ? { ...entry, memo: urgent } : entry));
+    draw();
+    const memoLine = () => body().querySelector(".tx-row .tx-memo");
+    const field = body().querySelector('input[aria-label="Search activity"]');
+    field.value = "urgent";
+    field.dispatchEvent(new Event("input"));
+    expect(body().querySelectorAll(".tx-row")).toHaveLength(1);
+    expect(memoLine().className).toContain("tx-memo--theirs");
+    expect(visibleText(memoLine())).toBe(`“${urgent}”From an address not in your contacts`);
+    expect(memoLine().querySelector("a, b, strong")).toBeNull();
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toContain(`memo “${urgent}”, From an address not in your contacts`);
+
+    // With a .dusk name of its own: from that name.
+    state.activity.names = new Map([[SENDER, "sofiadesign.dusk"]]);
+    draw();
+    field.dispatchEvent(new Event("input"));
+    expect(visibleText(body().querySelector(".tx-row .tx-memo"))).toBe(`“${urgent}”From sofiadesign.dusk`);
+
+    // Its details: the same.
+    const hash = state.activity.entries[at].hash;
+    state.route = "tx";
+    state.txDetailHash = hash;
+    draw();
+    const memoRow = body().querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
+    expect(visibleText(memoRow.querySelector(".kv-value"))).toBe(`“${urgent}”From sofiadesign.dusk`);
+
+    // A contact's memo is as ever.
+    state.route = "activity";
+    state.addressBook.items = [{ id: "c1", name: "Sofía", address: SENDER }];
+    draw();
+    field.dispatchEvent(new Event("input"));
+    const line = body().querySelector(".tx-row .tx-memo");
+    expect([line.className, visibleText(line)]).toEqual(["row-sub tx-memo", urgent]);
   });
 
   it("finds an amount typed with either decimal mark, in the browser's language", () => {
@@ -521,6 +564,40 @@ describe("the Activity view", () => {
     field.value = "sender.dusk";
     field.dispatchEvent(new Event("input"));
     await vi.waitFor(() => expect(rows().map((row) => row.split(" · ")[0])).toEqual(["sender.duskReceived"]));
+  });
+
+  // Lena's, on Android, twice: opened offline, her payments to sofiadesign.dusk showed as a bare address, and the name
+  // didn't come back with the signal or with Refresh, only after a restart: a failed lookup counted as one done.
+  it("looks a name up again with the next read once its lookup failed, as when the signal's back, keeping one it had", async () => {
+    const { state, draw } = setup({ route: "activity" });
+    const { refreshActivitySoon } = await import("./popup/activity.js");
+    Object.assign(state.activity, {
+      checked: new Set(),
+      epoch: Promise.resolve(1),
+      history: { sync: vi.fn(async () => {}), read: vi.fn(async () => ({ entries: state.activity.entries, state: null, complete: true, coveredTo: 0 })) },
+    });
+    const render = async () => draw();
+    // No signal: every lookup fails, and nothing's named.
+    lookupRecipientNames.mockClear();
+    lookupRecipientNames.mockImplementation(async () => new Map());
+    refreshActivitySoon({ state, render }, 0);
+    await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(rows().some((row) => row.startsWith(`${short(SENDER)}Received`))).toBe(true);
+
+    // The signal's back: the next read looks it up again, and the name shows.
+    lookupRecipientNames.mockImplementation(async (accounts) => new Map(accounts.map((a) => [a, a === SENDER ? "sofiadesign.dusk" : null])));
+    refreshActivitySoon({ state, render }, 0);
+    await vi.waitFor(() => expect(rows().some((row) => row.startsWith("sofiadesign.duskReceived"))).toBe(true));
+
+    // Lost again: the name stays.
+    lookupRecipientNames.mockImplementation(async () => new Map());
+    state.activity.checked.clear();
+    refreshActivitySoon({ state, render }, 0);
+    await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalledTimes(3));
+    await settle();
+    expect(rows().some((row) => row.startsWith("sofiadesign.duskReceived"))).toBe(true);
+    lookupRecipientNames.mockImplementation(async () => new Map());
   });
 
   it("finds no row by its amount while balances are hidden, and says what's still to read", () => {

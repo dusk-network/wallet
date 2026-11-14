@@ -58,16 +58,32 @@ export async function noticesState(allowedNow) {
 }
 
 /**
- * A send's notice on a phone, as its lock screen shows it: what came of it,
- * never its amount or whom it was for, and its network.
- * @param {{ kind?: string, ok: boolean, nodeUrl?: string }} sent
- * @returns {{ title: string, network: string }}
+ * A send's notice on a phone: what came of it, and for a payment how much and
+ * to whom, as Activity names them (`amount` "" while balances are hidden), and
+ * its network: `body`. A locked phone that hides what notices say shows what
+ * came of it and the `network` alone.
+ * @param {{ kind?: string, ok: boolean, nodeUrl?: string, amount?: string, to?: string }} sent
+ * @returns {{ title: string, network: string, body: string }}
  */
-export function arrivalNotice({ kind, ok, nodeUrl }) {
+export function arrivalNotice({ kind, ok, nodeUrl, amount = "", to = "" }) {
   const what = String(kind ?? "") === TX_KIND.TRANSFER ? "payment" : "transaction";
   const title = ok ? (what === "payment" ? "Your payment arrived" : "Your transaction went through") : `Your ${what} didn't go through`;
-  return { title, network: nodeUrl ? networkTextOf(String(nodeUrl)) : "" };
+  const network = nodeUrl ? networkTextOf(String(nodeUrl)) : "";
+  const payment = what === "payment" && to ? (amount ? `${amount} DUSK to ${to}` : `To ${to}`) : "";
+  return { title, network, body: [payment, network].filter(Boolean).join(" · ") };
 }
+
+/**
+ * A notice for money that came in, as Android's job fills it in
+ * (android/ArrivalJob.kt): {amount} and {name}, whoever paid; no amount
+ * while balances are hidden.
+ * @param {{ hidden?: boolean }} [opts]
+ */
+export const incomingNoticeTitle = ({ hidden = false } = {}) =>
+  hidden ? "You received a payment from {name}" : "You received {amount} DUSK from {name}";
+
+/** What a locked phone that hides what notices say shows of money that came in: no amount, no name. */
+export const INCOMING_LOCKED_TITLE = "Payment received";
 
 /**
  * The person tapped Tell me when it arrives: the phone asks, the first time.

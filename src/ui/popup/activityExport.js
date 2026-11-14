@@ -24,6 +24,7 @@ import { duskPrices } from "./duskPrice.js";
 import { migrationChainCache } from "./migrationFacts.js";
 import { archiveAt, historyArchiverUrl } from "../../shared/activityHistory.js";
 import { networkForNode } from "../../shared/nodeNetwork.js";
+import { isTestNetwork } from "../components/TestnetStrip.js";
 import { shortEvmAddress } from "../lib/strings.js";
 import { defaultCurrency } from "@dusk-network/app-core/amounts";
 
@@ -120,6 +121,14 @@ function otherProfiles(ov, profileIndex) {
   return [...own, ...others];
 }
 
+/**
+ * Whether DUSK has a price on the overview's network, for the file's values:
+ * on mainnet alone, as the wallet says amounts in a currency there alone
+ * (inCurrency.js). Test DUSK has none.
+ * @param {object} ov - the overview
+ */
+export const priced = (ov) => networkForNode(String(ov?.nodeUrl ?? ""))?.name === "mainnet";
+
 // A quarter asked for, "2026-4", all of it (no period), or the days typed.
 function periodOf({ period, from, to } = {}) {
   if (!period || period === "all") return undefined;
@@ -177,7 +186,8 @@ export async function makeExport(ov, choices, { state }) {
     profile: { name: await profileNameOf(ov, profileIndex), account, address: ov?.addresses?.[profileIndex] },
     profiles,
     period,
-    price: choices.fiat ? duskPrices({ currency }) : undefined,
+    // In a currency only where DUSK has a price: never test DUSK's.
+    price: choices.fiat && priced(ov) ? duskPrices({ currency }) : undefined,
     currency,
     facts,
     ...(bridge ? { bridge } : {}),
@@ -386,9 +396,17 @@ export function activityExportPanel(ov, { state, actions }) {
     checkbox("activity-export-contacts", "Add my contact names", ex.withContacts, (on) => {
       ex.withContacts = on;
     }),
-    checkbox("activity-export-value", `Add each payment's value in ${currencyName(defaultCurrency())}, from CoinGecko's prices`, ex.fiat, (on) => {
-      ex.fiat = on;
-    }),
+    // A value only where DUSK has a price: off mainnet, said where the choice would be.
+    priced(ov)
+      ? checkbox("activity-export-value", `Add each payment's value in ${currencyName(defaultCurrency())}, from CoinGecko's prices`, ex.fiat, (on) => {
+          ex.fiat = on;
+        })
+      : h("p", {
+          class: "activity-export-note activity-export-novalue",
+          text: isTestNetwork(String(ov?.nodeUrl ?? ""), ov?.chainId ?? null)
+            ? "Test DUSK has no value, so the file gives none."
+            : "DUSK has no price on this network, so the file gives no value.",
+        }),
     checkbox("activity-export-excel", "For Excel: keep accents as it opens", ex.excel, (on) => {
       ex.excel = on;
     }),
