@@ -821,6 +821,22 @@ export async function localSend(message) {
       // (`madeOn`), whatever was chosen since.
       let made;
       let madeOn = "";
+      // Kept as a sent one as soon as its try has handed it over, before it
+      // leaves the waiting list (waitingSends.js forgets it once the try is
+      // back), under the node it was sent on: another may have been chosen
+      // while it waited or was looked up. Read meanwhile, the wallet's lists
+      // have it in the one or the other, never in neither (Lena's and Chen's:
+      // gone from Home and Activity both for 10 s as it went out). The profile
+      // that paid, as the extension keeps it: a stake's own profile may not be
+      // the one selected.
+      const keptSent = async (tried) => {
+        const hash = tried.result?.hash ?? "";
+        if (!hash) return tried;
+        const nodeUrl = tried.nodeUrl || (await getSettings())?.nodeUrl || "";
+        const record = submittedTxMeta(tried.baseParams, { walletId: String(tried.status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(tried.baseParams, tried.status), nullifiers: tried.result?.nullifiers }, walletSendFields(tried.baseParams, message));
+        await putTxMeta(hash, record, { epoch: tried.txEpoch }).catch(() => {});
+        return { ...tried, record };
+      };
       const attempt = ({ resend = false, found = null } = {}) => withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         const status = engineStatus();
         if (!status.isUnlocked) {
@@ -835,7 +851,7 @@ export async function localSend(message) {
         await ensureEngineConfigured();
         if (found || resend) {
           const result = found ? { ...found, found: true } : await resendSend({ sendId });
-          return { status, txEpoch, baseParams: made ?? applyTxDefaults(reviewed, {}), result, nodeUrl: madeOn };
+          return keptSent({ status, txEpoch, baseParams: made ?? applyTxDefaults(reviewed, {}), result, nodeUrl: madeOn });
         }
         // The node's gas price (kept 30 s) by both wallets' one rule: its
         // median, under a ceiling.
@@ -862,9 +878,9 @@ export async function localSend(message) {
           }
           throw error;
         });
-        return { status, txEpoch, baseParams, result, nodeUrl };
+        return keptSent({ status, txEpoch, baseParams, result, nodeUrl });
       });
-      const { status, txEpoch, baseParams, result, nodeUrl: sentOn } = sendId
+      const { txEpoch, result, nodeUrl: sentOn, record } = sendId
         ? await sendWhenReachable({
             sendId,
             record: waitingRecordOf(message, await getSettings().then((settings) => ({ nodeUrl: settings.nodeUrl, profileIndex: Number(settings.selectedAccountIndex ?? 0) || 0 }))),
@@ -879,19 +895,13 @@ export async function localSend(message) {
         : await attempt();
       const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
 
-      // Persist metadata (see background/index.js comments), under the node it
-      // was sent on: another may have been chosen while it waited or was looked up.
+      // Kept as sent as it was handed over (keptSent), under the node it was sent on.
       const hash = result?.hash ?? "";
       try {
         const nodeUrl = sentOn || (await getSettings())?.nodeUrl || "";
 
-        if (hash) {
-          // The profile that paid, as the extension keeps it: a stake's own
-          // profile may not be the one selected.
-          const profileIndex = sendingProfile(baseParams, status);
-          const record = submittedTxMeta(baseParams, { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
+        if (hash && record) {
           const { pendingNullifiers } = record;
-          await putTxMeta(hash, record, { epoch: txEpoch });
           // Asked for notices: Android looks for it too, once the app leaves the screen.
           watchArrival(hash, record).catch(() => {});
           // Found on the node after a hand-over with no clear answer, maybe in its block already: looked up now.

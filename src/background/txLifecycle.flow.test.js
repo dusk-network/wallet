@@ -1170,6 +1170,41 @@ describe("background Phoenix tx lifecycle flow", () => {
     });
 
     // Amélie's: the Wi-Fi off at Confirm, the popup said "Not sent" a second later and never waited.
+    // Lena's and Chen's: a payment that waited went from Home's list and was in Activity only about 10 s later.
+    it("keeps a payment that waited as sent before it leaves the waiting list, so the wallet's lists always have it", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const sends = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction");
+      const offline = Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+      engineCall.mockImplementation(async (method) => {
+        if (method !== "dusk_sendTransaction") return true;
+        if (sends().length === 1) throw offline;
+        return { hash: "0xwent" };
+      });
+      // Each time its record leaves the waiting list: whether Activity's records have it by then.
+      const left = [];
+      const setItem = localStorage.setItem.bind(localStorage);
+      localStorage.setItem = (key, value) => {
+        if (key === "dusk_waiting_sends_v1" && String(localStorage.getItem(key) ?? "").includes("send-0009") && !String(value).includes("send-0009")) {
+          left.push(String(localStorage.getItem("dusk_txs_v1") ?? "").includes("0xwent") ? "in Activity" : "in neither");
+        }
+        setItem(key, value);
+      };
+      mocks.nodeAnswers = false;
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const response = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-0009", params: { ...params, memo: "Hors ligne" } }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0009", waits: true }));
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "0xwent" } });
+        expect(left).toEqual(["in Activity"]);
+      } finally {
+        localStorage.setItem = setItem;
+        mocks.nodeAnswers = true;
+        vi.useRealTimers();
+      }
+    });
+
     it("waits for the network where a payment from Send couldn't reach it before it went out, and goes out once it answers", async () => {
       const { engineCall } = await import("../background/engineHost.js");
       const sends = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction");

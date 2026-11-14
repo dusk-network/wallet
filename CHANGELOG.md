@@ -44,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said one thing at a time of a payment that waited, on Home: Not sent yet while it waits and Sending as it goes out, and listed it in Activity as it went out, rather than in neither for a while; and in Firefox for Android that it goes on while the Keep open tab stays open.
 - Gave each request its own Share in the Android app, beside its Copy, in Request payment and in the list, with Share by the address for the address alone, and brought Request payment into view at its Amount as it's opened.
 - Copied or shared a request paid already as its own link, saying it was paid, rather than making a second one with the same invoice.
 - Said the fee charged on Completed once a node that went silent answers again, rather than the most it could be.

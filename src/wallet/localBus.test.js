@@ -416,6 +416,31 @@ describe("a payment from Send that can't reach the network before it goes out", 
     expect(await waitingNow(localSend)).toEqual([]);
   });
 
+  // Lena's and Chen's: a payment that waited went from Home's list and was in Activity only about 10 s later.
+  it("is kept as sent before it leaves the waiting list, so the wallet's lists always have it", async () => {
+    const { localSend } = await import("./localBus.js");
+    page();
+    const HASH = "af".repeat(32);
+    // Each time its record leaves the waiting list: whether Activity's records have it by then.
+    const left = [];
+    const setItem = localStorage.setItem.bind(localStorage);
+    localStorage.setItem = (key, value) => {
+      if (key === "dusk_waiting_sends_v1" && String(localStorage.getItem(key) ?? "").includes("send-0005") && !String(value).includes("send-0005")) {
+        left.push(String(localStorage.getItem("dusk_txs_v1") ?? "").includes(HASH) ? "in Activity" : "in neither");
+      }
+      setItem(key, value);
+    };
+    statusChecks.nodeAnswers = false;
+    engine.sendTransaction.mockRejectedValueOnce(offline()).mockResolvedValueOnce({ hash: HASH, nonce: 1n });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0005", walletId: "account of wallet A", params });
+    await vi.waitFor(async () => expect(await waitingNow(localSend)).toHaveLength(1));
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: HASH } });
+    expect(left).toEqual(["in Activity"]);
+  });
+
   it("is called off with Cancel while it waits: nothing sent, and never tried again", async () => {
     const { localSend } = await import("./localBus.js");
     const heard = page();

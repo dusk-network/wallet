@@ -361,9 +361,14 @@ function waitingSection(ov, { state, actions } = {}) {
       },
     });
 
-  // One handed over without a clear answer may have gone out: it's looked up,
-  // and has no Cancel. In the app on a phone, one waiting goes out only while
-  // the app's open, which it says.
+  // One state at a time (Chen's, Lena's: "Not sent yet … It's being sent.
+  // Cancel" as it went out): Not sent yet while it waits for the network,
+  // Sending while it goes out; gone out, Activity has it as this card goes
+  // (the wallet keeps it as sent before it leaves this list). One handed
+  // over without a clear answer may have gone out: it's looked up, and has no
+  // Cancel. In the app on a phone, one waiting goes out only while the app's
+  // open, which it says.
+  const sending = (send) => !send.waits && !send.checks;
   const waitingNote = (send) =>
     send.unclear && send.checks
       ? "It may have gone out already. The wallet checks once the network answers."
@@ -373,12 +378,13 @@ function waitingSection(ov, { state, actions } = {}) {
           ? isTauriRuntime() && isPhone()
             ? `It goes out once the network answers. ${appLeaveText(ov)}`
             : "It goes out once the network answers."
-          : "It's being sent.";
+          : "";
+  const titleOf = (send) => (sending(send) ? "Sending: " : send.unclear ? "Not confirmed: " : "Not sent yet: ");
   const waitingBox = (send) =>
     h("div", { class: "callout home-waiting", role: "status" }, [
-      h("div", { class: "callout-title" }, [send.unclear ? "Not confirmed: " : "Not sent yet: ", ...what(send)]),
+      h("div", { class: "callout-title" }, [titleOf(send), ...what(send)]),
       madeLine(send),
-      h("p", { class: "muted home-waiting__note", text: waitingNote(send) }),
+      waitingNote(send) ? h("p", { class: "muted home-waiting__note", text: waitingNote(send) }) : null,
       send.unclear ? null : h("div", { class: "home-waiting__actions" }, [
         button("Cancel", async () => {
           const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null);

@@ -305,9 +305,10 @@ describe("payments from Send waiting for the network, on Home", () => {
       }),
     };
     document.body.replaceChildren(...homeView(ov([send(), send({ sendId: "s2", memo: "Hors ligne deux", at: at(2, 36), waits: false })]), { state, actions }));
+    // Chen's and Lena's: "Not sent yet … It's being sent. Cancel" as it went out. One state at a time: Sending.
     expect(boxes(document)).toEqual([
       "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers.Cancel",
-      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36It's being sent.Cancel",
+      "Sending: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36Cancel",
     ]);
 
     // Cancel on the second: that one alone, and said.
@@ -356,7 +357,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(boxes(document)).toEqual([
       "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It may have gone out already. If it didn't, it goes out once the network answers.",
       "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36It may have gone out already. The wallet checks once the network answers.",
-      "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Trois” · made at 02:38It's being sent.",
+      "Sending: 0.01 DUSK to Lucas (petit-fils)“Trois” · made at 02:38",
     ]);
     expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
   });

@@ -75,7 +75,8 @@ describe("the tab the wallet runs in, in Firefox", () => {
     expect(await says("executed")).toBe(`Your payment at ${time} went through.`);
     expect(await says("submitted")).toBe(`Your payment at ${time} went out and is on its way.`);
     expect(await says("unknown")).toBe(`Your payment at ${time} went out and is on its way.`);
-    expect(await says("waiting")).toBe(`Your payment at ${time} hasn't gone out yet. It goes out once the network answers.`);
+    // Amélie's and Marek's: closing it stopped a payment that waited, though nothing said so.
+    expect(await says("waiting")).toBe(`Your payment at ${time} hasn't gone out yet. It goes out once the network answers, while this tab stays open.`);
     expect(await says("not_sent")).toBe(`Your payment at ${time} wasn't sent.`);
     // Handed over as the connection went: neither sent nor not, till the node's asked.
     expect(await says("unclear")).toBe(`Your payment at ${time} may have gone out already. The wallet checks once the network answers.`);

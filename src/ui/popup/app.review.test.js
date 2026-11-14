@@ -491,6 +491,25 @@ describe("the phone's Back button", () => {
   });
 });
 
+// Astra's: called off on its Sent, a payment that waited said "Sent" on Home though nothing went out, and one
+// whose try failed and whose record went said the same. Leaving the waiting list says nothing of how it left:
+// one that went out is in Activity by then, as the wallet keeps it as sent first.
+describe("a payment that waited, on Home", () => {
+  it("never says it was sent for leaving the waiting list, called off on its Sent or failed", async () => {
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } });
+    const waiting = (sendId, memo) => ({ sendId, walletId: A, nodeUrl: t.open.nodeUrl, profileIndex: 0, privacy: "public", to: B, lux: "10000000", feeLux: "2500000", memo, at: Date.now() - 60_000, waiting: true, waits: false });
+    const cards = () => [...t.app.querySelectorAll(".home-waiting")].map((card) => card.textContent);
+    t.open = { ...t.open, waitingSends: [waiting("send-0201", "Hors ligne un"), waiting("send-0202", "Hors ligne deux")] };
+    await t.render({ forceRefresh: true });
+    expect(cards()).toEqual([expect.stringContaining("Sending: "), expect.stringContaining("Sending: ")]);
+    // Called off on its Sent, the other's try failed and its record went: both leave the list, nothing went out.
+    t.open = { ...t.open, waitingSends: [] };
+    await t.render({ forceRefresh: true });
+    expect(cards()).toEqual([]);
+    expect(t.app.textContent).not.toContain("Sent: ");
+  });
+});
+
 // Chen's: Amelie and 0.02 typed, Back, Back, and Send again was empty, nothing asked.
 describe("a half-typed Send, left with Back", () => {
   it("is there again as Send opens from Home, for the same wallet, profile and network, and goes once it's sent", async () => {

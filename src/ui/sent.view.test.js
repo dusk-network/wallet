@@ -696,8 +696,9 @@ describe("Tell me when it arrives, on a phone", () => {
   const ANDROID = "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0";
   // Marek's: "You can close the wallet; this continues in the background." right above
   // "You'll get a notice when it arrives, while the wallet stays open.": one line now.
-  const COMES = "It goes on if you close the wallet; its notice comes only while the wallet stays open.";
-  const CLOSE = "You can close the wallet; this continues in the background.";
+  // Amélie's and Marek's, then: closing the Keep open tab, in which the wallet runs, stopped a payment that waited.
+  const COMES = "It goes on if you close the wallet, while its Keep open tab stays open; its notice comes only while the wallet stays open.";
+  const CLOSE = "You can close the wallet; this goes on while its Keep open tab stays open.";
   const draw = async (states, { phone = true, app = false, sent = {}, ov = {} } = {}) => {
     if (phone) vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: ANDROID });
     // The app on Android: Tauri's bridge to its wrapper.
