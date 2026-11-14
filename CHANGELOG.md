@@ -113,7 +113,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said a request was paid already on Send's form as soon as a link fills it in, pasted or opened, not only on Review, and named another profile of the wallet's by its own name there.
 - Said there's no connection on a send's Sending step while the browser is offline.
 - Kept every letter typed in Activity's search and Send's fields on a phone, in their order, by drawing the screen again only once the typing stops.
-- Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, rather than answering with the connected profile's balance.
+- Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, or with anything else the method doesn't take, under any key, rather than answering with the connected profile's balance.
 - Opened Home on reloading the extension's tab after a request link was paid or left, rather than the same payment filled in again.
 - Dropped what a link or a QR code filled in once Send is left, rather than bringing it back in the next Send, and its Filled in from line once another recipient is picked in Contacts.
 - Typed a recovery phrase's words on a phone in boxes no browser offers to keep as a password, still unseen and kept from the keyboard's learning, and emptied them, and the passwords beside them, as the screen is left.
