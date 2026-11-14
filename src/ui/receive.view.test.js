@@ -235,9 +235,9 @@ describe("receive", () => {
     expect(view.button("Copy request link").disabled).toBe(false);
     view.button("Copy request link").click();
     await settle();
-    const [link] = dom.clipboard.writeText.mock.calls.at(-1);
-    // The web wallet's Send on the network it's for, which survives email and chat.
-    expect(link).toBe(`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.5&network=testnet`);
+    const [copied] = dom.clipboard.writeText.mock.calls.at(-1);
+    // A line a person reads, then the web wallet's Send on the network it's for, which survives email and chat.
+    expect(copied).toBe(`You're asked to pay 1.5 DUSK\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.5&network=testnet`);
     // The QR holds the same request, for a wallet to read.
     expect(dom.document.body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(`dusk:public-${ACCOUNT}@dusk:2?amount=1.5`));
     expect(visibleText(dom.document.body.querySelector(".receive-request"))).toContain("The link opens the web wallet's Send, filled in.");
@@ -248,15 +248,28 @@ describe("receive", () => {
     let view = await receive("shielded", { state });
     view.button("Copy request link").click();
     await settle();
-    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ADDRESS}&memo=Factura+33&network=testnet`);
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(
+      `You're asked for a payment in DUSK · Factura 33\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ADDRESS}&memo=Factura+33&network=testnet`
+    );
 
     // A chain there's no file for: nothing to open, so the link a wallet reads.
     state.receive.tab = "public";
     view = await receive("public", { state, ov: { ...overview, nodeUrl: "https://node.example", chainId: 42 } });
     view.button("Copy request link").click();
     await settle();
-    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`dusk:public-${ACCOUNT}@dusk:42?memo=Factura+33`);
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`You're asked for a payment in DUSK · Factura 33\nPay here: dusk:public-${ACCOUNT}@dusk:42?memo=Factura+33`);
     expect(visibleText(dom.document.body.querySelector(".receive-request"))).not.toContain("web wallet");
+  });
+
+  // Chen's: the request says who asks by the name given the profile here, where it has no .dusk name.
+  it("copies a request with the name given the profile here, where it has no .dusk name", async () => {
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "0.02", memo: "chicken rice" } };
+    const view = await receive("public", { state, ov: { ...overview, networkName: "Testnet", accountNames: { 0: "Chen" } } });
+    view.button("Copy request link").click();
+    await settle();
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(
+      `Chen asks you to pay 0.02 DUSK on Testnet · chicken rice\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.02&memo=chicken+rice&network=testnet`
+    );
   });
 
   it("asks for a network by the chain a custom node signs for", async () => {
@@ -264,7 +277,7 @@ describe("receive", () => {
     const view = await receive("public", { state, ov: { ...overview, nodeUrl: "https://node.example", chainId: 1 } });
     view.button("Copy request link").click();
     await settle();
-    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`https://apps.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1&network=mainnet`);
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`You're asked to pay 1 DUSK\nPay here: https://apps.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1&network=mainnet`);
   });
 
   // Sofía's first wish for three rounds: her clients to see what they pay in their own money, euros.
@@ -279,7 +292,9 @@ describe("receive", () => {
     await vi.waitFor(() => expect(shown(".receive-in-currency")).toMatch(/^≈ 1,82\s€ · price at \d{2}:\d{2}$/));
     view.button("Copy request link").click();
     await settle();
-    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`https://apps.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=30&memo=Factura+2026-133&network=mainnet`);
+    expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(
+      `You're asked to pay 30 DUSK · Factura 2026-133\nPay here: https://apps.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=30&memo=Factura+2026-133&network=mainnet`
+    );
     // The request kept in the list says it too.
     await vi.waitFor(() => expect(shown(".request-row__in-currency")).toMatch(/^≈ 1,82\s€ · price at /));
 
@@ -513,8 +528,8 @@ describe("receive", () => {
     expect(written).toEqual(["Dusk payment request · Testnet", "0.03 DUSK", "Invoice 2026-114", "To sofiadesign.dusk · 26FCH7…Tck927"]);
   });
 
-  // Sofía's: Share sent one bare long web link.
-  it("shares a request in the app as a few words of what it asks, with its QR code's picture and its link", async () => {
+  // Sofía's: Share sent one bare long web link; and then the client got only a ~270-character link, no sentence.
+  it("shares a request in the app as a line of who asks for what, with its QR code's picture and its link", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(2026, 10, 10, 4, 12));
     dom = installFakeDom({
@@ -539,13 +554,14 @@ describe("receive", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     const state = { receive: { tab: "public", requestOpen: true, amountDusk: "0.03", memo: "Invoice 2026-115" } };
     const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
+    lookupPrimaryName.mockResolvedValue("sofiadesign.dusk");
     dom.document.body.replaceChildren(...receiveView({ ...overview, networkName: "Testnet" }, { state, actions }));
     await settle();
     dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === "Share").click();
     await vi.waitFor(() => expect(invoke.mock.calls.some(([cmd]) => cmd === "share_text")).toBe(true));
     const [, args] = invoke.mock.calls.find(([cmd]) => cmd === "share_text");
     expect(args).toEqual({
-      text: `Dusk payment request · Testnet\n0.03 DUSK · Invoice 2026-115\nhttps://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.03&memo=Invoice+2026-115&network=testnet`,
+      text: `sofiadesign.dusk asks you to pay 0.03 DUSK on Testnet · Invoice 2026-115\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.03&memo=Invoice+2026-115&network=testnet`,
       title: "Dusk payment request",
       image: "iVBORw==",
       name: "dusk-testnet-request-0.03-DUSK-Invoice-2026-115-2026-11-10-0412.png",

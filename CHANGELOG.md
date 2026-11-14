@@ -54,7 +54,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Returned to the screen left after the Android app's Immediately lock, with what was typed on it.
 - Kept a half-typed Send for its next opening after Back.
 - Said the network a link or a QR code fills Send in to pay on.
-- Shared a request from the Android app as a few words of what it asks, its QR code's picture and its link.
+- Shared and copied a request as a line a person reads, in both wallets' words, "Sofía asks you to pay 0.03 DUSK · Invoice 141", then "Pay here:" and its link, with its QR code's picture when shared from the Android app.
 - Put Review's Confirm after its details on a phone turned sideways.
 - Said on a phone's Sent that its notice comes while the wallet stays open.
 - Said "Your payment arrived" in a phone's notices, without the amount, and opened the payment in the wallet from it.
