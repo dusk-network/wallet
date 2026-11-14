@@ -527,13 +527,15 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   return Object.assign([nav, form], { busy: () => busy });
 }
 
-// Import wallet's network, Mainnet or Testnet, the ones people hold DUSK on:
-// none is picked to begin with, and Import waits till one is, so a phrase
+// Import wallet's network, Mainnet or Testnet, the ones people hold DUSK on,
+// each saying what its DUSK is (real, or test DUSK with no value): none is
+// picked to begin with, and Import waits till one is, so a phrase
 // used on Testnet doesn't open on Mainnet with nothing in it. Picking one
 // moves the wallet there, as the network menu does, and keeps what's typed.
 // On another network, picked before in Settings, nothing's asked: the top bar
 // names it. `setDisabled` holds it while the wallet is made; `picked` says
 // whether one was, and says to pick one where none was.
+const NETWORK_DUSK = Object.freeze({ mainnet: "real DUSK", testnet: "test DUSK, no value" });
 function networkChoice(ov, actions) {
   const on = detectPresetId({ nodeUrl: ov?.nodeUrl, proverUrl: ov?.proverUrl, archiverUrl: ov?.archiverUrl });
   if (!ov?.nodeUrl || (on !== "mainnet" && on !== "testnet")) return null;
@@ -547,7 +549,7 @@ function networkChoice(ov, actions) {
     host.replaceChildren(
       segmented({
         label: "Network",
-        items: offered.map((preset) => ({ id: preset.id, text: preset.label, disabled: busy || held })),
+        items: offered.map((preset) => ({ id: preset.id, text: preset.label, sub: NETWORK_DUSK[preset.id], disabled: busy || held })),
         selected: picked,
         onSelect: pick,
         none: true,

@@ -2125,6 +2125,29 @@ button.balance-refresh:hover {
   box-shadow: none;
 }
 
+/* A choice with a line under its name: what it is, small and muted. */
+.tabs.tabs--sub {
+  border-radius: var(--radius-lg);
+}
+.tabs.tabs--sub::before {
+  border-radius: calc(var(--radius-lg) - var(--seg-pad));
+}
+.tabs.tabs--sub .tab {
+  height: auto;
+  min-height: 44px;
+  padding: 6px 8px;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: calc(var(--radius-lg) - var(--seg-pad));
+  text-align: center;
+}
+.tab .tab-sub {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.25;
+}
+
 .tab-badge {
   display: inline-flex;
   align-items: center;

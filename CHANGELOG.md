@@ -44,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said under Import wallet's Mainnet and Testnet which holds real DUSK and which test DUSK with no value.
 - Took a recovery phrase pasted into its boxes off the clipboard in Firefox for Android, writing a space over it, and one a phone's keyboard puts in whole from its clipboard too.
 - Took an l, 1, ! or | for an i, as in Davld or Dav!d beside David, and a .dusk name in small capitals, circled letters or after a fullwidth point, as the look-alikes they are, in contact and profile names.
 - Refused a link with any space in its amount, a tab too.
