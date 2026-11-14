@@ -345,6 +345,18 @@ describe("contacts", () => {
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "\u0410lice", address: BOB }), expect.anything());
     });
 
+    // Marek's: Dav1d (a digit 1) and Wendv (a v for the y) went by beside David and Wendy.
+    it("asks about a name with a digit for a letter, or a v for a y, as it asks of other look-alikes", () => {
+      const view = edit({ items: [{ id: "d", name: "David", address: ACCOUNT, type: "account" }, { id: "w", name: "Wendy", address: ADDRESS, type: "address" }] });
+      const name = view.field("Name");
+      typeInto(name, "Dav1d");
+      expect(shownNote()).toEqual([`That looks like your contact David, at ${shortAddress(ACCOUNT)}. Is this someone else?`]);
+      typeInto(name, "Wendv");
+      expect(shownNote()).toEqual([`That looks like your contact Wendy, at ${shortAddress(ADDRESS)}. Is this someone else?`]);
+      typeInto(name, "Davina");
+      expect(shownNote()).toEqual([]);
+    });
+
     it("refuses a name with hidden characters, as it's typed and on Save", async () => {
       // Marek's: an override at the start reads as "Profile 2" and "Alice", and a space that takes no room.
       const view = edit();

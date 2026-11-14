@@ -11,7 +11,7 @@ import { setAccountName } from "../../../shared/accountNames.js";
 import { siteLastSeen } from "../../../shared/siteRecords.js";
 import { normalizeWalletName, walletLabel } from "../../../shared/wallets.js";
 import { clearAddressBook, listAddressBook } from "../../../shared/addressBook.js";
-import { duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
+import { duskNameOwners, duskNamesNetwork, lookupPrimaryName } from "../../../shared/duskNames.js";
 import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
@@ -265,10 +265,12 @@ export function optionsView(ov, { state, actions } = {}) {
               // The one check both wallets make at Save (app-core): refused, said under the
               // field; asked, said under it with Yes, save it, and saved only then. Each
               // profile by its label and its verified .dusk name; each contact by its name and
-              // the .dusk name it was saved from.
+              // the .dusk name it was saved from; each .dusk name in it by whose it is, looked
+              // up first: another account's is refused, not asked.
               if (label) {
                 const profiles = displayAccounts.map((account, j) => ({ account: String(account ?? ""), address: String(ov?.addresses?.[j] ?? ""), name: profileLabelOf(ov, j), duskName: verified.get(j) || undefined }));
-                const said = profileNameCheck(label, { profiles, contacts: await contactsNow(), self: String(acct ?? "") });
+                const owners = await duskNameOwners(label, { nodeUrl: ov?.nodeUrl });
+                const said = profileNameCheck(label, { profiles, contacts: await contactsNow(), self: String(acct ?? ""), owners });
                 // Typed again meanwhile: what's said is of the name as it is now.
                 if (input.value !== value) return;
                 if (said?.refused) {

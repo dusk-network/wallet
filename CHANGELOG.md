@@ -82,6 +82,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Refused a profile's name that is a .dusk name registered to another account, looked up first, rather than asking, and took one that is the profile's own without a question; asked about a name with a digit for a letter, as Dav1d beside David, or a v for a y, as Wendv beside Wendy.
 - Left a currency value out of a test network's export, saying where the choice would be that test DUSK has no value.
 - Counted Sozu's deposit fees in what grew while held too, at the same average cost as what unstaking took out, so one is part of the other and a loss shows in both.
 - Took Send it now on a payment Home says wasn't sent straight to Review, to send from there, kept the notice until the payment is handed over, and called Drop Don't send, as the web wallet does.

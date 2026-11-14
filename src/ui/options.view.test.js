@@ -11,6 +11,8 @@ vi.mock("../shared/addressBook.js", () => ({ clearAddressBook: vi.fn(async () =>
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: vi.fn(async (account) => (account.startsWith("26FCH7") ? "alice.dusk" : null)),
+  // Whose each .dusk name in a name is: none looked up, unless a test says.
+  duskNameOwners: vi.fn(async () => new Map()),
 }));
 
 const ACCOUNTS = [
@@ -220,6 +222,79 @@ describe("profile names", () => {
     }
     expect(setAccountName).not.toHaveBeenCalled();
     listAddressBook.mockResolvedValue([]);
+  });
+
+  // Marek's: Yes, save it took sofiadesign.dusk, Sofía's, as his Profile 2's name, and History then gave his own
+  // transfers her name. A .dusk name is looked up first: another account's is refused, not asked; this profile's
+  // own needs no question. And Dav1d beside David, Wendv beside Wendy, went by.
+  it("refuse a .dusk name registered to another account, take this profile's own without asking, and refuse digit and v-for-y look-alikes", async () => {
+    const SOFIA = "sEeMSo7oiV2rxo6aZD3H75XGFZD95BtrmgFD3AezyUkC5W9bUyRwqFr6VuybvuvmvX5kTRt4STaSKbE6FEeMGoPDZNaX1LL82rGzN6BDbajY8qJcweu1mp7m1budNv9kgd7";
+    const { duskNameOwners } = await import("../shared/duskNames.js");
+    duskNameOwners.mockImplementation(async (typed) => {
+      const said = new Map();
+      if (/sofiadesign\.dusk/i.test(typed)) said.set("sofiadesign.dusk", { account: SOFIA });
+      if (/mine\.dusk/i.test(typed)) said.set("mine.dusk", { account: ACCOUNTS[1] });
+      return said;
+    });
+    listAddressBook.mockResolvedValue([
+      { id: "d", name: "David", address: `${SOFIA.slice(0, -1)}8` },
+      { id: "w", name: "Wendy", address: `${SOFIA.slice(0, -1)}9` },
+    ]);
+    setAccountName.mockClear();
+    await settings();
+    const shownError = (n) => {
+      const id = label(n).getAttribute("aria-describedby");
+      return id ? dom.document.getElementById(id).textContent : "";
+    };
+    const question = (n) => label(n).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.querySelector(".contact-note__words").textContent);
+    const name = async (n, typed) => {
+      typeInto(label(n), typed);
+      label(n).dispatchEvent(fakeEvent("blur"));
+      await settle();
+    };
+    try {
+      await name(2, "sofiadesign.dusk");
+      expect([shownError(2), question(2)]).toEqual(["sofiadesign.dusk belongs to another account. Choose another name.", []]);
+      expect(duskNameOwners).toHaveBeenLastCalledWith("sofiadesign.dusk", { nodeUrl: "https://testnet.nodes.dusk.network" });
+      await name(2, "Dav1d");
+      expect(shownError(2)).toBe("That looks like your contact David. Choose another name.");
+      await name(2, "Wendv");
+      expect(shownError(2)).toBe("That looks like your contact Wendy. Choose another name.");
+      expect(setAccountName).not.toHaveBeenCalled();
+      // This profile's own: saved, nothing asked.
+      await name(2, "mine.dusk");
+      expect([shownError(2), question(2), setAccountName.mock.calls]).toEqual(["", [], [[ACCOUNTS[0], 1, "mine.dusk"]]]);
+    } finally {
+      duskNameOwners.mockImplementation(async () => new Map());
+      listAddressBook.mockResolvedValue([]);
+    }
+  });
+
+  // Amélie's: Enter, Enter saved a stranger's account as Lucas in the web wallet, its second Enter on Yes, save it.
+  it("never answer the question with Enter: the field keeps the focus, Enter asks again, and only Yes, save it saves", async () => {
+    listAddressBook.mockResolvedValue([{ id: "l", name: "Lucas (petit-fils)", address: ACCOUNTS[1].replace(/.$/, "x") }]);
+    setAccountName.mockClear();
+    await settings();
+    const question = () => label(2).parentNode.querySelectorAll(".contact-note").filter(isShown).map((el) => el.querySelector(".contact-note__words").textContent);
+    const enter = async () => {
+      label(2).focus();
+      label(2).dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+      label(2).dispatchEvent(fakeEvent("change"));
+      await settle();
+    };
+    try {
+      typeInto(label(2), "Lucas");
+      await enter();
+      expect(question()).toEqual(["You have a contact called Lucas (petit-fils). Is this someone else?"]);
+      expect(dom.document.activeElement).toBe(label(2));
+      await enter();
+      expect([question().length, setAccountName.mock.calls]).toEqual([1, []]);
+      label(2).parentNode.querySelectorAll(".contact-note button").find((b) => b.textContent === "Yes, save it").click();
+      await settle();
+      expect(setAccountName.mock.calls).toEqual([[ACCOUNTS[0], 1, "Lucas"]]);
+    } finally {
+      listAddressBook.mockResolvedValue([]);
+    }
   });
 
   // Amélie's: her profile named Lucas beside her grandson's contact "Lucas (petit-fils)".
