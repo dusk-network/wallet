@@ -48,7 +48,7 @@ import {
 } from "../../../shared/duskNames.js";
 
 import { openQrScanModal } from "../../components/QrScanModal.js";
-import { forgetRequestLink, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
+import { forgetRequestLink, readPastedRequest, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
@@ -439,12 +439,14 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   // A link, read on the wallet's network; what isn't one is a recipient, as a
-  // QR code may hold just the address: it fills in To alone.
-  const looksLikeRequest = (text) => readRequestLink(text, ov?.nodeUrl) !== null;
+  // QR code may hold just the address: it fills in To alone. What's typed or
+  // pasted in To is read as a paste (readPastedRequest): a shared request's
+  // message by its link; a QR code's, as the link it holds.
+  const looksLikeRequest = (text) => readPastedRequest(text, ov?.nodeUrl) !== null;
   const maybeDecodeRequest = (raw, { source = "request" } = {}) => {
     const s = String(raw || "").trim();
     if (!s) return false;
-    const read = readRequestLink(s, ov?.nodeUrl);
+    const read = source === "qr" ? readRequestLink(s, ov?.nodeUrl) : readPastedRequest(s, ov?.nodeUrl);
     if (read) return applyRequest(read, { source });
     if (source !== "qr") return false;
     to.value = s;

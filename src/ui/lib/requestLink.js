@@ -1,4 +1,4 @@
-import { linkAmount, readPaymentLink } from "@dusk-network/app-core/payment-links";
+import { linkAmount, readPastedLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
 
 import { chainIdFromNodeUrl } from "../../shared/chain.js";
 import { chainIdForNode } from "../../shared/nodeNetwork.js";
@@ -20,6 +20,20 @@ export const walletChainOf = (nodeUrl) => chainIdForNode(String(nodeUrl ?? "")) 
  */
 export function readRequestLink(text, nodeUrl) {
   return readPaymentLink(text, nodeUrl === undefined ? {} : { network: walletChainOf(nodeUrl) });
+}
+
+/**
+ * What's typed or pasted in Send's To, as all three wallets' Send read it
+ * (app-core's readPastedLink): a link whole, or a shared request ("… asks you
+ * to pay … Pay here: <link>") by its one link at its end, with its line break
+ * or without, as a phone's one-line field drops it; refused with two links,
+ * or words after the link. Read as readRequestLink reads a link; null for
+ * what has no link, which Send takes as a recipient.
+ * @param {string} text
+ * @param {string} [nodeUrl] - the wallet's node; without one, any network's
+ */
+export function readPastedRequest(text, nodeUrl) {
+  return readPastedLink(text, nodeUrl === undefined ? {} : { network: walletChainOf(nodeUrl) });
 }
 
 /**
