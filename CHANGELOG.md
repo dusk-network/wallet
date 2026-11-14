@@ -82,6 +82,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Looked up again the .dusk names Activity couldn't look up without a signal, once the network is back and on Refresh, rather than only after a restart.
 - Kept the password box for turning fingerprint unlock on in the Android app open while the password is typed, rather than closing it at the first letter.
 - Refused a profile's name that is a .dusk name registered to another account, looked up first, rather than asking, and took one that is the profile's own without a question; asked about a name with a digit for a letter, as Dav1d beside David, or a v for a y, as Wendv beside Wendy.
 - Left a currency value out of a test network's export, saying where the choice would be that test DUSK has no value.

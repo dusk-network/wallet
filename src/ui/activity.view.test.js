@@ -566,6 +566,40 @@ describe("the Activity view", () => {
     await vi.waitFor(() => expect(rows().map((row) => row.split(" · ")[0])).toEqual(["sender.duskReceived"]));
   });
 
+  // Lena's, on Android, twice: opened offline, her payments to sofiadesign.dusk showed as a bare address, and the name
+  // didn't come back with the signal or with Refresh, only after a restart: a failed lookup counted as one done.
+  it("looks a name up again with the next read once its lookup failed, as when the signal's back, keeping one it had", async () => {
+    const { state, draw } = setup({ route: "activity" });
+    const { refreshActivitySoon } = await import("./popup/activity.js");
+    Object.assign(state.activity, {
+      checked: new Set(),
+      epoch: Promise.resolve(1),
+      history: { sync: vi.fn(async () => {}), read: vi.fn(async () => ({ entries: state.activity.entries, state: null, complete: true, coveredTo: 0 })) },
+    });
+    const render = async () => draw();
+    // No signal: every lookup fails, and nothing's named.
+    lookupRecipientNames.mockClear();
+    lookupRecipientNames.mockImplementation(async () => new Map());
+    refreshActivitySoon({ state, render }, 0);
+    await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(rows().some((row) => row.startsWith(`${short(SENDER)}Received`))).toBe(true);
+
+    // The signal's back: the next read looks it up again, and the name shows.
+    lookupRecipientNames.mockImplementation(async (accounts) => new Map(accounts.map((a) => [a, a === SENDER ? "sofiadesign.dusk" : null])));
+    refreshActivitySoon({ state, render }, 0);
+    await vi.waitFor(() => expect(rows().some((row) => row.startsWith("sofiadesign.duskReceived"))).toBe(true));
+
+    // Lost again: the name stays.
+    lookupRecipientNames.mockImplementation(async () => new Map());
+    state.activity.checked.clear();
+    refreshActivitySoon({ state, render }, 0);
+    await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalledTimes(3));
+    await settle();
+    expect(rows().some((row) => row.startsWith("sofiadesign.duskReceived"))).toBe(true);
+    lookupRecipientNames.mockImplementation(async () => new Map());
+  });
+
   it("finds no row by its amount while balances are hidden, and says what's still to read", () => {
     const { state, draw } = setup({ complete: false, hidden: true, route: "activity" });
     state.activitySearch = "1,100";

@@ -942,8 +942,9 @@ installTxStatusListener();
 // --- The connection -------------------------------------------------------
 // Offline, as the browser says at once: the header and Home say so, the
 // balance read last staying. Back online: read again at once, not at the next
-// turn, and the node checked again, for the header not to go on with what a
-// check said while offline. A balance the node couldn't give, online, is read
+// turn, the history with it and the names it couldn't look up, and the node
+// checked again, for the header not to go on with what a check said while
+// offline. A balance the node couldn't give, online, is read
 // again 30 seconds on.
 const BALANCE_RETRY_MS = 30_000;
 let balanceRetryTimer = null;
@@ -966,7 +967,9 @@ async function renderForConnection(opts) {
 try {
   window.addEventListener("offline", () => renderForConnection().catch(() => {}));
   window.addEventListener("online", () => {
-    renderForConnection({ forceRefresh: true }).catch(() => {});
+    renderForConnection({ forceRefresh: true })
+      .then(() => lookForPayments(state.overview, { state, render }))
+      .catch(() => {});
     send({ type: "DUSK_UI_CHECK_NETWORK" })
       .then(() => renderForConnection({ forceRefresh: true }))
       .catch(() => {});
@@ -1009,8 +1012,11 @@ async function askNode() {
   if (answer.nodeStatus === "online") reconnectingUntil = 0;
   if (REVIEW_ROUTES.has(state.route)) renderHeader(headerOf(now));
   else await render({ cached: true });
-  // Back: the balance read again, without waiting for it here.
-  if (answer.nodeStatus === "online") renderForConnection({ forceRefresh: true }).catch(() => {});
+  // Back: the balance read again, and the history, without waiting for it here.
+  if (answer.nodeStatus === "online")
+    renderForConnection({ forceRefresh: true })
+      .then(() => lookForPayments(state.overview, { state, render }))
+      .catch(() => {});
 }
 
 function scheduleNodeAsk(ov) {
