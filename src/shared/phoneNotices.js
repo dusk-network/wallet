@@ -86,6 +86,15 @@ export const incomingNoticeTitle = ({ hidden = false } = {}) =>
 export const INCOMING_LOCKED_TITLE = "Payment received";
 
 /**
+ * What a notice for money that came in says under its title on a phone that
+ * shows it whole, where the payment has a memo, as Android's job fills it in:
+ * the payer's words in quotes ({memo}), as Activity shows a memo that isn't
+ * the wallet's own, then the network. Without a memo, the network alone.
+ * @param {string} network - the network's name
+ */
+export const incomingMemoBody = (network) => [`“{memo}”`, network].filter(Boolean).join(" · ");
+
+/**
  * The app's notice while it's away with a payment waiting for the network
  * (android/ArrivalJob.kt's Waiting): it signs and sends only while it's open.
  * `away` as it's left, `back` once the network answers again. No amount and

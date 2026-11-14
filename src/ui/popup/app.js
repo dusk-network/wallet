@@ -1115,13 +1115,19 @@ function followSent() {
 // Back in front, the balance, the shielded sync and the history are read
 // again at once, as Refresh does: a send made meanwhile, money that came in,
 // or a sync the phone stopped, shows as it is.
+// A phone cut the page's network while it was away, or the app starts: it
+// reconnects first. Said at once, from what's read: the network being
+// checked, never what was said of it while away. Before a notice's tap draws
+// anything (Chen's: a red "Can't reach the network" as a tap opened the payment).
+function reconnecting() {
+  reconnectingUntil = Date.now() + RECONNECT_MS;
+  if (state.overview) renderHeader(headerOf(state.overview));
+}
+
 function comeBack() {
   state.needsRefresh = true;
-  // A phone cut the page's network while it was away: it reconnects first.
-  reconnectingUntil = Date.now() + RECONNECT_MS;
-  // Said at once, from what's read: the network being checked, never what
-  // was said of it while away; a send on Sent being looked up.
-  renderHeader(headerOf(state.overview));
+  reconnecting();
+  // A send on Sent being looked up.
   lookingUpOnLeave();
   setTimeout(() => askNode().catch(() => {}), 0);
   setTimeout(() => renderHeader(headerOf(state.overview)), RECONNECT_MS + 50);
@@ -1197,7 +1203,9 @@ function scheduleFollow(ov) {
 const RECONNECT_MS = 10_000;
 let reconnectingUntil = 0;
 function headerOf(ov) {
-  if (Date.now() >= reconnectingUntil || ov?.networkStatus?.nodeStatus !== "offline" || globalThis.navigator?.onLine === false) return ov;
+  // Away from the screen, what's drawn is the first thing seen back, as the network reconnects: never offline then.
+  const away = document.visibilityState === "hidden";
+  if ((!away && Date.now() >= reconnectingUntil) || ov?.networkStatus?.nodeStatus !== "offline" || globalThis.navigator?.onLine === false) return ov;
   return { ...ov, networkStatus: { ...ov.networkStatus, nodeStatus: "checking" } };
 }
 
@@ -1283,6 +1291,7 @@ try {
       return;
     }
     stepBack();
+    reconnecting();
     // In the app on a phone, a notice's tap first: what it opened is drawn
     // before the screen left is drawn again.
     if (isTauriRuntime() && isPhone()) openNoticed().catch(() => {}).finally(comeBack);
@@ -1811,6 +1820,11 @@ async function openNoticed() {
     acctMenu.close();
     Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
   };
+  // Drawn at once from what's read; as the app starts, nothing's read yet:
+  // the start's own draw reads it, the unlock first where it's locked, which
+  // leaves the payment the screen after it (Sofía's: tapped after Android had
+  // ended the app, the unlock went to Home, the payment a passing toast).
+  const drawOpened = () => (state.overview ? render({ cached: true }) : Promise.resolve());
   // What the notice knew of it, in its block, on its record before it shows:
   // never "Not confirmed" while the app reconnects. Its fee comes with the lookup.
   const recorded = send({ type: "DUSK_UI_TX_NOTICED", hash, token: noticed.token, ...(noticed.status ? { status: noticed.status, blockHeight: noticed.blockHeight } : {}) }).catch(() => null);
@@ -1824,7 +1838,7 @@ async function openNoticed() {
       if (noticed.blockHeight) record.blockHeight = noticed.blockHeight;
     }
     open();
-    await render({ cached: true });
+    await drawOpened();
   }
   const known = await recorded;
   if (!known?.result && !noticed.ours) return;
@@ -1832,7 +1846,7 @@ async function openNoticed() {
     open();
     // At once, from what's read, with the notice's news on it (DUSK_UI_TX_STATUS):
     // a read now could wait seconds on a network still coming back.
-    await render({ cached: true });
+    await drawOpened();
   }
   state.needsRefresh = true;
   render({ forceRefresh: true }).catch(() => {});
@@ -1870,6 +1884,11 @@ async function openIncoming(noticed) {
   }
   incomingTap = null;
   const known = await send({ type: "DUSK_UI_TX_NOTICED", hash: noticed.hash, token: noticed.token, account: noticed.account }).catch(() => null);
+  // Locked meanwhile, as by its auto-lock, though what was read says open: the payment once it's unlocked.
+  if (isWalletLockedResponse(known)) {
+    incomingTap = noticed;
+    return;
+  }
   const profileIndex = known?.result?.incoming ? Number(known.result.profileIndex) : -1;
   if (!(profileIndex >= 0)) return;
   netMenu.close();
@@ -1894,6 +1913,8 @@ async function openIncoming(noticed) {
 }
 
 export function mountPopup() {
+  // The app starts: what was said of the network was said before, maybe while it was away.
+  if (isTauriRuntime() && isPhone()) reconnecting();
   openNoticed().catch(() => {});
   render()
     // Sends left on their way while the wallet was closed are looked up now.

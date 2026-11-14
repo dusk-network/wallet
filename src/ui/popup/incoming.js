@@ -12,7 +12,7 @@
 import { historyArchiverUrl } from "../../shared/activityHistory.js";
 import { amountLocale } from "../../shared/amount.js";
 import { networkTextOf } from "../../shared/nodeNetwork.js";
-import { INCOMING_LOCKED_TITLE, incomingNoticeTitle } from "../../shared/phoneNotices.js";
+import { INCOMING_LOCKED_TITLE, incomingMemoBody, incomingNoticeTitle } from "../../shared/phoneNotices.js";
 import { appNoticesAllowed, watchAppIncoming } from "../../platform/notices.js";
 
 // What was given last, and when: given again once it changes, and each
@@ -45,12 +45,15 @@ export function incomingSetup(ov, { names } = {}) {
   const archiveUrl = historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl });
   if (!accounts.length || !archiveUrl) return null;
   const known = [...(names ?? new Map())].filter(([account, name]) => account && typeof name === "string" && /\.dusk$/i.test(name)).slice(0, 100);
+  const network = networkTextOf(String(ov.nodeUrl ?? ""));
   return {
     accounts,
     names: Object.fromEntries(known),
     archiveUrl,
-    network: networkTextOf(String(ov.nodeUrl ?? "")),
+    network,
     title: incomingNoticeTitle({ hidden: ov.hideBalances === true }),
+    // Under it, the payer's memo where the payment has one (Sofía's: her invoice's number wasn't named).
+    memoBody: incomingMemoBody(network),
     // On a locked phone that hides what notices say.
     publicTitle: INCOMING_LOCKED_TITLE,
     wallet: accounts[0].account,

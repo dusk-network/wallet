@@ -819,6 +819,45 @@ export function loadActivityDetail({ ov, state, render }, hash) {
     });
 }
 
+// Each tapped payment looked for among every row kept, once for each change to what's kept.
+const keptLooks = new Map();
+
+/**
+ * A payment a screen opens by its ID, still looked for (`state.txDetailRow`,
+ * `reading`), as a notice's tap opens what came in: looked for among every row
+ * kept on this device, past Activity's page too (issue #214: the payment
+ * reported missing behind 50 newer ones), once for each change to what's kept
+ * as Activity syncs. Found, it's the row the details show.
+ * @param {{ ov: object, state: object, render?: () => Promise<void> }} ctx
+ * @param {string} hash
+ */
+export function lookForKeptRow({ ov, state, render }, hash) {
+  const a = state?.activity;
+  const tap = state?.txDetailRow;
+  const want = String(hash ?? "").toLowerCase();
+  if (!a?.history || !a.loaded || !tap?.reading || tap.context !== a.key || String(tap.hash ?? "").toLowerCase() !== want) return;
+  const key = `${a.key}\n${want}`;
+  const at = a.reads ?? 0;
+  if (keptLooks.has(key) && keptLooks.get(key) === at) return;
+  keptLooks.set(key, at);
+  a.history
+    .read({ limit: Number.MAX_SAFE_INTEGER - 1 })
+    .then(async (read) => {
+      let entry = read.entries.find((e) => e.hash === want);
+      if (!entry || state.activity !== a || state.txDetailRow !== tap) return;
+      // Its time, outcome and fee, as a row opened gets them.
+      if (a.history.needsDetails(entry) && (await a.epoch) !== undefined) {
+        await a.history.fillDetails([entry]).catch(() => {});
+        const { entries: block } = await a.history.read({ before: entry.blockHeight + 1, limit: 1 });
+        entry = block.find((e) => e.hash === want) ?? entry;
+      }
+      if (state.activity !== a || state.txDetailRow !== tap) return;
+      tap.row = activityRows(ov, state, { entries: [entry], meta: read.state, shielded: a.shielded }).find((row) => row.hash === want) ?? null;
+      if (tap.row) redraw(state, render);
+    })
+    .catch(() => {});
+}
+
 /** Whether Show more has more to show: kept rows beyond the page, or older history to sync. */
 export function hasMoreActivity(state) {
   const a = state?.activity;

@@ -1511,8 +1511,10 @@ describe("arrival notices in the app on a phone", () => {
     await expect(tap({ token: "d5".repeat(16) })).resolves.toMatchObject({ ok: true, result: null });
     await expect(tap({ token: await noticeTokenFor(HASH) })).resolves.toMatchObject({ ok: true, result: null });
     await expect(tap({ account: ACCOUNT })).resolves.toMatchObject({ ok: true, result: null });
+    // Locked, as by its auto-lock while the page still showed it open: said so, for the page to keep
+    // the tap for the unlock (issue #214), rather than as a tap that opens nothing.
     engine.unlocked = false;
-    await expect(tap()).resolves.toMatchObject({ ok: true, result: null });
+    await expect(tap()).resolves.toEqual({ error: expect.objectContaining({ message: "Wallet locked" }) });
     engine.unlocked = true;
   });
 

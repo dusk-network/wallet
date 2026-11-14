@@ -44,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Named the payer's memo in the Android app's notice for money that came in.
 - Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
 - Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.
 - Said one thing at a time of a payment that waited, on Home: Not sent yet while it waits and Sending as it goes out, and listed it in Activity as it went out, rather than in neither for a while; and in Firefox for Android that it goes on while the Keep open tab stays open.
@@ -100,6 +101,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Opened a payment notice tapped after Android had closed the app on its payment once unlocked, rather than on Home with a passing toast, and one for money that came in after the app locked itself.
+- Kept Can't reach the network off the Android app's screen as it reconnects, as when a notice's tap brings it back.
+- Found a payment a notice opens among every payment on the device, also behind 50 newer ones.
 - Searched every payment kept on the device in Activity when older ones can't be read, such as offline, rather than only the rows shown.
 - Kept a warning said as a field is typed in, such as that the same payment is waiting or that the recovery phrase is still on the clipboard, above a phone's keyboard with the button after it, in Firefox for Android and the app.
 - Looked for a send every 10 to 30 seconds for its first two minutes once the Android app is left, so its notice comes within moments of its block rather than minutes after.

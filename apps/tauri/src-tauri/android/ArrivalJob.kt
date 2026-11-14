@@ -38,6 +38,9 @@ import org.json.JSONObject
 import java.math.BigInteger
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
 
 object Arrivals {
   /** The intent's extra a notice's tap carries: the transaction to open. */
@@ -464,7 +467,35 @@ object Incoming {
     return if (fraction.isEmpty()) whole else "$whole$decimal$fraction"
   }
 
-  private class Payment(val account: String, val hash: String, val height: Long, val value: BigInteger, val from: String)
+  private class Payment(val account: String, val hash: String, val height: Long, val value: BigInteger, val from: String, val memo: String)
+
+  // At most this many characters of a memo in a notice, the rest "…".
+  private const val MEMO_SHOWN = 100
+  private val HEX = Regex("^[0-9a-fA-F]+$")
+
+  /**
+   * A payment's memo as its words, as Activity reads it (app-core's memoOf):
+   * UTF-8 text, else nothing. Nothing either for one with a character that
+   * can't be seen or that turns the text around, which Activity shows as its
+   * code and a notice can't: its details show it.
+   */
+  private fun memoText(hex: String): String {
+    if (hex.isEmpty() || hex.length % 2 != 0 || hex.length > 2048 || !HEX.matches(hex)) return ""
+    val bytes = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+    val text = try {
+      StandardCharsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(bytes))
+        .toString()
+        .trim()
+    } catch (_: Exception) {
+      return ""
+    }
+    if (text.any { Character.isISOControl(it) || Character.getType(it) == Character.FORMAT.toInt() || it == '\u2028' || it == '\u2029' }) return ""
+    if (text.codePointCount(0, text.length) <= MEMO_SHOWN) return text
+    return text.substring(0, text.offsetByCodePoints(0, MEMO_SHOWN)).trimEnd() + "…"
+  }
 
   /** One look: each account's payments in since the last, the newest told where the app was away when they came. */
   fun check(context: Context) {
@@ -514,6 +545,7 @@ object Incoming {
         if (!Arrivals.isHash(hash) || height < 0 || height > finalized) continue
         var value = BigInteger.ZERO
         var from = ""
+        var memo = ""
         val events = row.optJSONArray("events") ?: continue
         for (e in 0 until events.length()) {
           val event = events.optJSONObject(e) ?: continue
@@ -522,9 +554,12 @@ object Incoming {
           val sender = d.optString("sender")
           if (d.optString("receiver") != account || sender == account) continue
           value += d.optString("value").toBigIntegerOrNull()?.takeIf { it.signum() > 0 } ?: BigInteger.ZERO
-          if (from.isEmpty()) from = sender
+          if (from.isEmpty()) {
+            from = sender
+            memo = memoText(d.optString("memo"))
+          }
         }
-        if (value.signum() > 0) found += Payment(account, hash, height, value, from)
+        if (value.signum() > 0) found += Payment(account, hash, height, value, from, memo)
       }
     }
     val awayAt = prefs(context).getLong("awayAt", 0L)
@@ -560,11 +595,15 @@ object Incoming {
       val name = ownName?.takeIf { it.isNotEmpty() } ?: names.optString(payment.from).takeIf { it.isNotEmpty() }
         ?: if (payment.from.length > 15) "${payment.from.take(6)}…${payment.from.takeLast(6)}" else payment.from
       val title = setup.optString("title").replace("{amount}", dusk(payment.value, setup.optString("decimal", "."), setup.optString("group", ","))).replace("{name}", name)
+      // Under it, the payer's memo where it has one, as the page words it (`memoBody`), else the network alone.
+      val network = setup.optString("network")
+      val memoBody = setup.optString("memoBody")
+      val body = if (payment.memo.isNotEmpty() && memoBody.contains("{memo}")) memoBody.replace("{memo}", payment.memo) else network
       // Turned off, or the wallet gone, while the archive answered: nothing told.
       // A locked phone that hides what notices say: "Payment received", no amount, no name.
       synchronized(this) {
         if (setup(context)?.optString("wallet") == setup.optString("wallet")) {
-          Arrivals.post(context, title, setup.optString("network"), payment.hash, "executed", payment.height, setup.optString("token"), setup.optString("network"), payment.account, setup.optString("publicTitle").ifEmpty { "Payment received" })
+          Arrivals.post(context, title, body, payment.hash, "executed", payment.height, setup.optString("token"), network, payment.account, setup.optString("publicTitle").ifEmpty { "Payment received" })
         }
       }
     }

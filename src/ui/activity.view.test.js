@@ -653,6 +653,29 @@ describe("the Activity view", () => {
   });
 });
 
+describe("a payment a notice's tap opens", () => {
+  // Issue #214: a payment told by a notice, behind 50 newer ones in Activity, was reported missing though it was kept.
+  it("is looked for among every payment kept on this device, past Activity's page, by its ID", async () => {
+    const { state, draw } = setup({ route: "tx" });
+    const kept = state.activity.entries;
+    const told = kept.find((entry) => entry.counterparty === SENDER);
+    // The page: the newest one alone.
+    state.activity.limit = 1;
+    state.activity.entries = kept.slice(0, 1);
+    state.activity.epoch = Promise.resolve(1);
+    state.activity.history = {
+      read: vi.fn(async ({ limit, before }) => ({ entries: kept.filter((e) => !before || e.blockHeight < before).slice(0, limit), state: null, complete: true, coveredTo: 0 })),
+      needsDetails: () => false,
+      fillDetails: vi.fn(async () => {}),
+    };
+    expect(state.activity.entries.some((entry) => entry.hash === told.hash)).toBe(false);
+    Object.assign(state, { txDetailHash: told.hash, txDetailFrom: "home", txDetailRow: { context: state.activity.key, hash: told.hash, reading: true, row: null } });
+    draw();
+    await vi.waitFor(() => expect(visibleText(body().querySelector(".tx-hero-amount"))).toBe("+1,000 DUSK"));
+    expect(body().querySelector(".tx-missing")).toBeNull();
+  });
+});
+
 describe("a transaction's details", () => {
   const sent = {
     hash: "3e6a0ec6".padEnd(56, "0") + "7eae84ba",

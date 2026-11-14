@@ -748,7 +748,10 @@ export async function localSend(message) {
       // token for those notices.
       if (message.account) {
         const status = engineStatus();
-        const accounts = status?.isUnlocked ? (status.accounts ?? []).map(String) : [];
+        // Locked, as by its auto-lock while the page still showed it open: the
+        // page keeps the tap for the unlock rather than drop it.
+        if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        const accounts = (status.accounts ?? []).map(String);
         const profileIndex = accounts.indexOf(String(message.account));
         const ours = profileIndex >= 0 && (await isIncomingNoticeToken(accounts[0], token).catch(() => false));
         return { ok: true, result: ours ? { incoming: true, profileIndex } : null };

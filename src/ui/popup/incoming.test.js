@@ -46,6 +46,8 @@ describe("notices of money coming in, in the app on Android", () => {
       archiveUrl: "https://testnet.nodes.dusk.network",
       network: "Testnet",
       title: "You received {amount} DUSK from {name}",
+      // Sofía's: "You received 0.01 DUSK from Profile 2 · Testnet" didn't name her invoice. The payer's memo, in quotes.
+      memoBody: "“{memo}” · Testnet",
       // Astra's: the lock screen showed the amount and who paid, where the phone hides what notices say.
       publicTitle: "Payment received",
       wallet: ACCOUNTS[0],
