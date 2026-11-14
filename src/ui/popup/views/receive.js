@@ -16,7 +16,7 @@ import { requestFileName, stamped } from "../../lib/fileNames.js";
 import { shortAddress } from "../../lib/strings.js";
 import { inCurrencyLine } from "../../lib/inCurrency.js";
 import { makePaymentLink, requestMessage } from "@dusk-network/app-core/payment-links";
-import { rememberRequest } from "../../../shared/paymentRequests.js";
+import { rememberRequest, sameRequest } from "../../../shared/paymentRequests.js";
 import { requestKept, requestNetwork, requestsSection } from "./requests.js";
 import { amountChoices, amountForInput, formatDuskExact } from "../../../shared/amount.js";
 import { amountQuestionEls } from "../../components/AmountQuestion.js";
@@ -37,6 +37,9 @@ function isTauriMobileLike() {
 }
 
 // A test network's name, for a request's picture and its file; "" on Mainnet.
+/** What's said as a request paid already is copied or shared again: its link goes, and no new one is kept. */
+export const PAID_ALREADY_TEXT = "This request was paid already.";
+
 const testNetworkOf = (ov) => {
   const name = String(ov?.networkName ?? "");
   return name && name !== "Mainnet" ? name : "";
@@ -185,10 +188,19 @@ export function receiveView(ov, { state, actions } = {}) {
   // The requests made here, drawn again on their own as one is kept, so what's pressed stays as it is.
   const requestsHost = h("div", { class: "receive-requests-host" });
   const drawRequests = () => requestsHost.replaceChildren(...[requestsSection(ov, { state, actions })].filter(Boolean));
-  // Keeps what's asked in the list as it leaves the wallet: copied, shared or downloaded.
+  // Keeps what's asked in the list as it leaves the wallet: copied, shared or
+  // downloaded. Sofía's: Copy request link on an invoice paid already made a
+  // second, waiting one with its number, which a client could pay again. One
+  // paid already goes as its link, the same one, and it's said: nothing new
+  // is kept (rememberRequest keeps none twice).
   const keepRequest = () => {
     if (!wantRequest) return;
-    rememberRequest(String(ov?.accounts?.[0] ?? ""), { lux: curLux, memo: curMemo, network: requestNetwork(ov), to: curRecipient })
+    const asked = { lux: curLux, memo: curMemo, network: requestNetwork(ov), to: curRecipient };
+    if (sameRequest(state.requests?.list, asked)?.paid) {
+      actions?.showToast?.(PAID_ALREADY_TEXT);
+      return;
+    }
+    rememberRequest(String(ov?.accounts?.[0] ?? ""), asked)
       .then((list) => {
         requestKept(state, list);
         drawRequests();

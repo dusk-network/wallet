@@ -44,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Copied or shared a request paid already as its own link, saying it was paid, rather than making a second one with the same invoice.
 - Said the fee charged on Completed once a node that went silent answers again, rather than the most it could be.
 - Read Rewards by year again after a stake or an unstake with Sozu, till the history lists it and it's counted.
 - Said Staking's figures may be out of date while the node doesn't answer or the network's gone, as Home says its balance may be.

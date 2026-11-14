@@ -638,6 +638,27 @@ describe("the requests made here", () => {
     expect(items[KEY][ACCOUNT]).toHaveLength(1);
   });
 
+  // Sofía's, in the app: Copy request link on an invoice paid already, the form still filled in, made a second
+  // request with the same invoice number, Waiting, which a client could pay again.
+  it("copies a request paid already as its own link, keeps no second one, and says it was paid", async () => {
+    items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "10000000", memo: "Factura 2026-151" })] };
+    const entries = [paidIn("a1".repeat(32), "10000000", "Factura 2026-151", T0 + HOUR)];
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "0.01", memo: "Factura 2026-151" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
+    const actions = await draw(state);
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid"]));
+    await vi.waitFor(() => expect(items[KEY][ACCOUNT][0].paid).toBeTruthy());
+    await actions.render();
+
+    dom.document.body.querySelector('button[data-label="Copy request link"]').click();
+    await settle();
+    await settle();
+    // The link it was asked with, as before; no second request, and what's said is that it was paid.
+    expect(String(dom.clipboard.writeText.mock.lastCall?.[0] ?? "")).toContain("memo=Factura+2026-151");
+    expect(actions.showToast).toHaveBeenCalledWith("This request was paid already.");
+    expect(items[KEY][ACCOUNT].map((r) => r.id)).toEqual(["a"]);
+    expect(shown().map((row) => row.state)).toEqual(["Paid"]);
+  });
+
   it("says what came in for each: paid, to check, or paid twice, each payment to open, and keeps what paid", async () => {
     items[KEY] = {
       [ACCOUNT]: [

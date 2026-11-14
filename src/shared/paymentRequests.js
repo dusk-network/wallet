@@ -67,18 +67,26 @@ function change(walletId, edit) {
 }
 
 /**
- * Keeps a request as it leaves the wallet: the same one still open stays as
- * it is, with the time it was first asked.
+ * Keeps a request as it leaves the wallet: the same one kept already, open or
+ * paid, stays as it is, with the time it was first asked.
  * @param {string} walletId
  * @param {{ lux: bigint | null, memo: string, network: string, to: string }} asked
  */
 export function rememberRequest(walletId, { lux, memo, network, to }) {
-  const text = lux === null ? null : String(lux);
-  return change(walletId, (list) =>
-    list.some((kept) => !kept.paid && kept.to === to && kept.lux === text && kept.memo === memo && kept.network === network)
-      ? list
-      : [{ at: Date.now(), id: crypto.randomUUID(), lux: text, memo, network, to }, ...list]
-  );
+  return change(walletId, (list) => (sameRequest(list, { lux, memo, network, to }) ? list : [{ at: Date.now(), id: crypto.randomUUID(), lux: lux === null ? null : String(lux), memo, network, to }, ...list]));
+}
+
+/**
+ * The request kept already that asks what `asked` does, paid or not: the same
+ * amount and memo, to the same address on the same network. Two such can't
+ * be told apart: a payment for one pays the other, so none is kept twice.
+ * @param {PaymentRequest[]} list
+ * @param {{ lux: bigint | string | null, memo: string, network: string, to: string }} asked
+ * @returns {PaymentRequest | undefined}
+ */
+export function sameRequest(list, { lux, memo, network, to }) {
+  const text = lux === null || lux === undefined ? null : String(lux);
+  return (Array.isArray(list) ? list : []).find((kept) => kept.to === to && kept.lux === text && kept.memo === memo && kept.network === network);
 }
 
 /**
