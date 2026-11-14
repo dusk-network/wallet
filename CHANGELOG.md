@@ -44,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said on Liquid staking that Sozu's rewards so far are before deposit fees, and in Rewards by year that what grew while held is after them.
 - Said in the Android app that a payment waiting for the network goes out when the app is opened again, on Sent and Home, and in a notice while it's away, which says to open the app once the network's back.
 - Said how much was paid and to whom in the Android app's notice that a payment arrived, keeping that off a locked screen that hides what notices say.
 - Showed a memo on a payment from an address that isn't one of your profiles or contacts as the sender's words, muted and in quotes, under “From an address not in your contacts” or their .dusk name, in Activity, on Home and in its details.

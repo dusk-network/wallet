@@ -11,7 +11,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
-import { sozuPosition, sozuRate, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
+import { POSITION_WORDS, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
 import { SOZU_FN, feePercent, leastSozuStake, parsePool, sozuStake, sozuUnstakeAllowed } from "@dusk-network/networks/sozu";
 
 import {
@@ -884,24 +884,26 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
-  // The position, as the shared sums make it (sozuPosition): each short, as a row
-  // is, with what it is to the last lux for a pointer. What's put in and earned
-  // waits for the whole history, and the rewards for each stake's deposit fee.
+  // The position, as the shared sums make it (sozuPosition), in both wallets'
+  // words: each short, as a row is, with what it is to the last lux for a
+  // pointer. What's put in and earned waits for the whole history, and the
+  // rewards for each stake's deposit fee; they're before those fees, which the
+  // row above them says, as Rewards by year's growth is after them.
   const held = sozuPosition({ rows: history.rows, status: rateStatus, facts: history.facts, complete: Boolean(history.whole) });
   const money = (lux) => h("span", { title: hidden ? undefined : formatDuskExact(lux.toString()) }, [balance(hidden, fmtLux(lux)), " DUSK"]);
   const reading = h("span", { class: "muted", text: "Reading your history…" });
   const positionGroup = position && (poolBalanceLux > 0n || stDuskLux > 0n || held.putIn > 0n)
     ? h("div", { class: "group sozu-position" }, [
-        history.whole ? kv("Put in", money(held.putIn)) : null,
-        history.whole && held.takenOut > 0n ? kv("Taken out", money(held.takenOut)) : null,
-        kv("Worth now", money(poolBalanceLux)),
-        history.whole && held.depositFees > 0n ? kv(held.feesExact ? "Deposit fees" : "Deposit fees, about", money(held.depositFees)) : null,
+        history.whole ? kv(POSITION_WORDS.putIn, money(held.putIn)) : null,
+        history.whole && held.takenOut > 0n ? kv(POSITION_WORDS.takenOut, money(held.takenOut)) : null,
+        kv(POSITION_WORDS.worthNow, money(poolBalanceLux)),
+        history.whole && held.depositFees > 0n ? kv(held.feesExact ? POSITION_WORDS.depositFees : POSITION_WORDS.depositFeesAbout, money(held.depositFees)) : null,
         history.reading
-          ? kv("Rewards so far", reading)
+          ? kv(POSITION_WORDS.earned, reading)
           : history.whole && held.earned !== null
-            ? kv("Rewards so far", held.earned < 0n ? h("span", {}, [MINUS, money(-held.earned)]) : money(held.earned))
+            ? kv(POSITION_WORDS.earned, held.earned < 0n ? h("span", {}, [MINUS, money(-held.earned)]) : money(held.earned))
             : null,
-        kv("stDUSK", [balance(hidden, fmtLux(stDuskLux)), " stDUSK", stDuskAction].filter(Boolean)),
+        kv(POSITION_WORDS.stDusk, [balance(hidden, fmtLux(stDuskLux)), " stDUSK", stDuskAction].filter(Boolean)),
         held.waiting ? h("p", { class: "stake-cap", text: held.waiting === 1 ? "One more on its way isn't counted yet." : `${held.waiting} more on their way aren't counted yet.` }) : null,
       ].filter(Boolean))
     : null;
