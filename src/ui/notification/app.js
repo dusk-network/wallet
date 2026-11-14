@@ -7,7 +7,7 @@ import { UI_DISPLAY_DECIMALS, amountLocale, formatDuskExact, formatFee, groupTho
 import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, callsBridge } from "../../shared/bridgeCalls.js";
 import { bytesToHex, sha256Hex, toBytes } from "../../shared/bytes.js";
 import { TX_KIND } from "../../shared/constants.js";
-import { defaultGasPriceOf, getMinimumGas } from "../../shared/txDefaults.js";
+import { defaultGasPriceOf, gasStatsRead, getMinimumGas } from "../../shared/txDefaults.js";
 import { classifyDuskIdentifier } from "../../shared/duskIdentifiers.js";
 import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
@@ -1355,8 +1355,8 @@ export async function renderNotification() {
         send({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" })
           .then((res) => {
             const stats = res?.result ?? res;
-            if (!/^\d+$/.test(String(stats?.median ?? "").trim())) return;
-            // Both wallets' one rule: the mempool's median, under a ceiling, said over it.
+            if (!gasStatsRead(stats)) return;
+            // Both wallets' one rule: the minimum while what waits fits in a block, else the mempool's median, under a ceiling, said over it.
             const rule = defaultGasPriceOf(stats);
             const price = rule.price.toString();
             gasEditor.networkGas = { limit: String(gas.limit), price };

@@ -1,5 +1,5 @@
 import { UI_DISPLAY_DECIMALS } from "../../shared/amount.js";
-import { defaultGasPriceOf, getDefaultGas, getMinimumGas } from "../../shared/txDefaults.js";
+import { defaultGasPriceOf, gasStatsRead, getDefaultGas, getMinimumGas } from "../../shared/txDefaults.js";
 import { h } from "../lib/dom.js";
 import { shortfallText } from "../lib/shortfall.js";
 import { sameGas } from "./GasEditor.js";
@@ -36,9 +36,10 @@ export function startingGas({ defaultGas, minLimit, customGas, gas } = {}) {
 /**
  * The gas price the network asks now, by both wallets' one rule (app-core's
  * defaultGasPrice), as Review and Send's own fee both start from it: the
- * node's mempool median, under a ceiling, with `busy` where the median is
- * over it and `median` then; null where the node doesn't say. The wallet
- * keeps it 30 seconds, so the two agree.
+ * minimum while what waits in the node's mempool fits in the next block, else
+ * its median, under a ceiling, with `busy` where the median is over it and
+ * `median` then; null where the node doesn't say. The wallet keeps it 30
+ * seconds, so the two agree.
  * @param {object} actions
  * @returns {Promise<{ price: string, busy: boolean, median: string } | null>}
  */
@@ -46,7 +47,7 @@ export async function networkGasRule(actions) {
   const response = await actions?.send?.({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
   if (response?.error) throw new Error(response.error.message ?? "Gas price unavailable");
   const stats = response?.result ?? response;
-  if (!/^\d+$/.test(String(stats?.median ?? "").trim())) return null;
+  if (!gasStatsRead(stats)) return null;
   const rule = defaultGasPriceOf(stats);
   return { price: rule.price.toString(), busy: rule.busy, median: String(rule.median ?? "") };
 }

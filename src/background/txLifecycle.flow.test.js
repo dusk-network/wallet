@@ -1437,6 +1437,23 @@ describe("background Phoenix tx lifecycle flow", () => {
       expect(sent().gas).toEqual({ limit: "2500000", price: "40" });
     });
 
+    // Lena's, three rounds: the median of a mempool holding only Sozu's activation, at 2, was everyone's price.
+    it("goes at the minimum while what waits fits in a block, and the capped median once it doesn't, where Review left the price to the network", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      let stats = { mempool: [{ gasPrice: "2", gasLimit: "6000000" }] };
+      engineCall.mockImplementation(async (method) => {
+        if (method === "dusk_getCachedGasPrice") return stats;
+        if (method === "dusk_sendTransaction") return { hash: "0xpriced" };
+        return true;
+      });
+      const sent = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction").at(-1)[1];
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params })).resolves.toMatchObject({ ok: true });
+      expect(sent().gas).toEqual({ limit: "2500000", price: "1" });
+      stats = { mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) };
+      await sendBackgroundMessage({ type: "DUSK_UI_SEND_TX", walletId: "acct0", params });
+      expect(sent().gas).toEqual({ limit: "2500000", price: "5" });
+    });
+
     it("goes from the wallet it was reviewed on, and a switch waits for it", async () => {
       const { engineCall } = await import("../background/engineHost.js");
       const { WALLET_LIFECYCLE_LOCK, withStorageLock } = await import("../shared/storageLock.js");

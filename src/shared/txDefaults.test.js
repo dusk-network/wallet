@@ -1,18 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  DEFAULT_TRANSFER_GAS_BY_PRIVACY,
-  DEFAULT_GAS_BY_KIND,
-  MIN_TRANSFER_GAS_BY_PRIVACY,
-  MIN_CONTRACT_CALL_GAS_BY_PRIVACY,
-  getDefaultGas,
-  getMinimumGas,
-  applyGasDefaults,
-  applyTxDefaults,
-  assertMinimumGas,
-  isCompleteGas,
-  GAS_PRICE_BUSY,
-  defaultGasPriceOf,
-} from "./txDefaults.js";
+import { DEFAULT_TRANSFER_GAS_BY_PRIVACY, DEFAULT_GAS_BY_KIND, MIN_TRANSFER_GAS_BY_PRIVACY, MIN_CONTRACT_CALL_GAS_BY_PRIVACY, getDefaultGas, getMinimumGas, applyGasDefaults, applyTxDefaults, assertMinimumGas, isCompleteGas, GAS_PRICE_BUSY, defaultGasPriceOf, gasStatsRead } from "./txDefaults.js";
 import { TX_KIND } from "./constants.js";
 
 describe("DEFAULT_GAS_BY_KIND", () => {
@@ -379,6 +366,19 @@ describe("isCompleteGas", () => {
 });
 
 describe("the default gas price", () => {
+  // Lena's, three rounds: the extension's unstake paid 2 where the web wallet's paid 1. Sozu's operator's activation,
+  // at 2, waited alone in the mempool, and the median of one is 2. What waits all fits in the next block: the minimum.
+  it("is the minimum while what waits in the mempool fits in the next block, and its median, capped, once it doesn't", () => {
+    expect(defaultGasPriceOf({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] })).toMatchObject({ price: 1n, busy: false });
+    expect(defaultGasPriceOf({ mempool: [] })).toMatchObject({ price: 1n, busy: false });
+    const full = (price) => Array.from({ length: 1000 }, () => ({ gasPrice: String(price), gasLimit: "2500000" }));
+    expect(defaultGasPriceOf({ mempool: full(3) })).toMatchObject({ price: 3n, busy: false });
+    expect(defaultGasPriceOf({ mempool: full(900) })).toMatchObject({ price: 5n, busy: true, median: 900n });
+    // What waits wins over a median, and either one is the node's word; nothing is the minimum.
+    expect(defaultGasPriceOf({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }], median: "2" })).toMatchObject({ price: 1n });
+    expect([gasStatsRead({ mempool: [] }), gasStatsRead({ median: "2" }), gasStatsRead({})]).toEqual([true, true, false]);
+  });
+
   // Marek's: the default followed the mempool's median with no ceiling, so a spammed mempool raised every default fee.
   // Lena's: the extension's unstake paid price 2 where the web wallet's paid 1. Both wallets use app-core's one rule now.
   it("follows the network's median up to a ceiling of five times the minimum, and says the network is busy over it", () => {

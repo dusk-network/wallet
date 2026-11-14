@@ -1297,6 +1297,31 @@ describe("review", () => {
     expect([fee(), busy()]).toEqual(["Network feeup to 0.005 DUSKTotalup to 1.005 DUSK", ""]);
   });
 
+  // Lena's, three rounds: a default worked out from the mempool's median made one waiting transaction everyone's
+  // price, as Sozu's activation at 2 after a stake. What waits fits in a block: the minimum.
+  it.each([
+    ["a public transfer", () => ({ to: ALICE.account, privacy: "public" })],
+    ["a shielded transfer", () => ({ to: ALICE.address, privacy: "shielded" })],
+  ])("starts %s from the minimum with one transaction waiting at 2, and from the capped median with a full mempool", async (_, draft) => {
+    const priceSent = async (stats) => {
+      const sent = [];
+      const send = async (message) => {
+        if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+        return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? stats : { ok: true, result: { hash: "ab".repeat(32) } };
+      };
+      review(draft(), overview({ shieldedBalance: { value: "5000000000", spendable: "5000000000" } }), send);
+      await settle();
+      const busy = visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
+      pastClickGuard();
+      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+      await settle();
+      return [sent[0]?.params.gas?.price, busy];
+    };
+    expect(await priceSent({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] })).toEqual(["1", ""]);
+    const full = { mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) };
+    expect(await priceSent(full)).toEqual(["5", "The network is busy. You can raise the gas price for it to go out sooner."]);
+  });
+
   it("hides Use the network's price while the fee is the network's, custom gas from Settings that equals it too", async () => {
     // The node asks 2 LUX.
     const send = async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {});

@@ -2503,6 +2503,33 @@ export async function getGasPrice({ maxTransactions } = {}) {
   }
 }
 
+/**
+ * What waits in the node's mempool, each transaction's gas price and limit,
+ * as the node's GraphQL lists it (`mempoolTxs { gasPrice gasLimit }`) and the
+ * web wallet reads it: what both wallets' default gas price is worked out
+ * from (app-core's defaultGasPrice, txDefaults.js defaultGasPriceOf).
+ * @returns {Promise<Array<{ gasPrice: string, gasLimit: string }>>}
+ */
+async function getMempoolGas() {
+  await ensureNetwork();
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+
+  try {
+    const { mempoolTxs } = await state.network.query("mempoolTxs { gasPrice gasLimit }", { signal: controller.signal });
+    if (!Array.isArray(mempoolTxs)) throw new Error("The node didn't list its mempool");
+    return mempoolTxs.map((tx) => ({ gasPrice: String(tx?.gasPrice ?? ""), gasLimit: String(tx?.gasLimit ?? "") }));
+  } catch (e) {
+    if (e?.name === "AbortError") {
+      throw new Error("Gas price request timed out");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 // --- Cached gas price ---
 // Cache gas prices to avoid hammering the node on every tx.
 const gasPriceCache = {
@@ -2513,12 +2540,15 @@ const gasPriceCache = {
 const GAS_PRICE_CACHE_TTL_MS = 30_000; // 30 seconds
 
 /**
- * Get gas price with caching. Returns cached value if fresh, otherwise fetches.
- * Falls back to { average: "1", ... } on error to avoid blocking transactions.
+ * What waits in the node's mempool (`mempool`, getMempoolGas), for the
+ * default gas price of every transaction the wallet makes or a site asks for:
+ * read as a Review opens and kept 30 seconds, so the Review and its Confirm
+ * agree. Where the node can't say, what was read last, else nothing (`{}`),
+ * and the default is the network's minimum.
  *
  * @param {Object} [opts]
  * @param {boolean} [opts.forceRefresh=false] - Bypass cache and fetch fresh data.
- * @returns {Promise<{average: string, max: string, median: string, min: string}>}
+ * @returns {Promise<{ mempool?: Array<{ gasPrice: string, gasLimit: string }> }>}
  */
 export async function getCachedGasPrice({ forceRefresh = false } = {}) {
   const nodeUrl = String(engineConfig.nodeUrl || "").trim();
@@ -2535,15 +2565,15 @@ export async function getCachedGasPrice({ forceRefresh = false } = {}) {
   }
 
   try {
-    const data = await getGasPrice();
+    const data = { mempool: await getMempoolGas() };
     gasPriceCache.data = data;
     gasPriceCache.nodeUrl = nodeUrl;
     gasPriceCache.fetchedAt = now;
     return data;
   } catch {
-    // On error, return cached if available, otherwise safe fallback
-    if (gasPriceCache.data) return gasPriceCache.data;
-    return { average: "1", max: "1", median: "1", min: "1" };
+    // On error, what was read last from this node, else nothing: the minimum.
+    if (gasPriceCache.data && gasPriceCache.nodeUrl === nodeUrl) return gasPriceCache.data;
+    return {};
   }
 }
 

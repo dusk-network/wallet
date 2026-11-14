@@ -355,6 +355,26 @@ describe("local sends", () => {
   });
 });
 
+describe("the app's default gas price", () => {
+  // Lena's, three rounds: the median of a mempool holding only Sozu's activation, at 2, was everyone's price.
+  it("is the minimum while what waits fits in a block, and the capped median once it doesn't, where Review left it to the network", async () => {
+    const { getCachedGasPrice } = await import("../shared/walletEngine.js");
+    const { localSend } = await import("./localBus.js");
+    const params = { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "10000000" };
+    engine.sendTransaction.mockResolvedValue({ hash: "ab".repeat(32), nonce: 1n });
+    try {
+      getCachedGasPrice.mockResolvedValue({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] });
+      await expect(localSend({ type: "DUSK_UI_SEND_TX", walletId: "account of wallet A", params })).resolves.toMatchObject({ ok: true });
+      expect(engine.sendTransaction.mock.calls.at(-1)[0].gas).toEqual({ limit: "2500000", price: "1" });
+      getCachedGasPrice.mockResolvedValue({ mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) });
+      await localSend({ type: "DUSK_UI_SEND_TX", walletId: "account of wallet A", params });
+      expect(engine.sendTransaction.mock.calls.at(-1)[0].gas).toEqual({ limit: "2500000", price: "5" });
+    } finally {
+      getCachedGasPrice.mockResolvedValue({ median: "1" });
+    }
+  });
+});
+
 describe("a payment from Send that can't reach the network before it goes out", () => {
   // Amélie's and Chen's on Android: the Wi-Fi off at Confirm said "Not sent" a moment later and never waited.
   const params = { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "10000000", memo: "Hors ligne un" };

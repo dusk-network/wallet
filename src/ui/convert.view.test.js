@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { accessibleName, installFakeDom, isShown, press, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, pastClickGuard, press, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { convertConfirmView, convertFormView } from "./popup/views/convert.js";
 import { reviewOf } from "./popup/views/sent.js";
 
@@ -121,6 +121,33 @@ describe("shield and unshield", () => {
     const shown = () => body().querySelectorAll("button").filter(isShown).map((b) => b.textContent);
     expect(shown()).toEqual(["← Back", "Confirm"]);
     expect(visibleText(body().querySelector("details.gas-custom summary"))).toBe("Custom fee");
+  });
+
+  // Lena's, three rounds: the default followed the mempool's median, which one transaction waiting alone at 2 made
+  // everyone's price. What waits fits in a block: the minimum.
+  it.each([[TX_KIND.SHIELD], [TX_KIND.UNSHIELD]])("starts a %s from the minimum with one transaction waiting at 2, and the capped median with a full mempool", async (kind) => {
+    const priceSent = async (stats) => {
+      const state = { route: "convert_confirm", draft: { kind, amountLux: "1000000000", amountDusk: "1" } };
+      const sent = [];
+      const own = {
+        send: vi.fn(async (message) => {
+          if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+          return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? stats : { ok: true, result: { hash: "ab".repeat(32) } };
+        }),
+        render: vi.fn(async () => {}),
+        showToast: vi.fn(),
+      };
+      dom.document.body.replaceChildren(...convertConfirmView(ov, { state, actions: { ...own, review: reviewOf({ ...ov, isUnlocked: true }, state) } }));
+      await settle();
+      const busy = visibleText(body().querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
+      pastClickGuard();
+      button("Confirm").click();
+      await settle();
+      return [sent[0]?.params.gas?.price, busy];
+    };
+    expect(await priceSent({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] })).toEqual(["1", ""]);
+    const full = { mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) };
+    expect(await priceSent(full)).toEqual(["5", "The network is busy. You can raise the gas price for it to go out sooner."]);
   });
 
   it("keeps Review off while an amount typed won't do, and on for an empty one to say what's missing", () => {

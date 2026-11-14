@@ -132,13 +132,17 @@ afterEach(() => {
   nativeMeasure.value = null;
 });
 
+// What the wallet says waits in the node's mempool, as Reviews ask for it.
+const MEDIAN_ONE = { min: "1", median: "1", max: "1" };
+let gasAnswer = MEDIAN_ONE;
+
 // Draws Staking, its Review and Sent as app.js routes them, and redraws on
 // render. Sozu's status, read again before a stake is sent, is the one Staking
 // holds, unless `sozuStatus` gives what the node says by then.
 function popup(state, overview = ov(), { sozuStatus, rewardRate = null, stakingFigures = null } = {}) {
   const actions = {
     send: vi.fn(async (message) => {
-      if (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE") return { min: "1", median: "1", max: "1" };
+      if (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE") return gasAnswer;
       if (message.type === "DUSK_UI_GET_REWARD_RATE") return { ok: true, result: rewardRate };
       if (message.type === "DUSK_UI_GET_STAKING_FIGURES") return { ok: true, result: stakingFigures };
       if (message.type === "DUSK_UI_SEND_TX") return { ok: true, result: { hash: "ab".repeat(32) } };
@@ -2108,6 +2112,46 @@ describe("a staking Review's Confirm, the moment the Review is up", () => {
     await settle();
     expect(sends()).toHaveLength(1);
     expect(state.route).toBe("sent");
+  });
+});
+
+describe("a staking Review's default gas price", () => {
+  // Lena's, three rounds: the extension's unstake paid gas price 2 where the web wallet's paid 1. Sozu's operator
+  // sends its own activation at 2 just after a stake, and while that waited alone in the mempool its median was 2.
+  const withStake = () => ({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) });
+  const liquid = (over) => ({ route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu(over) });
+  const amount = (name, value, review) => () => {
+    typeInto(field(name), value);
+    button(review).click();
+  };
+  const sozuActivation = { mempool: [{ gasPrice: "2", gasLimit: "6000000" }] };
+  const busyMempool = { mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) };
+  afterEach(() => {
+    gasAnswer = MEDIAN_ONE;
+  });
+
+  it.each([
+    ["Stake", () => ({ route: "stake", staking: staking(owner(), { screen: "native" }) }), amount("Stake amount", "1000", "Review stake")],
+    ["Unstake", withStake, () => button("Unstake").click()],
+    ["Claim rewards", withStake, () => button("Claim rewards").click()],
+    ["Liquid staking", () => liquid(), amount("Stake amount", "100", "Review stake")],
+    ["Unstake from Sozu", () => liquid({ action: "withdraw", position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }), amount("Unstake amount", "5", "Review unstake")],
+  ])("is the minimum with Sozu's activation waiting alone, and the capped median, said busy, with a full mempool (%s)", async (_, start, toReview) => {
+    const priceSent = async (answer) => {
+      gasAnswer = answer;
+      const state = start();
+      const app = popup(state);
+      toReview();
+      await settle();
+      const busy = visibleText(body.querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
+      pastClickGuard();
+      button("Confirm").click();
+      await settle();
+      const sent = app.actions.send.mock.calls.map(([m]) => m).find((m) => m.type === "DUSK_UI_SEND_TX");
+      return [sent?.params.gas?.price, busy];
+    };
+    expect(await priceSent(sozuActivation)).toEqual(["1", ""]);
+    expect(await priceSent(busyMempool)).toEqual(["5", "The network is busy. You can raise the gas price for it to go out sooner."]);
   });
 });
 

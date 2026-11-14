@@ -206,23 +206,36 @@ describe("a send that fails, and whether it went out", () => {
 });
 
 describe("the network's gas price", () => {
-  // Lena's: the extension's unstake paid gas price 2 where the web wallet's paid 1: the extension asked for the median
-  // of the 100 best-paying transactions, the web wallet for that of every one the node holds.
-  it("is asked of every transaction the node holds, as the web wallet asks it, and kept 30 seconds", async () => {
+  // Lena's, three rounds: the extension's unstake paid gas price 2 where the web wallet's paid 1. Sozu's operator
+  // sends its activation at 2 just after a stake, and the extension read the median of the mempool while that waited
+  // there alone. What waits is read as the web wallet reads it, for app-core's rule to work the price out from.
+  it("is worked out from what waits in the node's mempool, as the web wallet reads it, and kept 30 seconds", async () => {
     await addNode(TESTNET);
     await engine.unlockWithMnemonic(MNEMONIC);
     const asked = [];
     const fetch = node.fetch;
     vi.stubGlobal("fetch", async (input, init = {}) => {
-      if (new URL(String(input), "https://wallet.invalid").pathname === "/on/blocks/gas-price") {
-        asked.push(init.body ?? null);
-        return new Response(JSON.stringify({ average: 3, max: 9, median: 2, min: 1 }));
+      const path = new URL(String(input), "https://wallet.invalid").pathname;
+      if (path === "/on/blocks/gas-price") asked.push("gas-price");
+      if (path === "/graphql" && String(init.body ?? "").includes("mempoolTxs")) {
+        asked.push(JSON.parse(init.body).query);
+        return new Response(JSON.stringify({ data: { mempoolTxs: [{ gasPrice: 2, gasLimit: 6000000 }] } }));
       }
       return fetch(input, init);
     });
-    await expect(engine.getCachedGasPrice({ forceRefresh: true })).resolves.toEqual({ average: "3", max: "9", median: "2", min: "1" });
+    await expect(engine.getCachedGasPrice({ forceRefresh: true })).resolves.toEqual({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] });
     await engine.getCachedGasPrice();
-    expect(asked).toEqual([null]);
+    expect(asked).toEqual(["query { mempoolTxs { gasPrice gasLimit } }"]);
+  });
+
+  it("is the minimum where the node can't list what waits", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    const fetch = node.fetch;
+    vi.stubGlobal("fetch", async (input, init = {}) =>
+      new URL(String(input), "https://wallet.invalid").pathname === "/graphql" ? new Response("", { status: 503 }) : fetch(input, init)
+    );
+    await expect(engine.getCachedGasPrice({ forceRefresh: true })).resolves.toEqual({});
   });
 });
 
