@@ -100,6 +100,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Searched every payment kept on the device in Activity when older ones can't be read, such as offline, rather than only the rows shown.
 - Kept a warning said as a field is typed in, such as that the same payment is waiting or that the recovery phrase is still on the clipboard, above a phone's keyboard with the button after it, in Firefox for Android and the app.
 - Looked for a send every 10 to 30 seconds for its first two minutes once the Android app is left, so its notice comes within moments of its block rather than minutes after.
 - Opened a tapped payment notice in the Android app on its payment at once, rather than after seconds of the screen left behind.

@@ -503,6 +503,36 @@ describe("the Activity view", () => {
     expect([visibleText(body().querySelector(".tx-hero-name")), visibleText(body().querySelector(".tx-hero-amount"))]).toEqual(["Estudio Marta", "+1,100 DUSK"]);
   });
 
+  // Amélie's: "marché" found nothing till History had been shown three times more, the payments kept all along;
+  // and a stranger's memo found lost its "not in your contacts".
+  it("searches every payment kept on this device when older ones can't be had, a stranger's marked as in the list", async () => {
+    const { state, draw } = setup({ complete: false, route: "activity" });
+    const kept = state.activity.entries.map((entry) => (entry.hash === state.activity.entries.find((e) => e.counterparty === SENDER)?.hash ? { ...entry, memo: "Les fleurs du marché" } : entry));
+    state.activity.limit = 2;
+    state.activity.entries = kept.slice(0, 2);
+    state.activity.epoch = Promise.resolve(1);
+    state.activity.history = {
+      // No network: older blocks can't be had.
+      sync: vi.fn(async () => {
+        throw new Error("Failed to fetch");
+      }),
+      read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, limit), state: null, complete: false, coveredTo: 0 })),
+    };
+    draw();
+    expect(rows().some((row) => row.includes("marché"))).toBe(false);
+    const field = body().querySelector('input[aria-label="Search activity"]');
+    field.value = "marche";
+    field.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows()[0]).toBe(`${short(SENDER)}Received · 16:41From ${short(SENDER)} · not in your contacts“Les fleurs du marché”+1,000 DUSK`);
+    expect(body().querySelector(".tx-row .tx-memo").className).toContain("tx-memo--theirs");
+    // Older payments may still match: it says so, with Show more.
+    field.value = "tulipes";
+    field.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(visibleText(body().querySelector(".tx-empty"))).toBe("Nothing read so far matches that. Show more to look further back."));
+    expect(button("Show more")).toBeTruthy();
+  });
+
   // Astra's: a .dusk name searched for found nothing where its payments were all past the page, their names never read.
   it("finds a payment past the page by its counterparty's .dusk name, read as the page's are", async () => {
     const { state, draw } = setup({ complete: false, route: "activity" });

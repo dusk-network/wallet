@@ -423,12 +423,15 @@ function within(promise, ms) {
 /**
  * Activity's search: the account's whole history, its older blocks synced
  * first as far back as they go, as Show more would, then every row kept read
- * at once. Read again once what's kept changed; the last read stands
- * meanwhile. `whole` is what `activityRows` takes, null until it's read, or
- * where there's no history to read; `reading` while it's read.
+ * at once. Older blocks that can't be had now, as offline, leave every row
+ * kept on this device, searched all the same (Amélie's: "Nothing" for
+ * payments three Show mores down); `complete` says whether that's all of it.
+ * Read again once what's kept changed; the last read stands meanwhile.
+ * `whole` is what `activityRows` takes, null until it's read, or where
+ * there's no history to read; `reading` while it's read.
  * @param {object} ov - the overview
  * @param {{ state: object, render?: () => Promise<void> }} ctx
- * @returns {{ whole: { entries: object[], meta: object | null, shielded: object[] } | null, reading: boolean }}
+ * @returns {{ whole: { entries: object[], meta: object | null, shielded: object[], complete: boolean } | null, reading: boolean }}
  */
 export function searchedActivity(ov, { state, render }) {
   const a = state?.activity;
@@ -440,9 +443,13 @@ export function searchedActivity(ov, { state, render }) {
     a.searching = (async () => {
       if ((await a.epoch) === undefined) throw new Error("The activity store is out of reach");
       let complete = a.complete;
-      for (let run = 0; run < WHOLE_RUNS && !complete && !a.stale; run += 1) {
-        await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
-        ({ complete } = await a.history.read({ limit: 1 }));
+      try {
+        for (let run = 0; run < WHOLE_RUNS && !complete && !a.stale; run += 1) {
+          await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
+          ({ complete } = await a.history.read({ limit: 1 }));
+        }
+      } catch {
+        // What's kept on this device is searched as it is.
       }
       const read = await a.history.read({ limit: Number.MAX_SAFE_INTEGER - 1 });
       // The .dusk names of whom the rows past the page are with too, as the
@@ -454,7 +461,7 @@ export function searchedActivity(ov, { state, render }) {
       if ((await within(checking, NODE_ANSWER_MS)) === LATE) {
         checking.then((named) => named && state.activity === a && redraw(state, render));
       }
-      if (state.activity === a) a.searched = { entries: read.entries, meta: read.state };
+      if (state.activity === a) a.searched = { entries: read.entries, meta: read.state, complete: read.complete === true };
     })()
       .catch(() => {})
       .finally(() => {
@@ -462,7 +469,7 @@ export function searchedActivity(ov, { state, render }) {
         redraw(state, render);
       });
   }
-  const whole = a.searched ? { entries: a.searched.entries, meta: a.searched.meta, shielded: a.shielded } : null;
+  const whole = a.searched ? { entries: a.searched.entries, meta: a.searched.meta, shielded: a.shielded, complete: a.searched.complete } : null;
   return { whole, reading: Boolean(a.searching) };
 }
 
