@@ -423,7 +423,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     // Anyone can send a memo: neutralized, so it can't read as something it isn't.
     tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient
       ? theirs
-        ? kv("Memo", [h("span", { class: "memo-theirs" }, [h("span", { class: "memo-theirs__text" }, ["“", safeTextEl(tx.memo), "”"]), h("span", { class: "memo-theirs__from", text: theirs.from })])], { className: "kv--wrap" })
+        ? kv("Memo", [h("span", { class: "memo-theirs" }, [h("span", { class: "memo-theirs__from", text: theirs.from }), h("span", { class: "memo-theirs__text" }, ["“", safeTextEl(tx.memo), "”"])])], { className: "kv--wrap" })
         : kv("Memo", safeTextEl(tx.memo), { className: "kv--wrap" })
       : null,
     ledger ? null : feeRow(tx, desc, hidden),

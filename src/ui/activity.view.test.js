@@ -379,15 +379,16 @@ describe("the Activity view", () => {
     expect(search("gouter")).toEqual(["Le go\u00fbter du mercredi"]);
     // What can't be seen in a memo shows as its code, as everywhere a memo shows, and its button says it.
     // The last one came in from an address that isn't a contact's: the sender's words, said so.
-    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", "“Fac\\u202etura”From an address not in your contacts"]);
+    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", `From ${shortAddress(SENDER)} · not in your contacts“Fac\\u202etura”`]);
     expect(visibleText(body())).not.toContain("\u202e");
     const opened = body().querySelectorAll(".tx-row button.tx-open").map(accessibleName);
     expect(opened.every((name) => /, memo /.test(name))).toBe(true);
   });
 
   // Chen's and Marek's: a stranger's "URGENT: wallet suspended - pay now to restore" read like the wallet's own words,
-  // in Activity, on Home and in its details.
-  it("says a stranger's memo is theirs: muted and in quotes, under who it's from, a contact's as ever, and search finds it", () => {
+  // in Activity, on Home and in its details. Lena's and Amélie's then: "From sofiadesign.dusk" with nothing saying she
+  // isn't a contact, and a pushy stranger's memo still the biggest thing in its row.
+  it("says a stranger's memo is theirs: who it's from and not in your contacts, a .dusk name or not, then their words, muted and in quotes", () => {
     const urgent = "URGENT: wallet suspended - pay now to restore";
     const { state, draw } = setup({ route: "activity" });
     const at = state.activity.entries.findIndex((entry) => entry.direction === "in" && String(entry.counterparty ?? "") === SENDER);
@@ -400,15 +401,18 @@ describe("the Activity view", () => {
     field.dispatchEvent(new Event("input"));
     expect(body().querySelectorAll(".tx-row")).toHaveLength(1);
     expect(memoLine().className).toContain("tx-memo--theirs");
-    expect(visibleText(memoLine())).toBe(`“${urgent}”From an address not in your contacts`);
+    const from = `From ${shortAddress(SENDER)} · not in your contacts`;
+    expect(visibleText(memoLine())).toBe(`${from}“${urgent}”`);
+    // Who it's from first, in the memo's own size: never cut off by a long memo.
+    expect(memoLine().children.map((el) => el.className)).toEqual(["tx-memo__from", "tx-memo__text"]);
     expect(memoLine().querySelector("a, b, strong")).toBeNull();
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toContain(`memo “${urgent}”, From an address not in your contacts`);
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toContain(`memo “${urgent}”, ${from}`);
 
     // With a .dusk name of its own: from that name.
     state.activity.names = new Map([[SENDER, "sofiadesign.dusk"]]);
     draw();
     field.dispatchEvent(new Event("input"));
-    expect(visibleText(body().querySelector(".tx-row .tx-memo"))).toBe(`“${urgent}”From sofiadesign.dusk`);
+    expect(visibleText(body().querySelector(".tx-row .tx-memo"))).toBe(`From sofiadesign.dusk · not in your contacts“${urgent}”`);
 
     // Its details: the same.
     const hash = state.activity.entries[at].hash;
@@ -416,7 +420,7 @@ describe("the Activity view", () => {
     state.txDetailHash = hash;
     draw();
     const memoRow = body().querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
-    expect(visibleText(memoRow.querySelector(".kv-value"))).toBe(`“${urgent}”From sofiadesign.dusk`);
+    expect(visibleText(memoRow.querySelector(".kv-value"))).toBe(`From sofiadesign.dusk · not in your contacts“${urgent}”`);
 
     // A contact's memo is as ever.
     state.route = "activity";

@@ -4633,25 +4633,25 @@ button.tx-open:focus-visible::after {
   unicode-bidi: isolate;
 }
 
-/* A stranger's memo: their words, muted and in quotes, never bold, under who
-   it's from. */
+/* A stranger's memo: who it's from, then their words, small, muted and in
+   quotes, never bold, one line in a row (its details have all of it); both
+   the same size. */
 .tx-memo.tx-memo--theirs {
   display: flex;
   flex-direction: column;
   color: var(--text-muted);
+  font-size: 12px;
   font-weight: 400;
 }
 .tx-memo--theirs .tx-memo__text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .tx-memo__from,
 .memo-theirs__from {
   color: var(--text-muted);
-  font-size: 0.85em;
+  font-size: 1em;
 }
 .memo-theirs {
   display: flex;
