@@ -84,6 +84,44 @@ describe("a field typed in on a phone", () => {
     expect(page.button.getBoundingClientRect().bottom).toBeLessThanOrEqual(434);
   });
 
+  // Chen's and Marek's: "The same payment is waiting to go out…" said under the memo put Review under the keyboard, and
+  // the note that the phrase is still on the clipboard showed under it as the words were pasted.
+  it("puts a warning said as a field is typed in above the keyboard, with the button after it", async () => {
+    let changed = null;
+    vi.stubGlobal("MutationObserver", undefined);
+    const page = importScreen();
+    page.dom.window.MutationObserver = class {
+      constructor(fn) {
+        changed = fn;
+      }
+      observe() {}
+    };
+    // Watched from here: a page made again, as the popup makes it.
+    const { installKeyboardRoom: install } = await import("./keyboard.js");
+    install({ win: page.dom.window });
+    await page.focus(page.word);
+    const top = page.word.getBoundingClientRect().top;
+    // A warning between the word box and the button: they don't all fit in the top half, the warning and the button do.
+    let tall = 100;
+    const warning = Object.assign(page.dom.document.createElement("div"), { className: "callout warn" });
+    warning.setAttribute("role", "alert");
+    warning.textContent = "The same payment is waiting to go out.";
+    warning.getBoundingClientRect = () => ({ top: 700 - tall - page.scroller.scrollTop, bottom: 700 - page.scroller.scrollTop });
+    page.word.parentNode.insertBefore(warning, page.password);
+    changed?.();
+    await settle();
+    expect(page.button.getBoundingClientRect().bottom).toBeLessThanOrEqual(395);
+    expect(warning.getBoundingClientRect().top).toBeGreaterThanOrEqual(82);
+    expect(page.word.getBoundingClientRect().top).toBeLessThan(top);
+    // Too tall for both: the button all the same, under as much of it as fits.
+    tall = 400;
+    page.scroller.scrollTop = 0;
+    changed?.();
+    await settle();
+    expect(page.button.getBoundingClientRect().bottom).toBeLessThanOrEqual(395);
+    expect(page.button.getBoundingClientRect().top).toBeGreaterThanOrEqual(82);
+  });
+
   it("goes into the top half with the button after it, where Firefox says nothing of the keyboard", async () => {
     const page = importScreen();
     await page.focus(page.confirm);

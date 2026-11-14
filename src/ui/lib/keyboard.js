@@ -107,6 +107,22 @@ function nextButton(field, doc) {
   return all.slice(all.indexOf(field) + 1).find((el) => el.matches?.("button.btn-primary, button[data-next]")) ?? null;
 }
 
+// What the screen says between a field and its button as it's typed in: a
+// warning ("The same payment is waiting to go out…") or a note ("Your
+// recovery phrase is still on the clipboard…"), shown.
+function saidBetween(field, button, doc) {
+  const scope = field.closest?.(".qrscan-overlay") ?? doc.getElementById?.("app") ?? doc.body;
+  const all = Array.from(scope?.querySelectorAll?.("*") ?? []);
+  const from = all.indexOf(field);
+  const to = all.indexOf(button);
+  if (from < 0 || to < 0) return null;
+  return (
+    all
+      .slice(from + 1, to)
+      .find((el) => el.matches?.('[role="alert"], [role="status"], .callout') && !el.hidden && !el.closest?.("[hidden]") && String(el.textContent ?? "").trim()) ?? null
+  );
+}
+
 /**
  * Keeps a field typed in on a touch screen above the keyboard.
  * @param {{ win?: Window }} [opts]
@@ -176,11 +192,20 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
     const from = Math.max(MARGIN, page ? 0 : scroller.getBoundingClientRect().top + MARGIN);
     const to = top - MARGIN;
     const f = field.getBoundingClientRect();
-    const b = nextButton(field, doc)?.getBoundingClientRect();
-    // The field, and its button with it when both fit.
-    const bottom = b && b.bottom > f.bottom && b.bottom - f.top <= to - from ? b.bottom : f.bottom;
+    const next = nextButton(field, doc);
+    const b = next?.getBoundingClientRect();
+    // A warning or a note said between them as it's typed in: it and the
+    // button above the keyboard, the field with them where all fit (Chen's
+    // and Marek's: Review, and what was said of the payment, under it).
+    const w = next ? saidBetween(field, next, doc)?.getBoundingClientRect() : null;
+    const room = to - from;
+    // The field, and its button with it when both fit; said between them,
+    // the button and as much of what's said as fits above it.
+    const both = Boolean(b && b.bottom > f.bottom && b.bottom - f.top <= room);
+    const bottom = b && b.bottom > f.bottom && (both || w) ? b.bottom : f.bottom;
+    const first = !both && w && bottom === b.bottom ? Math.max(w.top, b.bottom - room) : f.top;
     let by = bottom > to ? bottom - to : 0;
-    if (f.top - by < from) by = f.top - from;
+    if (first - by < from) by = first - from;
     if (Math.abs(by) >= 1) scroller.scrollTop += by;
   };
 
@@ -202,6 +227,17 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
     markSideways(e.target);
     if (isTyped(e.target)) soon();
   });
+  // Something said or shown as a field is typed in, a warning under it: it,
+  // and the button, go above the keyboard too.
+  try {
+    if (win.MutationObserver && doc.body) {
+      new win.MutationObserver(() => {
+        if (touch() && isTyped(doc.activeElement)) soon();
+      }).observe(doc.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["hidden"] });
+    }
+  } catch {
+    // Nothing watched: it goes above the keyboard as it's tapped.
+  }
   // Where the focus goes next, if anywhere: another field keeps it so.
   doc.addEventListener("focusout", (e) => markSideways(e.relatedTarget ?? null));
   win.visualViewport?.addEventListener?.("resize", soon);

@@ -85,6 +85,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept a warning said as a field is typed in, such as that the same payment is waiting or that the recovery phrase is still on the clipboard, above a phone's keyboard with the button after it, in Firefox for Android and the app.
 - Looked for a send every 10 to 30 seconds for its first two minutes once the Android app is left, so its notice comes within moments of its block rather than minutes after.
 - Opened a tapped payment notice in the Android app on its payment at once, rather than after seconds of the screen left behind.
 - Looked up again the .dusk names Activity couldn't look up without a signal, once the network is back and on Refresh, rather than only after a restart.
