@@ -696,9 +696,10 @@ describe("Tell me when it arrives, on a phone", () => {
   const ANDROID = "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0";
   // Marek's: "You can close the wallet; this continues in the background." right above
   // "You'll get a notice when it arrives, while the wallet stays open.": one line now.
-  const COMES = "It goes on if you close the wallet; its notice comes only while the wallet stays open.";
-  const CLOSE = "You can close the wallet; this continues in the background.";
-  const draw = async (states, { phone = true, app = false, sent = {} } = {}) => {
+  // Amélie's and Marek's, then: closing the Keep open tab, in which the wallet runs, stopped a payment that waited.
+  const COMES = "It goes on if you close the wallet, while its Keep open tab stays open; its notice comes only while the wallet stays open.";
+  const CLOSE = "You can close the wallet; this goes on while its Keep open tab stays open.";
+  const draw = async (states, { phone = true, app = false, sent = {}, ov = {} } = {}) => {
     if (phone) vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: ANDROID });
     // The app on Android: Tauri's bridge to its wrapper.
     if (app) dom.window.__TAURI_INTERNALS__ = {};
@@ -717,7 +718,7 @@ describe("Tell me when it arrives, on a phone", () => {
       showToast: vi.fn(),
     };
     const show = async () => {
-      dom.document.body.replaceChildren(...sentView(overview(), { state, actions }));
+      dom.document.body.replaceChildren(...sentView(overview(ov), { state, actions }));
       await settle();
     };
     await show();
@@ -752,6 +753,26 @@ describe("Tell me when it arrives, on a phone", () => {
       shown.ask().click();
       await settle();
       expect(shown.said()).toEqual(["You can leave this screen; this continues in the background.", "You'll get a notice when it arrives."]);
+    } finally {
+      isExtensionRuntime.mockReturnValue(true);
+    }
+  });
+
+  // Chen's, in the app: "You can leave this screen; this continues in the background." for a payment confirmed as
+  // the signal dropped, which went out only once he opened the app again, the signal back for minutes.
+  it("says in the app that a payment waiting for the network goes out once the app's opened again", async () => {
+    isExtensionRuntime.mockReturnValue(false);
+    try {
+      const waiting = { phase: "sending", hash: "", status: "", sendId: "send-0001", waits: true };
+      const shown = await draw([null], { app: true, sent: waiting });
+      expect(shown.said()).toEqual(["If you leave Dusk Wallet, it goes out when you open it again."]);
+      // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
+      const locks = await draw([null], { app: true, sent: waiting, ov: { lockOnLeave: true } });
+      expect(locks.said()).toEqual(["If you leave Dusk Wallet, it locks and this isn't sent."]);
+      // Handed over, Android looks for it with the app away: as before.
+      Object.assign(shown.state.sent, { phase: "sent", hash: HASH, status: "submitted", waits: false, handedOver: true });
+      await shown.show();
+      expect(shown.said()).toEqual(["You can leave this screen; this continues in the background."]);
     } finally {
       isExtensionRuntime.mockReturnValue(true);
     }

@@ -3,11 +3,13 @@ import { h } from "../lib/dom.js";
 /**
  * Two or more choices on one track, the picked one lit: a tab list whose
  * picked tab says so to screen readers, with the arrow keys moving to the
- * next choice. Picking one calls `onSelect`, which redraws the view.
+ * next choice. Picking one calls `onSelect`, which redraws the view. A
+ * choice's `sub`, where it has one, is a short line under its name, part of
+ * what it says ("Mainnet · real DUSK").
  *
  * @param {{
  *   label: string,
- *   items: { id: string, text: string, disabled?: boolean }[],
+ *   items: { id: string, text: string, sub?: string, disabled?: boolean }[],
  *   selected: string,
  *   onSelect: (id: string) => void,
  *   className?: string,
@@ -43,13 +45,15 @@ export function segmented({ label, items, selected, onSelect, className = "", no
           }
         },
       },
-      [h("span", { text: item.text })]
+      item.sub
+        ? [h("span", { class: "tab-name", text: item.text }), h("span", { class: "sr-only", text: " · " }), h("span", { class: "tab-sub", text: item.sub })]
+        : [h("span", { text: item.text })]
     )
   );
   return h(
     "div",
     {
-      class: ["tabs", index < 0 ? "tabs--none" : "", className].filter(Boolean).join(" "),
+      class: ["tabs", index < 0 ? "tabs--none" : "", items.some((item) => item.sub) ? "tabs--sub" : "", className].filter(Boolean).join(" "),
       role: "tablist",
       "aria-label": label,
       style: `--seg-index: ${Math.max(0, index)};`,

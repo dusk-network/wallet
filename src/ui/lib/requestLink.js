@@ -1,4 +1,4 @@
-import { linkAmount, readPaymentLink } from "@dusk-network/app-core/payment-links";
+import { linkAmount, readPastedLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
 
 import { chainIdFromNodeUrl } from "../../shared/chain.js";
 import { chainIdForNode } from "../../shared/nodeNetwork.js";
@@ -23,12 +23,26 @@ export function readRequestLink(text, nodeUrl) {
 }
 
 /**
+ * What's typed or pasted in Send's To, as all three wallets' Send read it
+ * (app-core's readPastedLink): a link whole, or a shared request ("… asks you
+ * to pay … Pay here: <link>") by its one link at its end, with its line break
+ * or without, as a phone's one-line field drops it; refused with two links,
+ * or words after the link. Read as readRequestLink reads a link; null for
+ * what has no link, which Send takes as a recipient.
+ * @param {string} text
+ * @param {string} [nodeUrl] - the wallet's node; without one, any network's
+ */
+export function readPastedRequest(text, nodeUrl) {
+  return readPastedLink(text, nodeUrl === undefined ? {} : { network: walletChainOf(nodeUrl) });
+}
+
+/**
  * Send's draft of a request link the page was opened with (`full.html?route=send&link=…`,
  * background/requestLinks.js): only a form filled in, which its checks read as any, and
  * Send refuses for another network. One that can't be read fills in nothing and says
  * why. Null for no link, or what isn't one.
  * @param {string} search - the page's query
- * @returns {{ to: string, amountDusk: string, memo: string, requestChainId?: string, refusedProblem?: string, filledFrom?: "link", filledIn?: true } | null}
+ * @returns {{ to: string, amountDusk: string, memo: string, requestChainId?: string, refusedProblem?: string, filledFrom?: "link", filledIn?: "link" } | null}
  */
 export function requestDraftOf(search) {
   const read = readRequestLink(new URLSearchParams(search).get("link") ?? "");
@@ -36,7 +50,7 @@ export function requestDraftOf(search) {
   if (!read.link) return { to: "", amountDusk: "", memo: "", refusedProblem: read.problem };
   const { link } = read;
   // Its amount as typing reads it (app-core's linkAmount): a link's 2.125 asks, as typed 2.125 does.
-  return { to: link.to, amountDusk: linkAmount(link).field, memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: true };
+  return { to: link.to, amountDusk: linkAmount(link).field, memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: "link" };
 }
 
 // The pages whose request link went, paid or left (forgetRequestLink).

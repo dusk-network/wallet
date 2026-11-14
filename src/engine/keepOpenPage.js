@@ -23,7 +23,7 @@ export function lastSendText(last) {
   const at = `Your payment at ${clockText(Number(last.at))}`;
   switch (last.state) {
     case "waiting":
-      return `${at} hasn't gone out yet. It goes out once the network answers.`;
+      return `${at} hasn't gone out yet. It goes out once the network answers, while this tab stays open.`;
     case "not_sent":
       return `${at} wasn't sent.`;
     case "unclear":

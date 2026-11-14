@@ -31,7 +31,7 @@ import { fieldLabel, reviewActions, submitOnGasEnter } from "../../components/Fo
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { readSozuFactsAgain, sozuHolding, sozuLiquidStakingView, stakingHistory } from "./sozu.js";
+import { readSozuFactsAgain, sozuHolding, sozuLiquidStakingView, stakeStaleNote, stakingHistory } from "./sozu.js";
 import { keptRatesOf, nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
 import { currencyName } from "../activityExport.js";
 import { duskPrices } from "../duskPrice.js";
@@ -696,6 +696,8 @@ function stakingOverview(ov, ctx, { state, actions }) {
           figure("Native rewards", rewardLux),
         ])
       : h("div", { class: "stake-sum__two" }, [figure("Staked", stakedLux), figure("Rewards", rewardLux)]),
+    // Lena's: with the node silent, Home said its balance may be out of date and Staking said nothing of its own.
+    stakeStaleNote(ov),
     lockedLux > 0n
       ? h("div", { class: "stake-cap" }, [
           "Locked: ",

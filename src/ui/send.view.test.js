@@ -2008,6 +2008,52 @@ describe("a request link", () => {
     expect(again.amount.value).toBe("1,5");
   });
 
+  // Sofía's, Amélie's, Marek's, Nandini's and Lena's: the wallet's own share message pasted into To said "Not a valid
+  // address" in the extension and the app, where the web wallet reads it; copied from a chat page too, and on a phone,
+  // whose one-line field drops its line break ("… Factura 2026-151Pay here: https://…").
+  it("reads a shared request by its link, pasted or put in whole, its line break kept or dropped", async () => {
+    const link = httpsLink(`to=${ALICE.account}&amount=0.01&memo=Factura+2026-151&network=testnet`);
+    const message = `sofiadesign.dusk asks you to pay 0.01 DUSK on Testnet · Factura 2026-151\nPay here: ${link}`;
+    const filled = (form, state) => [form.to.value, form.amount.value, state.draft?.memo, visibleText(dom.document.body.querySelector(".send-filled-note"))];
+    const FILLED = [ALICE.account, "0.01", "Factura 2026-151", "Filled in from the link, to pay on Testnet. Check it before you send."];
+    for (const text of [message, message.replace("\n", ""), message.replace("\n", " "), `You're asked to pay 0.01 DUSK on Testnet · Factura 2026-151\nPay here: ${link}`]) {
+      // Pasted, as the clipboard has it.
+      const pastedState = newState();
+      const pasted = mount(pastedState);
+      paste(pasted, text);
+      await settle();
+      expect(filled(pasted, pastedState)).toEqual(FILLED);
+      // Put in whole, as a phone's keyboard puts the clipboard in, with no paste to read.
+      const typedState = newState();
+      const typed = mount(typedState);
+      typed.to.value = text.replace("\n", "");
+      typed.to.dispatchEvent(fakeEvent("input", { inputType: "insertFromPaste" }));
+      await settle();
+      expect(filled(typed, typedState)).toEqual(FILLED);
+    }
+  });
+
+  // Marek's: the same refusals as the web wallet's for two links, and for words after the link.
+  it("refuses a message with two links, or words after its link, saying why, and fills in nothing", async () => {
+    const a = httpsLink(`to=${ALICE.account}&amount=0.01&network=testnet`);
+    const b = httpsLink(`to=${BOB.account}&amount=0.02&network=testnet`);
+    for (const [text, said] of [
+      [`Pay here: ${a} or here: ${b}`, "That has more than one payment link. Paste just the one to pay."],
+      [`Marek asks you to pay 0.01 DUSK on Testnet\nPay here: ${a} thanks!`, "The words after that link may be part of it. Paste the link alone."],
+    ]) {
+      const form = mount(newState());
+      paste(form, text);
+      await settle();
+      expect(dom.document.body.querySelectorAll(".field-error").filter(isShown).map((el) => el.textContent)).toEqual([said]);
+      expect([form.to.value, form.amount.value]).toEqual(["", ""]);
+    }
+    // Plain words, a name or an address are a recipient, as ever.
+    const form = mount(newState());
+    paste(form, "sofiadesign.dusk");
+    await settle();
+    expect(dom.document.body.querySelectorAll(".field-error").filter(isShown)).toEqual([]);
+  });
+
   // Nandini's and Chen's: a link's amount=2.125 was filled in as 2.1250 without a question, where typing 2.125 asks.
   it("reads a link's amount as typing does: 2.125 asks, with a button for each reading; a wallet's 2.1250 doesn't", async () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
@@ -2065,6 +2111,15 @@ describe("a request link", () => {
       await settle();
       expect(refusal(), amount).toEqual(["This link's amount can't be read. Ask for a new one."]);
       expect([typo.to.value, typo.amount.value], amount).toEqual(["", ""]);
+    }
+    // Marek's, the round after: a tab in a pasted link's amount, as a chat or mail can put in, was taken out
+    // ("0.001" + tab + "5" filled 0.0015); any space there, of any kind, refuses the link.
+    for (const space of ["\t", "\u00a0", "\u2009", "\u202f", "\u3000"]) {
+      const spaced = mount(newState());
+      paste(spaced, httpsLink(`to=${ALICE.account}&amount=0.001${space}5&memo=x&network=testnet`));
+      await settle();
+      expect(refusal(), JSON.stringify(space)).toEqual(["This link's amount can't be read. Ask for a new one."]);
+      expect([spaced.to.value, spaced.amount.value], JSON.stringify(space)).toEqual(["", ""]);
     }
   });
 
@@ -2195,7 +2250,11 @@ describe("a request link", () => {
     await settle();
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "0.03"]);
     typeInto(form.to, BOB.account);
+    // Back asks first, the scan's: Leave goes.
     dom.document.body.querySelector(".subnav-back").click();
+    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears the payment the QR code filled in.StayLeave");
+    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    await settle();
     expect(state.route).toBe("home");
     expect(keptSendDraft(overview())).toBeNull();
 

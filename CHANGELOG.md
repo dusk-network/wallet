@@ -9,7 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
-- Check your recovery words: right after a wallet's words are shown, three of them asked for at random, with Check and Skip for now, showing the words again where they don't match; and in Settings, behind the password, in the extension and the Android app.
+- Check your recovery words: right after a wallet's words are shown, three of them asked for at random, with Check and Skip for now, and in Settings, behind the password, in the extension and the Android app; a wrong answer shows no word, saying only that they don't match, with Try again and Show my recovery words.
 - Notices in the Android app for money that comes in while it's in the background or closed, saying how much and from whom and opening that payment, with Tell me when money comes in in Settings to turn them off; they can take up to about 15 minutes.
 - Opened the testnet web wallet's request links in the Android app where it's installed, as Android App Links, once the web wallet serves the file that names the app.
 - Said what a request asks comes to in your currency on mainnet, with the price's time, as it's made and in Receive's list, and what an amount comes to on Send and Review; the link stays in DUSK.
@@ -44,8 +44,24 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Named the payer's memo in the Android app's notice for money that came in.
+- Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
+- Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.
+- Said one thing at a time of a payment that waited, on Home: Not sent yet while it waits and Sending as it goes out, and listed it in Activity as it went out, rather than in neither for a while; and in Firefox for Android that it goes on while the Keep open tab stays open.
+- Gave each request its own Share in the Android app, beside its Copy, in Request payment and in the list, with Share by the address for the address alone, and brought Request payment into view at its Amount as it's opened.
+- Copied or shared a request paid already as its own link, saying it was paid, rather than making a second one with the same invoice.
+- Said the fee charged on Completed once a node that went silent answers again, rather than the most it could be.
+- Read Rewards by year again after a stake or an unstake with Sozu, till the history lists it and it's counted.
+- Said Staking's figures may be out of date while the node doesn't answer or the network's gone, as Home says its balance may be.
+- Said under Import wallet's Mainnet and Testnet which holds real DUSK and which test DUSK with no value.
+- Took a recovery phrase pasted into its boxes off the clipboard in Firefox for Android, writing a space over it, and one a phone's keyboard puts in whole from its clipboard too.
+- Took an l, 1, ! or | for an i, as in Davld or Dav!d beside David, and a .dusk name in small capitals, circled letters or after a fullwidth point, as the look-alikes they are, in contact and profile names.
+- Refused a link with any space in its amount, a tab too.
+- Read a shared request pasted into Send's To by its link, as the web wallet does, with its line break or without, saying why where it has two links or words after its link.
+- Said on Liquid staking that Sozu's rewards so far are before deposit fees, and in Rewards by year that what grew while held is after them.
+- Said in the Android app that a payment waiting for the network goes out when the app is opened again, on Sent and Home, and in a notice while it's away, which says to open the app once the network's back.
 - Said how much was paid and to whom in the Android app's notice that a payment arrived, keeping that off a locked screen that hides what notices say.
-- Showed a memo on a payment from an address that isn't one of your profiles or contacts as the sender's words, muted and in quotes, under “From an address not in your contacts” or their .dusk name, in Activity, on Home and in its details.
+- Showed a memo on a payment from an address that isn't one of your profiles or contacts as the sender's words, small, muted and in quotes, after “From” their .dusk name or address “· not in your contacts”, in the memo's size, in Activity, on Home and in its details.
 - Asked Firefox for the clipboardWrite permission, which it lists at install as “Input data to the clipboard”, to take a pasted recovery phrase off the clipboard there too.
 - Counted the deposit fees as part of what unstaked stDUSK cost in Rewards by year, at its average cost, said under the table, and showed a year's loss with its minus sign, in DUSK and in your currency.
 - Split Sozu's part of Rewards by year into what grew while held and what unstaking took out, saying where either couldn't be read.
@@ -85,6 +101,13 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Sent a payment kept by the previous version again with Send it now, rather than saying the wallet, profile or network changed.
+- Kept notices for money coming in off in the Android app when the setting is turned on and off quickly.
+- Said a payment the wallet stopped on as it went out wasn't sent only once the account's transaction at its nonce is seen to be another, never on the nonce alone.
+- Opened a payment notice tapped after Android had closed the app on its payment once unlocked, rather than on Home with a passing toast, and one for money that came in after the app locked itself.
+- Kept Can't reach the network off the Android app's screen as it reconnects, as when a notice's tap brings it back.
+- Found a payment a notice opens among every payment on the device, also behind 50 newer ones.
+- Searched every payment kept on the device in Activity when older ones can't be read, such as offline, rather than only the rows shown.
 - Kept a warning said as a field is typed in, such as that the same payment is waiting or that the recovery phrase is still on the clipboard, above a phone's keyboard with the button after it, in Firefox for Android and the app.
 - Looked for a send every 10 to 30 seconds for its first two minutes once the Android app is left, so its notice comes within moments of its block rather than minutes after.
 - Opened a tapped payment notice in the Android app on its payment at once, rather than after seconds of the screen left behind.
@@ -126,7 +149,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said a request was paid already on Send's form as soon as a link fills it in, pasted or opened, not only on Review, and named another profile of the wallet's by its own name there.
 - Said there's no connection on a send's Sending step while the browser is offline.
 - Kept every letter typed in Activity's search and Send's fields on a phone, in their order, by drawing the screen again only once the typing stops.
-- Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, or with anything else the method doesn't take, under any key, rather than answering with the connected profile's balance.
+- Refused a site's dusk_getPublicBalance for an account or profile it isn't connected to, or with anything else the method doesn't take, under any key or on a prototype, rather than answering with the connected profile's balance, and any site's request with anything on a prototype in its parameters.
 - Opened Home on reloading the extension's tab after a request link was paid or left, rather than the same payment filled in again.
 - Dropped what a link or a QR code filled in once Send is left, rather than bringing it back in the next Send, and its Filled in from line once another recipient is picked in Contacts.
 - Typed a recovery phrase's words on a phone in boxes no browser offers to keep as a password, still unseen and kept from the keyboard's learning, and emptied them, and the passwords beside them, as the screen is left.

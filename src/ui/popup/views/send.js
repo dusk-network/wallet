@@ -48,7 +48,7 @@ import {
 } from "../../../shared/duskNames.js";
 
 import { openQrScanModal } from "../../components/QrScanModal.js";
-import { forgetRequestLink, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
+import { forgetRequestLink, readPastedRequest, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
@@ -56,6 +56,7 @@ import { whenAtText } from "./txRow.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, linkAmount, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
+import { askConfirm } from "../../components/ConfirmDialog.js";
 import { reviewContextOf, sameWaiting, waitingLux } from "../../lib/waiting.js";
 import { homeView } from "./home.js";
 import { inCurrencyLine } from "../../lib/inCurrency.js";
@@ -363,9 +364,12 @@ export function sendFormView(ov, { state, actions } = {}) {
     chainNote.hidden = !text;
   };
   const filledNote = h("p", { class: "field-hint send-filled-note", role: "status", hidden: true });
+  // Whether Back asks first, said to the phone's Back as a link or a QR code fills the form in.
+  let markAsks = () => {};
   const sayFilled = (from) => {
     filledNote.textContent = filledText(from, ov?.nodeUrl);
     filledNote.hidden = !filledNote.textContent;
+    markAsks();
   };
   sayRefused({ chainId: state.draft?.refusedChainId, problem: state.draft?.refusedProblem });
   sayFilled(state.draft?.filledFrom);
@@ -426,7 +430,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     nextDraft.refusedChainId = undefined;
     nextDraft.refusedProblem = undefined;
     nextDraft.filledFrom = source === "qr" ? "qr" : "link";
-    nextDraft.filledIn = true;
+    // What filled it in, which typing over the recipient doesn't change.
+    nextDraft.filledIn = nextDraft.filledFrom;
     state.draft = nextDraft;
 
     sayRefused();
@@ -439,16 +444,18 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   // A link, read on the wallet's network; what isn't one is a recipient, as a
-  // QR code may hold just the address: it fills in To alone.
-  const looksLikeRequest = (text) => readRequestLink(text, ov?.nodeUrl) !== null;
+  // QR code may hold just the address: it fills in To alone. What's typed or
+  // pasted in To is read as a paste (readPastedRequest): a shared request's
+  // message by its link; a QR code's, as the link it holds.
+  const looksLikeRequest = (text) => readPastedRequest(text, ov?.nodeUrl) !== null;
   const maybeDecodeRequest = (raw, { source = "request" } = {}) => {
     const s = String(raw || "").trim();
     if (!s) return false;
-    const read = readRequestLink(s, ov?.nodeUrl);
+    const read = source === "qr" ? readRequestLink(s, ov?.nodeUrl) : readPastedRequest(s, ov?.nodeUrl);
     if (read) return applyRequest(read, { source });
     if (source !== "qr") return false;
     to.value = s;
-    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: "qr", filledIn: true };
+    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: "qr", filledIn: "qr" };
     sayRefused();
     sayFilled("qr");
     updateToType();
@@ -1172,20 +1179,31 @@ export function sendFormView(ov, { state, actions } = {}) {
     })
     .catch(() => {});
 
+  // Kept for Send's next opening: Back on a phone is pressed by the way. Not
+  // what a link or a QR code filled in, edited since or not: it isn't the next
+  // payment's, so Back asks first (Amélie's and Chen's: a phone's Back threw
+  // a link's payment away without a word). Stay keeps it, as the question's
+  // own Back does.
+  const leave = async () => {
+    if (state.draft?.filledIn) {
+      const from = state.draft.filledIn === "qr" ? "QR code" : "link";
+      const go = await askConfirm({ title: "Leave this payment?", text: `This clears the payment the ${from} filled in.`, action: "Leave", cancel: "Stay", destructive: true });
+      // Stayed, or the screen went elsewhere meanwhile.
+      if (!go || state.route !== "send") return;
+      forgetSendDraft();
+    } else keepSendDraft(state.draft, ov);
+    state.route = "home";
+    state.draft = null;
+    actions?.render?.().catch(() => {});
+  };
+  const nav = subnav({ title: "Send", onBack: leave });
+  // A phone's Back keeps an entry for the question's own Back (systemBack.js).
+  const backBtn = nav.querySelector(".subnav-back");
+  markAsks = () => (state.draft?.filledIn ? backBtn?.setAttribute("data-back-asks", "") : backBtn?.removeAttribute("data-back-asks"));
+  markAsks();
+
   return [
-    subnav({
-      title: "Send",
-      onBack: () => {
-        // Kept for Send's next opening: Back on a phone is pressed by the way.
-        // Not what a link or a QR code filled in, edited since or not: it
-        // isn't the next payment's.
-        if (state.draft?.filledIn) forgetSendDraft();
-        else keepSendDraft(state.draft, ov);
-        state.route = "home";
-        state.draft = null;
-        actions?.render?.().catch(() => {});
-      },
-    }),
+    nav,
     h("div", { class: "row send-form" }, [
       fieldLabel(to, "To"),
       toRow,

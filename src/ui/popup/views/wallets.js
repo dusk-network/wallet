@@ -8,7 +8,7 @@ import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
 import { decimalInput, fieldError, fieldLabel, groupLabel, newPasswordField, passwordForm, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { srpGridEl } from "./onboarding.js";
-import { createWordCheck } from "../../components/WordCheck.js";
+import { createWordCheck, wordsMismatch } from "../../components/WordCheck.js";
 import { wordPlaces } from "../../../shared/recoveryWords.js";
 import { subnav } from "../../components/Subnav.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
@@ -215,9 +215,10 @@ export function resetWalletView(ov, { state, actions } = {}) {
 }
 
 /**
- * The open wallet's recovery phrase, again, in the app's Settings: the
- * password first, or a fingerprint where it's on; then its words, till the
- * screen is left. Nothing of them is kept.
+ * The open wallet's recovery phrase, again, from the app's Settings and from
+ * Show my recovery words after a check: the password first, or a fingerprint
+ * where it's on; then its words, till the screen is left. Nothing of them is
+ * kept.
  */
 export function recoveryPhraseView(ov, { state, actions } = {}) {
   const pwd = unlockPasswordField({ onEnter: () => btn.click() });
@@ -320,8 +321,9 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
  * Check your recovery words, from Settings: the password first, or a
  * fingerprint where it's on, as for the recovery phrase; then three of the
  * open wallet's words, chosen at random, compared by the wallet. They match,
- * or don't, and then its words are shown, to put the paper right. Nothing
- * typed is kept.
+ * or don't, and that's all a check says: Try again asks the same three, and
+ * Show my recovery words opens the recovery phrase, behind the password
+ * again. Nothing typed is kept.
  */
 export function checkWordsView(ov, { state, actions } = {}) {
   const pwd = unlockPasswordField({ onEnter: () => btn.click() });
@@ -331,10 +333,10 @@ export function checkWordsView(ov, { state, actions } = {}) {
   let busy = false;
   let asked = null;
 
-  // The three words, with the password they were asked with.
-  const check = (password, count) => {
+  // The three words at `places`, with the password they were asked with.
+  const check = (password, count, places = wordPlaces(count)) => {
     let checkBtn;
-    const words = createWordCheck({ places: wordPlaces(count), onDone: () => checkBtn.click() });
+    const words = createWordCheck({ places, onDone: () => checkBtn.click() });
     const wordsError = fieldError(words.el, { markInvalid: false });
     checkBtn = h("button", {
       class: "btn-primary btn-full",
@@ -353,15 +355,18 @@ export function checkWordsView(ov, { state, actions } = {}) {
           const res = await actions?.send?.({ type: "DUSK_UI_CHECK_RECOVERY_WORDS", password, words: typed });
           if (res?.error) throw new Error(res.error.message ?? "Couldn't check the words");
           if (!page.isConnected || state.context !== asked) return;
+          if (res?.match === true) {
+            page.replaceChildren(h("p", { class: "auth-lead", text: "Your recovery words match." }), done);
+            return;
+          }
           page.replaceChildren(
-            ...(res?.match
-              ? [h("p", { class: "auth-lead", text: "Your recovery words match." }), done]
-              : [
-                  h("p", { class: "field-error", role: "alert", text: "Those words don't match. These are this wallet's words, in order:" }),
-                  h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
-                  srpGridEl(String(res?.phrase ?? "")),
-                  done,
-                ])
+            ...wordsMismatch({
+              tryAgain: () => check(password, count, places),
+              showWords: async () => {
+                state.route = "recovery_phrase";
+                await actions?.render?.();
+              },
+            })
           );
         } catch (e) {
           wordsError.show(e?.message ?? String(e));

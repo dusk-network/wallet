@@ -38,6 +38,9 @@ import org.json.JSONObject
 import java.math.BigInteger
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.ByteBuffer
+import java.nio.charset.CodingErrorAction
+import java.nio.charset.StandardCharsets
 
 object Arrivals {
   /** The intent's extra a notice's tap carries: the transaction to open. */
@@ -464,7 +467,35 @@ object Incoming {
     return if (fraction.isEmpty()) whole else "$whole$decimal$fraction"
   }
 
-  private class Payment(val account: String, val hash: String, val height: Long, val value: BigInteger, val from: String)
+  private class Payment(val account: String, val hash: String, val height: Long, val value: BigInteger, val from: String, val memo: String)
+
+  // At most this many characters of a memo in a notice, the rest "…".
+  private const val MEMO_SHOWN = 100
+  private val HEX = Regex("^[0-9a-fA-F]+$")
+
+  /**
+   * A payment's memo as its words, as Activity reads it (app-core's memoOf):
+   * UTF-8 text, else nothing. Nothing either for one with a character that
+   * can't be seen or that turns the text around, which Activity shows as its
+   * code and a notice can't: its details show it.
+   */
+  private fun memoText(hex: String): String {
+    if (hex.isEmpty() || hex.length % 2 != 0 || hex.length > 2048 || !HEX.matches(hex)) return ""
+    val bytes = ByteArray(hex.length / 2) { hex.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
+    val text = try {
+      StandardCharsets.UTF_8.newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(bytes))
+        .toString()
+        .trim()
+    } catch (_: Exception) {
+      return ""
+    }
+    if (text.any { Character.isISOControl(it) || Character.getType(it) == Character.FORMAT.toInt() || it == '\u2028' || it == '\u2029' }) return ""
+    if (text.codePointCount(0, text.length) <= MEMO_SHOWN) return text
+    return text.substring(0, text.offsetByCodePoints(0, MEMO_SHOWN)).trimEnd() + "…"
+  }
 
   /** One look: each account's payments in since the last, the newest told where the app was away when they came. */
   fun check(context: Context) {
@@ -514,6 +545,7 @@ object Incoming {
         if (!Arrivals.isHash(hash) || height < 0 || height > finalized) continue
         var value = BigInteger.ZERO
         var from = ""
+        var memo = ""
         val events = row.optJSONArray("events") ?: continue
         for (e in 0 until events.length()) {
           val event = events.optJSONObject(e) ?: continue
@@ -522,9 +554,12 @@ object Incoming {
           val sender = d.optString("sender")
           if (d.optString("receiver") != account || sender == account) continue
           value += d.optString("value").toBigIntegerOrNull()?.takeIf { it.signum() > 0 } ?: BigInteger.ZERO
-          if (from.isEmpty()) from = sender
+          if (from.isEmpty()) {
+            from = sender
+            memo = memoText(d.optString("memo"))
+          }
         }
-        if (value.signum() > 0) found += Payment(account, hash, height, value, from)
+        if (value.signum() > 0) found += Payment(account, hash, height, value, from, memo)
       }
     }
     val awayAt = prefs(context).getLong("awayAt", 0L)
@@ -560,11 +595,15 @@ object Incoming {
       val name = ownName?.takeIf { it.isNotEmpty() } ?: names.optString(payment.from).takeIf { it.isNotEmpty() }
         ?: if (payment.from.length > 15) "${payment.from.take(6)}…${payment.from.takeLast(6)}" else payment.from
       val title = setup.optString("title").replace("{amount}", dusk(payment.value, setup.optString("decimal", "."), setup.optString("group", ","))).replace("{name}", name)
+      // Under it, the payer's memo where it has one, as the page words it (`memoBody`), else the network alone.
+      val network = setup.optString("network")
+      val memoBody = setup.optString("memoBody")
+      val body = if (payment.memo.isNotEmpty() && memoBody.contains("{memo}")) memoBody.replace("{memo}", payment.memo) else network
       // Turned off, or the wallet gone, while the archive answered: nothing told.
       // A locked phone that hides what notices say: "Payment received", no amount, no name.
       synchronized(this) {
         if (setup(context)?.optString("wallet") == setup.optString("wallet")) {
-          Arrivals.post(context, title, setup.optString("network"), payment.hash, "executed", payment.height, setup.optString("token"), setup.optString("network"), payment.account, setup.optString("publicTitle").ifEmpty { "Payment received" })
+          Arrivals.post(context, title, body, payment.hash, "executed", payment.height, setup.optString("token"), network, payment.account, setup.optString("publicTitle").ifEmpty { "Payment received" })
         }
       }
     }
@@ -572,10 +611,191 @@ object Incoming {
   }
 }
 
-/** JobScheduler's jobs: the sends kept looked up, and money coming in looked for, off the main thread. */
+/**
+ * A payment from Send that waits for the network while the app is away: the
+ * app signs and sends only while it's open, never in the background, so it
+ * goes out once the app's opened again. Kept here by the page (`set`, from
+ * src/wallet/localBus.js), while one waits there: the node to ask, the wallet
+ * it's from and the notice's words. As the app leaves the screen with one
+ * waiting, its notice says it goes out when the app's opened again; once a job
+ * finds the network back (its node answers), the notice says to open the
+ * wallet to send it. Neither names the amount or whom it's to. Tapping it
+ * opens the wallet, which shows the waiting payment; back on the screen, the
+ * notice and the job go.
+ */
+object Waiting {
+  private const val PREFS = "dusk-wallet-waiting"
+  const val JOB_ID = 7444
+  /** The intent's extra a notice's tap carries: its token, made here, the only one taken as this notice's. */
+  const val EXTRA = "network.dusk.wallet.WAITING"
+  // The notice's own number: one notice, whichever words it has now.
+  private const val NOTICE_ID = 7444
+  // Waits between looks for the network: often at first, then less.
+  private val DELAYS = longArrayOf(5_000, 15_000, 30_000, 60_000, 120_000, 300_000, 600_000, 900_000)
+  // Looked for no longer than this after the app left.
+  private const val LOOKED_FOR_MS = 2 * 60 * 60 * 1000L
+
+  private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+  private fun setup(context: Context): JSONObject? =
+    try {
+      prefs(context).getString("setup", null)?.let { JSONObject(it) }
+    } catch (_: Exception) {
+      null
+    }
+
+  private fun jobs(context: Context) = context.getSystemService(JobScheduler::class.java)
+
+  /**
+   * One waits (`next`: `wallet`, `nodeUrl`, `title`, `away` and `back`, the
+   * notice's words), or none (null): then its notice and the job go. Told
+   * while the app's away already, as when its first try ended after it was
+   * left, the notice says so then.
+   */
+  @Synchronized
+  fun set(context: Context, next: JSONObject?) {
+    val node = next?.optString("nodeUrl") ?: ""
+    if (next == null || next.optString("title").isEmpty() || !(node.startsWith("https://") || node.startsWith("http://"))) {
+      prefs(context).edit().remove("setup").remove("said").remove("back").remove("tries").commit()
+      jobs(context)?.cancel(JOB_ID)
+      context.getSystemService(NotificationManager::class.java)?.cancel(NOTICE_ID)
+      return
+    }
+    val token = prefs(context).getString("token", null)?.takeIf { Arrivals.isToken(it) }
+      ?: java.util.UUID.randomUUID().toString().replace("-", "")
+    prefs(context).edit().putString("setup", next.toString()).putString("token", token).commit()
+    if (prefs(context).getLong("awayAt", 0L) > 0L && !prefs(context).getBoolean("said", false)) {
+      prefs(context).edit().putBoolean("said", true).putBoolean("back", false).putInt("tries", 0).commit()
+      post(context, next, next.optString("away"))
+      schedule(context, DELAYS[0])
+    }
+  }
+
+  /** Whether a tap's `token` is the one this notice carried. */
+  fun isOurs(context: Context, token: String): Boolean =
+    Arrivals.isToken(token) && prefs(context).getString("token", null) == token
+
+  // The notice, with the words for now: tapping it opens the wallet.
+  private fun post(context: Context, setup: JSONObject, body: String) {
+    val notices = context.getSystemService(NotificationManager::class.java) ?: return
+    if (!Arrivals.allowed(context)) return
+    val token = prefs(context).getString("token", "") ?: ""
+    val open = context.packageManager.getLaunchIntentForPackage(context.packageName)
+      ?.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      ?.apply { putExtra(EXTRA, token) }
+    val tap = open?.let { PendingIntent.getActivity(context, NOTICE_ID, it, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT) }
+    val mark = context.resources.getIdentifier("ic_launcher_foreground", "mipmap", context.packageName)
+    val icon = Icon.createWithResource(context, if (mark != 0) mark else context.applicationInfo.icon)
+    @Suppress("DEPRECATION")
+    val builder = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) Notification.Builder(context) else {
+      if (notices.getNotificationChannel("payments") == null) {
+        notices.createNotificationChannel(NotificationChannel("payments", "Payments", NotificationManager.IMPORTANCE_DEFAULT))
+      }
+      Notification.Builder(context, "payments")
+    }
+    // No amount and no one's name, so a locked phone shows it whole.
+    val notice = builder
+      .setSmallIcon(icon)
+      .setContentTitle(setup.optString("title"))
+      .setContentText(body)
+      .setVisibility(Notification.VISIBILITY_PUBLIC)
+      .setAutoCancel(true)
+      .apply { if (tap != null) setContentIntent(tap) }
+      .build()
+    notices.notify(NOTICE_ID, notice)
+  }
+
+  /**
+   * The app left the screen: with a payment waiting, said so, and the network
+   * looked for. Said a moment later, once the page has said whether leaving
+   * ended it (a wallet that locks as it's left sends nothing).
+   */
+  @Synchronized
+  fun away(context: Context) {
+    val at = System.currentTimeMillis()
+    prefs(context).edit().putLong("awayAt", at).putBoolean("said", false).putBoolean("back", false).putInt("tries", 0).commit()
+    if (setup(context) == null) return
+    android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+      synchronized(this) {
+        val setup = setup(context)
+        if (setup != null && prefs(context).getLong("awayAt", 0L) == at && !prefs(context).getBoolean("said", false)) {
+          prefs(context).edit().putBoolean("said", true).commit()
+          post(context, setup, setup.optString("away"))
+          schedule(context, DELAYS[0])
+        }
+      }
+    }, 1_000)
+  }
+
+  /** Back on the screen: the wallet shows the payment itself. */
+  @Synchronized
+  fun front(context: Context) {
+    prefs(context).edit().putLong("awayAt", 0L).commit()
+    jobs(context)?.cancel(JOB_ID)
+    context.getSystemService(NotificationManager::class.java)?.cancel(NOTICE_ID)
+  }
+
+  /** A wallet removed (`wallet`), or every one (""): its payment isn't waited on here any more. */
+  @Synchronized
+  fun forget(context: Context, wallet: String) {
+    if (wallet.isEmpty() || setup(context)?.optString("wallet") == wallet) set(context, null)
+  }
+
+  private fun schedule(context: Context, delay: Long) {
+    val job = JobInfo.Builder(JOB_ID, ComponentName(context, ArrivalJob::class.java))
+      .setRequiredNetworkType(JobInfo.NETWORK_TYPE_ANY)
+      .setMinimumLatency(delay)
+      .build()
+    try {
+      jobs(context)?.schedule(job)
+    } catch (_: Exception) {
+      // Not scheduled: the notice says what it said as the app left.
+    }
+  }
+
+  /**
+   * The job's look, with a network: once the node answers, the notice says to
+   * open the wallet to send it, and the job's done. True to look again later.
+   */
+  fun check(context: Context): Boolean {
+    val (setup, awayAt) = synchronized(this) { Pair(setup(context), prefs(context).getLong("awayAt", 0L)) }
+    if (setup == null || awayAt <= 0L || prefs(context).getBoolean("back", false)) return false
+    if (System.currentTimeMillis() - awayAt > LOOKED_FOR_MS) return false
+    Arrivals.graphql(setup.optString("nodeUrl"), "query { block(height: 0) { header { height } } }") ?: return true
+    synchronized(this) {
+      // Still away, with the same payment waiting.
+      val now = setup(context) ?: return false
+      if (prefs(context).getLong("awayAt", 0L) <= 0L || now.optString("wallet") != setup.optString("wallet")) return false
+      prefs(context).edit().putBoolean("back", true).commit()
+      post(context, now, now.optString("back"))
+    }
+    return false
+  }
+
+  /** Once more, a little later than the last time. */
+  @Synchronized
+  fun again(context: Context) {
+    if (setup(context) == null || prefs(context).getLong("awayAt", 0L) <= 0L) return
+    val tries = prefs(context).getInt("tries", 0) + 1
+    prefs(context).edit().putInt("tries", tries).commit()
+    schedule(context, DELAYS[minOf(tries, DELAYS.size - 1)])
+  }
+}
+
+/** JobScheduler's jobs: the sends kept looked up, money coming in looked for, and the network for a payment waiting, off the main thread. */
 class ArrivalJob : JobService() {
   override fun onStartJob(params: JobParameters): Boolean {
     Thread {
+      if (params.jobId == Waiting.JOB_ID) {
+        val again = try {
+          Waiting.check(applicationContext)
+        } catch (_: Exception) {
+          true
+        }
+        jobFinished(params, false)
+        if (again) Waiting.again(applicationContext)
+        return@Thread
+      }
       if (params.jobId == Incoming.JOB_ID || params.jobId == Incoming.SOON_ID) {
         try {
           Incoming.check(applicationContext)

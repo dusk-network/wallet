@@ -51,7 +51,7 @@ function searchedText(state, filter, query, searched) {
   const text = emptyText(state, filter);
   if (!query || text === LOOKING) return text;
   if (searched.reading && !searched.whole) return LOOKING_BACK;
-  return !searched.whole && hasMoreActivity(state) ? "Nothing read so far matches that. Show more to look further back." : "Nothing in your activity matches that.";
+  return !searched.whole?.complete && hasMoreActivity(state) ? "Nothing read so far matches that. Show more to look further back." : "Nothing in your activity matches that.";
 }
 
 const empty = (text) =>
@@ -192,8 +192,8 @@ export function activityView(ov, { state, actions } = {}) {
   );
 
   // Older history: kept rows past this page, or the next sync of older blocks;
-  // none for a search, which reads it all.
-  const more = hasMoreActivity(state) && !(query && (searched.whole || searched.reading))
+  // none for a search, which reads it all, unless older blocks couldn't be had.
+  const more = hasMoreActivity(state) && !(query && (searched.whole?.complete || searched.reading))
     ? h("button", {
         class: "btn-outline tx-more",
         type: "button",

@@ -1,4 +1,4 @@
-import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, nameHides } from "@dusk-network/app-core/names";
+import { NAME_HIDES, NAME_SAVE_YES, contactNameCheck, nameHides, passesForDuskName } from "@dusk-network/app-core/names";
 import { searchKey } from "@dusk-network/app-core/text";
 import { isAccount } from "@dusk-network/networks/account";
 import { ProfileGenerator } from "@dusk/w3sper";
@@ -8,7 +8,7 @@ import { duskNameErrorText, duskNameRecipient, duskNamesNetwork, lookupDuskName 
 import { nameCheckNote } from "../../../shared/nodeNetwork.js";
 import { openUrl } from "../../../platform/index.js";
 import { h } from "../../lib/dom.js";
-import { joinedAddress, passesForDuskName } from "../../lib/recipient.js";
+import { joinedAddress } from "../../lib/recipient.js";
 import { waiting } from "../../components/Waiting.js";
 import { shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";

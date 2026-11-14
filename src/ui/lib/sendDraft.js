@@ -18,7 +18,8 @@ import { SEND_DRAFT_KEY as KEY } from "../../shared/sendDraftStore.js";
 // What's kept of the form: what the person typed and chose, and a request's
 // network, which Send refuses it on any other (`requestChainId`), with where
 // it was filled in from, and that a link or a QR code filled it in
-// (`filledIn`), which is never the next Send's.
+// (`filledIn`: "link" or "qr", which typing over the recipient doesn't
+// change), which is never the next Send's.
 const FIELDS = ["to", "duskName", "nameChoices", "amountDusk", "amountMasked", "memo", "gas", "requestChainId", "filledFrom", "filledIn"];
 
 let held = null;

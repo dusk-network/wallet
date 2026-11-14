@@ -1,9 +1,7 @@
 // "Check your recovery words": three of a phrase's words, by their places,
-// chosen at random, and whether the words typed are its words there. The
-// words are compared on this device only; nothing typed is kept, logged or
-// sent anywhere.
-
-const wordOf = (text) => String(text ?? "").normalize("NFKD").trim().toLowerCase();
+// chosen at random. Whether the words typed are its words there is
+// app-core's to say (recoveryWordsMatch), as both wallets ask it; nothing
+// typed is kept, logged or sent anywhere.
 
 /**
  * Three places (from 1) of a phrase of `count` words, at random, in order.
@@ -16,18 +14,4 @@ export function wordPlaces(count, pick = (n) => globalThis.crypto.getRandomValue
   const places = new Set();
   while (places.size < Math.min(3, n)) places.add(pick(n) + 1);
   return [...places].sort((a, b) => a - b);
-}
-
-/**
- * Whether each word typed, by its place, is the phrase's word there.
- * @param {string} phrase
- * @param {[number, string][]} typed
- */
-export function wordsMatch(phrase, typed) {
-  const words = wordOf(phrase).split(/\s+/);
-  return (
-    Array.isArray(typed) &&
-    typed.length > 0 &&
-    typed.every(([place, word]) => Number.isInteger(place) && place >= 1 && place <= words.length && wordOf(word) !== "" && words[place - 1] === wordOf(word))
-  );
 }

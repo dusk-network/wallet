@@ -12,7 +12,7 @@
 import { historyArchiverUrl } from "../../shared/activityHistory.js";
 import { amountLocale } from "../../shared/amount.js";
 import { networkTextOf } from "../../shared/nodeNetwork.js";
-import { INCOMING_LOCKED_TITLE, incomingNoticeTitle } from "../../shared/phoneNotices.js";
+import { INCOMING_LOCKED_TITLE, incomingMemoBody, incomingNoticeTitle } from "../../shared/phoneNotices.js";
 import { appNoticesAllowed, watchAppIncoming } from "../../platform/notices.js";
 
 // What was given last, and when: given again once it changes, and each
@@ -20,6 +20,10 @@ import { appNoticesAllowed, watchAppIncoming } from "../../platform/notices.js";
 const GIVEN_AGAIN_MS = 60_000;
 let given = null;
 let givenAt = 0;
+// Each giving's turn: one a later one overtook while it asked Android or the
+// wallet gives nothing after it (issue #214: turned on and off quickly, the
+// first gave Android its job back after the second took it away).
+let turn = 0;
 
 // The marks Activity writes an amount with.
 function marks() {
@@ -45,12 +49,15 @@ export function incomingSetup(ov, { names } = {}) {
   const archiveUrl = historyArchiverUrl({ nodeUrl: ov?.nodeUrl, archiverUrl: ov?.archiverUrl });
   if (!accounts.length || !archiveUrl) return null;
   const known = [...(names ?? new Map())].filter(([account, name]) => account && typeof name === "string" && /\.dusk$/i.test(name)).slice(0, 100);
+  const network = networkTextOf(String(ov.nodeUrl ?? ""));
   return {
     accounts,
     names: Object.fromEntries(known),
     archiveUrl,
-    network: networkTextOf(String(ov.nodeUrl ?? "")),
+    network,
     title: incomingNoticeTitle({ hidden: ov.hideBalances === true }),
+    // Under it, the payer's memo where the payment has one (Sofía's: her invoice's number wasn't named).
+    memoBody: incomingMemoBody(network),
     // On a locked phone that hides what notices say.
     publicTitle: INCOMING_LOCKED_TITLE,
     wallet: accounts[0].account,
@@ -76,8 +83,13 @@ export async function keepIncomingWatched(ov, { names, send, allowedNow = appNot
   if (key === given && now - givenAt < GIVEN_AGAIN_MS) return;
   given = key;
   givenAt = now;
-  if (!setup || !(await allowedNow().catch(() => false))) return watch(null);
+  const mine = ++turn;
+  if (!setup) return watch(null);
+  const allowed = await allowedNow().catch(() => false);
+  if (mine !== turn) return;
+  if (!allowed) return watch(null);
   const token = (await send({ type: "DUSK_UI_INCOMING_TOKEN" }).catch(() => null))?.token ?? "";
+  if (mine !== turn) return;
   // Not given: asked again with the next draw.
   if (!token) {
     given = null;

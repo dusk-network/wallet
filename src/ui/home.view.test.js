@@ -202,6 +202,31 @@ describe("home balance", () => {
     );
   });
 
+  // Chen's and Lena's, on phones: "Shielded · Sync failed 0 DUSK" opened with no signal, and "Shielded · Not synced
+  // 0 DUSK" after an import and every cold start, read like something broke, and like nothing was there.
+  it("shows the shielded balance as not read yet, never 0, till a sync has gone through, and that it can't be read offline", () => {
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const draw = (over, online = true) => {
+      vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: online });
+      const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs: [], balance: { value: "620800000" }, shieldedBalance: { value: "0", spendable: "0" }, ...over };
+      document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
+      const item = document.body.querySelectorAll(".balance-split-item").find((el) => visibleText(el).startsWith("Shielded"));
+      return [visibleText(item.querySelector(".balance-split-label")), visibleText(item.querySelector(".balance-split-value")), document.body.querySelector(".balance-label__text").textContent];
+    };
+    // After an import, or a cold start, the sync not run yet.
+    expect(draw({ shieldedSync: { state: "idle", notes: 0 } })).toEqual(["Shielded · reading…", "—", "Public balance"]);
+    // Its first sync under way.
+    expect(draw({ shieldedSync: { state: "syncing", progress: 0.4, notes: 0 } })).toEqual(["Shielded · Syncing 40%", "—", "Public balance"]);
+    // Opened with no signal: it can't be read now, and nothing failed.
+    expect(draw({ shieldedSync: { state: "error", lastError: "Failed to fetch" }, balanceStale: true }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
+    expect(draw({ shieldedSync: { state: "idle", notes: 0 } }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
+    // What was read before, kept: shown, as it can't be read now.
+    expect(draw({ shieldedSync: { state: "error" }, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true }, false)).toEqual(["Shielded · can't be read now", "0.05 DUSK", "Public and shielded"]);
+    // Read: 0 is 0.
+    expect(draw({ shieldedSync: { state: "done", progress: 1, notes: 0 } })).toEqual(["Shielded", "0 DUSK", "Public and shielded"]);
+  });
+
   it("says plainly when a balance can't be read, with nothing of what the node said", () => {
     const { document } = installFakeDom();
     const state = { route: "home", addressBook: { loaded: true, items: [] } };
@@ -305,9 +330,10 @@ describe("payments from Send waiting for the network, on Home", () => {
       }),
     };
     document.body.replaceChildren(...homeView(ov([send(), send({ sendId: "s2", memo: "Hors ligne deux", at: at(2, 36), waits: false })]), { state, actions }));
+    // Chen's and Lena's: "Not sent yet … It's being sent. Cancel" as it went out. One state at a time: Sending.
     expect(boxes(document)).toEqual([
       "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers.Cancel",
-      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36It's being sent.Cancel",
+      "Sending: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36Cancel",
     ]);
 
     // Cancel on the second: that one alone, and said.
@@ -324,6 +350,24 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(boxes(document)).toEqual([]);
   });
 
+  // Chen's, in the app on Android: a payment waiting for the network went out only once he opened the app again.
+  it("says in the app on a phone that a payment waiting goes out once the app's opened again", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2, 40));
+    const { document, window } = installFakeDom();
+    window.__TAURI_INTERNALS__ = {};
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
+    document.body.replaceChildren(...homeView(ov([send()]), { state, actions }));
+    expect(boxes(document)).toEqual([
+      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers. If you leave Dusk Wallet, it goes out when you open it again.Cancel",
+    ]);
+    // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
+    document.body.replaceChildren(...homeView(ov([send()], { lockOnLeave: true }), { state, actions }));
+    expect(boxes(document)[0]).toContain("It goes out once the network answers. If you leave Dusk Wallet, it locks and this isn't sent.");
+  });
+
   // Chen's: one handed over as the Wi-Fi died showed as sent in Activity, though the node never had it.
   it("says one handed over without a clear answer may have gone out, with no Cancel, until the node's asked", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
@@ -338,7 +382,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(boxes(document)).toEqual([
       "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It may have gone out already. If it didn't, it goes out once the network answers.",
       "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36It may have gone out already. The wallet checks once the network answers.",
-      "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Trois” · made at 02:38It's being sent.",
+      "Sending: 0.01 DUSK to Lucas (petit-fils)“Trois” · made at 02:38",
     ]);
     expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
   });

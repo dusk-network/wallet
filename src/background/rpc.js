@@ -60,16 +60,34 @@ import {
 import { getExtensionApi, runtimeGetURL, tabsCreate } from "../platform/extensionApi.js";
 
 // RPC Handler (from dApps)
+// A site's request as plain data, whatever shape it comes in: text,
+// numbers, true and false, lists, bytes, and objects that hold what they hold
+// themselves, with nothing on a prototype of their own and no "__proto__" key.
+// A request read field by field never takes a field from a prototype then,
+// as one with {"__proto__": {"account": …}} could give it.
+const PLAIN_DEPTH = 64;
+function plainData(value, depth = 0) {
+  if (value === null || typeof value !== "object") return typeof value !== "function" && typeof value !== "symbol";
+  if (depth > PLAIN_DEPTH) return false;
+  if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return true;
+  const proto = Object.getPrototypeOf(value);
+  if (Array.isArray(value)) return proto === Array.prototype && Object.getOwnPropertySymbols(value).length === 0 && value.every((item) => plainData(item, depth + 1));
+  if (proto !== Object.prototype && proto !== null) return false;
+  const keys = Reflect.ownKeys(value);
+  return keys.every((key) => typeof key === "string" && key !== "__proto__") && keys.every((key) => plainData(value[key], depth + 1));
+}
+
 // What dusk_getPublicBalance takes: nothing, the account alone (or as the
 // one item of a list), or an object with `account` and `profileId`, each a
-// string. Anything else, a key it doesn't take whatever it holds, is refused
-// rather than read past.
+// string, its own. Anything else, a key it doesn't take whatever it holds, is
+// refused rather than read past.
 const BALANCE_KEYS = new Set(["account", "profileId"]);
 function balanceAsked(params) {
   const refuse = () => {
     throw rpcError(ERROR_CODES.INVALID_PARAMS, "dusk_getPublicBalance takes only the connected profile's account or profileId");
   };
   if (params === undefined || params === null) return {};
+  if (!plainData(params)) refuse();
   let asked = params;
   if (Array.isArray(params)) {
     if (params.length > 1) refuse();
@@ -79,8 +97,10 @@ function balanceAsked(params) {
   if (typeof asked === "string") return { account: asked };
   if (!asked || typeof asked !== "object" || Array.isArray(asked)) refuse();
   if (Object.keys(asked).some((key) => !BALANCE_KEYS.has(key))) refuse();
-  if ([asked.account, asked.profileId].some((value) => value !== undefined && typeof value !== "string")) refuse();
-  return { account: asked.account, profileId: asked.profileId };
+  const own = (key) => (Object.hasOwn(asked, key) ? asked[key] : undefined);
+  const [account, profileId] = [own("account"), own("profileId")];
+  if ([account, profileId].some((value) => value !== undefined && typeof value !== "string")) refuse();
+  return { account, profileId };
 }
 
 export async function handleRpc(origin, request, { pressed, approvalKey = "", resume = false, tabId } = {}) {
@@ -123,6 +143,8 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
   if (!DAPP_RPC_METHODS.includes(method) && !DAPP_TOMBSTONED_METHODS.includes(method)) {
     throw rpcError(ERROR_CODES.METHOD_NOT_FOUND, `Unknown method: ${method}`);
   }
+  // Its parameters as plain data: nothing in them is read from a prototype.
+  if (!plainData(params)) throw rpcError(ERROR_CODES.INVALID_PARAMS, "The request's parameters must be plain data.");
 
   // The site's connection to the wallet it's connected to now (siteWallet.js):
   // none of another wallet's. One from before wallets were kept apart that the

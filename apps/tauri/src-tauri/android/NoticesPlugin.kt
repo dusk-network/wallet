@@ -2,7 +2,8 @@
 // question for leave to show them, asked only when the person taps Tell me
 // when it arrives, a payment's notice once they may show, the sends to look
 // for once the app leaves the screen (ArrivalJob.kt), forgotten with their
-// wallet, the accounts to look at for money coming in (`incoming`), and the
+// wallet, the accounts to look at for money coming in (`incoming`), a payment
+// waiting for the network while the app's away (`waiting`), and the
 // transaction a notice's tap opened the app on.
 //
 // Copied into the generated Android project by build.rs, as the icon is, and
@@ -53,6 +54,12 @@ class IncomingArgs {
 }
 
 @InvokeArg
+class WaitingArgs {
+  // The payment waiting, as JSON (ArrivalJob.kt's Waiting.set): "" for none.
+  var setup: String = ""
+}
+
+@InvokeArg
 class ForgetArgs {
   // The wallet whose sends are forgotten: "" for every wallet's.
   var wallet: String = ""
@@ -71,6 +78,8 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   private var openedAccount = ""
   // Its token, the one this app's notice carried: checked here, for the page to open it at once.
   private var openedOurs = false
+  // A tap on the notice of a payment waiting for the network, with the token that notice carried.
+  private var openedWaiting = false
 
   private fun answer(invoke: Invoke, allowed: Boolean) {
     val out = JSObject()
@@ -79,6 +88,11 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   private fun take(intent: Intent?) {
+    val waiting = intent?.getStringExtra(Waiting.EXTRA)
+    if (waiting != null) {
+      intent.removeExtra(Waiting.EXTRA)
+      openedWaiting = Waiting.isOurs(activity.applicationContext, waiting)
+    }
     val hash = intent?.getStringExtra(Arrivals.EXTRA_TX) ?: return
     val outcome = intent.getStringExtra(Arrivals.EXTRA_OUTCOME) ?: ""
     val block = intent.getLongExtra(Arrivals.EXTRA_BLOCK, 0L)
@@ -103,6 +117,7 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   override fun load(webView: WebView) {
     take(activity.intent)
     Incoming.front(activity.applicationContext)
+    Waiting.front(activity.applicationContext)
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -113,11 +128,14 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   // its way is looked for by the job.
   override fun onStop() {
     Arrivals.away(activity.applicationContext)
+    // A payment waiting for the network goes out only once the app's open again: its notice says so.
+    Waiting.away(activity.applicationContext)
   }
 
-  // Back on the screen: money coming in shows there, not as a notice.
+  // Back on the screen: money coming in, and a payment waiting, show there, not as a notice.
   override fun onResume() {
     Incoming.front(activity.applicationContext)
+    Waiting.front(activity.applicationContext)
   }
 
   /** Whether notices may show. */
@@ -162,6 +180,20 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
     val args = invoke.parseArgs(ForgetArgs::class.java)
     Arrivals.forget(activity.applicationContext, args.wallet)
     Incoming.forget(activity.applicationContext, args.wallet)
+    Waiting.forget(activity.applicationContext, args.wallet)
+    answer(invoke, Arrivals.allowed(activity))
+  }
+
+  /** A payment from Send waiting for the network, for the app's time away, and the notice's words: none ("") for none. */
+  @Command
+  fun waiting(invoke: Invoke) {
+    val args = invoke.parseArgs(WaitingArgs::class.java)
+    val setup = try {
+      if (args.setup.isEmpty()) null else org.json.JSONObject(args.setup)
+    } catch (_: Exception) {
+      null
+    }
+    Waiting.set(activity.applicationContext, setup)
     answer(invoke, Arrivals.allowed(activity))
   }
 
@@ -202,6 +234,8 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
     out.put("token", openedToken)
     out.put("account", openedAccount)
     out.put("ours", openedOurs)
+    out.put("waiting", openedWaiting)
+    openedWaiting = false
     opened = ""
     openedOutcome = ""
     openedBlock = 0L

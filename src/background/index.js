@@ -519,7 +519,7 @@ async function paysFor(params, accountIndex, status) {
 }
 
 // Only the wallet's own pages' to send, whatever a content script is made to.
-const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE", "DUSK_UI_CANCEL_SEND", "DUSK_UI_DROP_UNSENT", "DUSK_UI_LAST_SEND"]);
+const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_RECOVERY_PHRASE", "DUSK_UI_CHECK_RECOVERY_WORDS", "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE", "DUSK_UI_CANCEL_SEND", "DUSK_UI_DROP_UNSENT", "DUSK_UI_LAST_SEND"]);
 
 // For when a site last used its connection: anything but what any page can ask.
 const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId", "dusk_openPaymentLink"]);
@@ -1652,6 +1652,24 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // node it was made for (`madeOn`), whatever was chosen since.
         let made;
         let madeOn = "";
+        // Kept as a sent one as soon as its try has handed it over, before it
+        // leaves the waiting list (waitingSends.js forgets it once the try is
+        // back), under the node it was sent on: another may have been chosen
+        // while it waited or was looked up. Read meanwhile, the wallet's lists
+        // have it in the one or the other, never in neither (Lena's and
+        // Chen's: gone from Home and Activity both for 10 s as it went out).
+        const keptSent = async (tried) => {
+          const hash = tried.result?.hash ?? "";
+          if (!hash) return tried;
+          try {
+            const settings = await getSettings();
+            const sent = { walletId: String(tried.status?.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl: tried.nodeUrl || settings?.nodeUrl || "", profileIndex: sendingProfile(tried.baseParams, tried.status, settings), nullifiers: tried.result?.nullifiers };
+            await putTxMeta(hash, submittedTxMeta(tried.baseParams, sent, walletSendFields(tried.baseParams, message)), { epoch: tried.txEpoch });
+          } catch {
+            // Said sent all the same, below.
+          }
+          return tried;
+        };
         const attempt = ({ resend = false, found = null } = {}) => withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           const status = await getEngineStatus();
           if (!status.isUnlocked) {
@@ -1666,7 +1684,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           await ensureEngineConfigured();
           if (found || resend) {
             const result = found ? { ...found, found: true } : await engineCall("dusk_resendSend", { sendId, txEpoch });
-            return { status, txEpoch, baseParams: made ?? applyTxDefaults(reviewed, {}), result, nodeUrl: madeOn };
+            return keptSent({ status, txEpoch, baseParams: made ?? applyTxDefaults(reviewed, {}), result, nodeUrl: madeOn });
           }
           // The node's gas price (kept 30 s) by both wallets' one rule: its
           // median, under a ceiling.
@@ -1695,9 +1713,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             }
             throw error;
           });
-          return { status, txEpoch, baseParams, result, nodeUrl };
+          return keptSent({ status, txEpoch, baseParams, result, nodeUrl });
         });
-        const { status, txEpoch, baseParams, result, nodeUrl: sentOn } = sendId
+        const { status, result, nodeUrl: sentOn } = sendId
           ? await sendWhenReachable({
               sendId,
               record: waitingRecordOf(message, await getSettings().then((settings) => ({ nodeUrl: settings.nodeUrl, profileIndex: Number(settings.selectedAccountIndex ?? 0) || 0 }))),
@@ -1708,20 +1726,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             })
           : await attempt();
 
-        // Persist metadata (see rpc.js comments), under the node it was sent
-        // on: another may have been chosen while it waited or was looked up.
+        // Kept as sent as it was handed over (keptSent), under the node it was sent on.
         const hash = result?.hash ?? "";
         try {
           const settings = await getSettings();
           const nodeUrl = sentOn || settings?.nodeUrl || "";
 
           if (hash) {
-            const profileIndex = sendingProfile(baseParams, status, settings);
-            await putTxMeta(
-              hash,
-              submittedTxMeta(baseParams, { walletId: String(status?.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message)),
-              { epoch: txEpoch }
-            );
             await keepLastSend({ walletId: String(status?.accounts?.[0] ?? ""), nodeUrl, hash, state: "submitted" }).catch(() => {});
             // Found on the node after a hand-over with no clear answer: no watcher follows it.
             if (result?.found) lookUpFound(hash);

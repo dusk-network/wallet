@@ -1076,6 +1076,29 @@ describe("a stake with Sozu in figures", () => {
   const held = { position: { poolBalanceLux: dusk(120), stDuskBalanceLux: dusk(39) } };
   const rows = () => body.querySelectorAll(".sozu-position .kv").map(visibleText);
 
+  // Lena's, the third round: with the node silent, Home said its balance may be out of date after a while, and the
+  // Stake page's figures, Sozu's and the native stake's, said nothing of the kind.
+  it("says Staking's figures may be out of date, as Home does, with when they were read", async () => {
+    const at = Date.UTC(2026, 10, 14, 10, 40);
+    const notes = () => body.querySelectorAll(".stake-stale").filter(isShown).map(visibleText);
+    const state = { route: "stake", staking: staking(owner()), sozu: sozu(held) };
+    popup(state, ov());
+    expect(notes()).toEqual([]);
+    // The node stopped answering: said under the figures, with the time of the last read.
+    popup(state, ov({ networkStatus: { nodeStatus: "offline" }, balanceReadAt: at }));
+    expect(notes()).toEqual([expect.stringMatching(/^Your stake may be out of date\. Last read .+\.$/)]);
+    // No network at all.
+    const online = globalThis.navigator;
+    vi.stubGlobal("navigator", { ...online, onLine: false });
+    popup(state, ov({ stakeStale: true }));
+    expect(notes()).toEqual(["Your stake may be out of date until you're back online."]);
+    vi.stubGlobal("navigator", online);
+    // On Liquid staking too, under what's held.
+    state.staking.screen = "liquid";
+    popup(state, ov({ networkStatus: { nodeStatus: "offline" } }));
+    expect(notes()).toEqual(["Your stake may be out of date."]);
+  });
+
   // Lena's wish: staking rewards per tax year.
   it("says the rewards of each calendar year on Staking, newest first: native rewards claimed, from the whole history", async () => {
     const overview = ov();
@@ -1155,8 +1178,9 @@ describe("a stake with Sozu in figures", () => {
       const history = [move(staked, "sozu_stake", "100000000000", 4_800_001, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "30300000000", 4_800_002, Date.UTC(2026, 5, 1, 12))];
       popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
       // Held from March at 2 to June at 2.02 (49.875 stDUSK), then on to now at 2.04 (34.875): 0.9975 and 0.6975,
-      // less the stake's 0.25 deposit fee, the cost unstaking counts too (Lena's and Nandini's: two cost bases).
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.445 DUSK", "Sozu, taken out by unstaking: 0.2248 DUSK"]]));
+      // less the stake's 0.25 deposit fee, the cost unstaking counts too (Lena's and Nandini's: two cost bases), which
+      // the line says, as the card's rewards are before it.
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held, after deposit fees: 1.445 DUSK", "Sozu, taken out by unstaking: 0.2248 DUSK"]]));
       // Lena's: the two lines read as two rewards to add. Under them, in both wallets' words, that one is part of the other, and how it's counted.
       expect(visibleText(body.querySelector(".stake-years-counted"))).toBe(
         "Taken out by unstaking is part of grown while held: both count stDUSK at its average cost, deposit fees included."
@@ -1180,13 +1204,13 @@ describe("a stake with Sozu in figures", () => {
       const state = { route: "stake", staking: staking(owner()), sozu: holding(0n, 0n), activity: activityOf(overview, history) };
       popup(state, overview);
       // Nandini's: "grown while held 0" beside "taken out −0.0005": the loss shows in both now, one part of the other.
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: −0.1 DUSK", "Sozu, taken out by unstaking: −0.1 DUSK"]]));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held, after deposit fees: −0.1 DUSK", "Sozu, taken out by unstaking: −0.1 DUSK"]]));
 
       // Its worth: under a cent, a loss all the same, never $0.00.
       body.querySelector("#stake-years-value").checked = true;
       body.querySelector("#stake-years-value").dispatchEvent(new Event("change"));
       await vi.waitFor(() =>
-        expect(years()).toEqual([["2026", "Sozu, grown while held: −0.1 DUSK · a loss under $0.01", "Sozu, taken out by unstaking: −0.1 DUSK · a loss under $0.01"]])
+        expect(years()).toEqual([["2026", "Sozu, grown while held, after deposit fees: −0.1 DUSK · a loss under $0.01", "Sozu, taken out by unstaking: −0.1 DUSK · a loss under $0.01"]])
       );
     });
 
@@ -1205,7 +1229,7 @@ describe("a stake with Sozu in figures", () => {
       popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
       await vi.waitFor(() => expect(years()).toHaveLength(1));
       expect(years()[0].join(" ")).not.toContain("couldn't be read");
-      expect(years()[0][1]).toMatch(/^Sozu, grown while held: [\d.]+ DUSK$/);
+      expect(years()[0][1]).toMatch(/^Sozu, grown while held, after deposit fees: [\d.]+ DUSK$/);
 
       // Astra's: not on the archive yet 20 s on, nor read 20 s after that, as the archive failed: read again all the same.
       await vi.advanceTimersByTimeAsync(20_000);
@@ -1226,6 +1250,33 @@ describe("a stake with Sozu in figures", () => {
       vi.useRealTimers();
     });
 
+    // Lena's, the third round: right after her own unstake, Rewards by year kept the "taken out" from before it for as
+    // long as she looked. Just made, the unstake is the wallet's own record, whose facts nothing reads, till the
+    // archive lists it with its block: the whole history is read again, as the web wallet reads it.
+    it("reads the whole history again after an unstake just made, till the archive lists it with its facts", async () => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.setSystemTime(Date.UTC(2026, 5, 1, 12, 0, 10));
+      const [staked, unstaked] = ["6e".repeat(32), "6f".repeat(32)];
+      const events = {
+        4800005: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }],
+      };
+      archive.query = archiveWith(events);
+      const history = [move(staked, "sozu_stake", "100000000000", 4_800_005, Date.UTC(2026, 2, 1, 12))];
+      // The unstake as the wallet keeps it the moment it's in its block: the archive doesn't list it yet.
+      const own = { hash: unstaked, kind: "contract_call", contractId: PILOT, fnName: "sozu_unstake", amount: "0", status: "executed", profileIndex: 0, submittedAt: Date.UTC(2026, 5, 1, 12), executedAt: Date.UTC(2026, 5, 1, 12, 0, 5), nodeUrl: "https://testnet.nodes.dusk.network", origin: "Wallet", asset: { kind: "sozu", action: "sozu_unstake", pool: PILOT } };
+      const overview = ov({ txs: [own] });
+      popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
+      await vi.waitFor(() => expect(years()).toHaveLength(1));
+      expect(years()[0].join(" ")).not.toContain("taken out by unstaking");
+
+      // The archive lists it now, with its block and its events: read again 20 s on, it's counted.
+      history.push(move(unstaked, "sozu_unstake", "30300000000", 4_800_006, Date.UTC(2026, 5, 1, 12)));
+      events[4800006] = [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }];
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.waitFor(() => expect(years()[0]).toContain("Sozu, taken out by unstaking: 0.2248 DUSK"));
+      vi.useRealTimers();
+    });
+
     // Astra's: rewards accrued, the holding worth more for the same stDUSK, and the year's growth stayed as it was.
     it("says what grew again as what's held is worth more, its stDUSK the same", async () => {
       const staked = "5d".repeat(32);
@@ -1234,12 +1285,12 @@ describe("a stake with Sozu in figures", () => {
       // 49.875 stDUSK that cost 100 DUSK with their 0.25 deposit fee, worth 101.745 now.
       const state = { route: "stake", staking: staking(owner()), sozu: holding(49_875_000_000n, 101_745_000_000n), activity: activityOf(overview, [move(staked, "sozu_stake", "100000000000", 4_800_004, Date.UTC(2026, 2, 1, 12))]) };
       const app = popup(state, overview);
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.745 DUSK"]]));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held, after deposit fees: 1.745 DUSK"]]));
       // Read again, worth 103.74: what grew is 3.74.
       const position = { poolBalanceLux: "103740000000", stDuskBalanceLux: "49875000000" };
       Object.assign(state.sozu, { position, status: { ...state.sozu.status, position } });
       app.draw();
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 3.74 DUSK"]]));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held, after deposit fees: 3.74 DUSK"]]));
     });
 
     it("says what grew couldn't be read where a new year's rate isn't on the archive yet", async () => {
@@ -1253,8 +1304,8 @@ describe("a stake with Sozu in figures", () => {
       // Held across the new year, whose rate the archive doesn't have: neither year's growth is known.
       await vi.waitFor(() =>
         expect(years()).toEqual([
-          ["2026", "Sozu, grown while held: couldn't be read"],
-          ["2025", "Sozu, grown while held: couldn't be read"],
+          ["2026", "Sozu, grown while held, after deposit fees: couldn't be read"],
+          ["2025", "Sozu, grown while held, after deposit fees: couldn't be read"],
         ])
       );
     });
@@ -1269,8 +1320,9 @@ describe("a stake with Sozu in figures", () => {
       activity: activityOf(overview, entries(["sozu_stake", dusk(100)], ["sozu_stake", dusk(50)], ["sozu_unstake", dusk(40)])),
     };
     popup(state, overview);
-    // Worth now from the status at once; the rest waits for the whole history.
-    expect(rows()).toEqual(["Worth now120 DUSK", "Rewards so farReading your history…", "stDUSK39 stDUSKAdd to Assets"]);
+    // Worth now from the status at once; the rest waits for the whole history. Lena's: the card's rewards and Rewards
+    // by year's growth differed by exactly the deposit fees, and neither said so: the card's are before them.
+    expect(rows()).toEqual(["Worth now120 DUSK", "Rewards so far, before deposit feesReading your history…", "stDUSK39 stDUSKAdd to Assets"]);
     await settle();
     await settle();
     // 0.25% of 150 DUSK, at the fee Sozu has now, as no event was read of what each paid.
@@ -1279,7 +1331,7 @@ describe("a stake with Sozu in figures", () => {
       "Taken out40 DUSK",
       "Worth now120 DUSK",
       "Deposit fees, about0.375 DUSK",
-      "Rewards so far10.375 DUSK",
+      "Rewards so far, before deposit fees10.375 DUSK",
       "stDUSK39 stDUSKAdd to Assets",
     ]);
     expect(state.activity.history.sync).toHaveBeenCalled();
@@ -1298,7 +1350,7 @@ describe("a stake with Sozu in figures", () => {
     popup(state, overview);
     await settle();
     await settle();
-    expect(rows()).toContain("Rewards so far−79.5 DUSK");
+    expect(rows()).toContain("Rewards so far, before deposit fees−79.5 DUSK");
     expect(visibleText(body.querySelector(".sozu-position"))).toContain("One more on its way isn't counted yet.");
   });
 
@@ -1337,7 +1389,7 @@ describe("a stake with Sozu in figures", () => {
     popup(left, overview);
     await settle();
     await settle();
-    expect(rows()).toEqual(["Put in100 DUSK", "Taken out101 DUSK", "Worth now0 DUSK", "Deposit fees, about0.25 DUSK", "Rewards so far1.25 DUSK", "stDUSK0 stDUSKAdd to Assets"]);
+    expect(rows()).toEqual(["Put in100 DUSK", "Taken out101 DUSK", "Worth now0 DUSK", "Deposit fees, about0.25 DUSK", "Rewards so far, before deposit fees1.25 DUSK", "stDUSK0 stDUSKAdd to Assets"]);
   });
 
   it("reads the history again with each new status, so what went through counts", async () => {

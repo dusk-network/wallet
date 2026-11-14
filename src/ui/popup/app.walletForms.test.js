@@ -314,10 +314,12 @@ describe("Import wallet's network", () => {
     const fresh = { hasVault: false, isUnlocked: false, accounts: [], accountCount: 0, wallets: [], walletKey: null, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" };
     const t = await popupAt("onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, answer, fresh);
     const tabs = () => t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]').map((tab) => [tab.textContent, tab.getAttribute("aria-selected")]);
+    // Amélie's: nothing said which one is real money. Each says what its DUSK is, under its name.
     expect(tabs()).toEqual([
-      ["Mainnet", "false"],
-      ["Testnet", "false"],
+      ["Mainnet · real DUSK", "false"],
+      ["Testnet · test DUSK, no value", "false"],
     ]);
+    expect(t.app.querySelectorAll('[role=tablist][aria-label="Network"] .tab-sub').map((el) => el.textContent)).toEqual(["real DUSK", "test DUSK, no value"]);
 
     // The words and the password typed first: Import waits for a network.
     const names = [...WORDS.map((_, i) => `Word ${i + 1}`), "Password", "Confirm password"];
@@ -339,8 +341,8 @@ describe("Import wallet's network", () => {
       },
     ]);
     expect(tabs()).toEqual([
-      ["Mainnet", "false"],
-      ["Testnet", "true"],
+      ["Mainnet · real DUSK", "false"],
+      ["Testnet · test DUSK, no value", "true"],
     ]);
     expect(fieldsOf(t.app, names)).toEqual(fields);
     expect(fields.every((f) => f.value && t.app.contains(f))).toBe(true);

@@ -379,15 +379,16 @@ describe("the Activity view", () => {
     expect(search("gouter")).toEqual(["Le go\u00fbter du mercredi"]);
     // What can't be seen in a memo shows as its code, as everywhere a memo shows, and its button says it.
     // The last one came in from an address that isn't a contact's: the sender's words, said so.
-    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", "“Fac\\u202etura”From an address not in your contacts"]);
+    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", `From ${shortAddress(SENDER)} · not in your contacts“Fac\\u202etura”`]);
     expect(visibleText(body())).not.toContain("\u202e");
     const opened = body().querySelectorAll(".tx-row button.tx-open").map(accessibleName);
     expect(opened.every((name) => /, memo /.test(name))).toBe(true);
   });
 
   // Chen's and Marek's: a stranger's "URGENT: wallet suspended - pay now to restore" read like the wallet's own words,
-  // in Activity, on Home and in its details.
-  it("says a stranger's memo is theirs: muted and in quotes, under who it's from, a contact's as ever, and search finds it", () => {
+  // in Activity, on Home and in its details. Lena's and Amélie's then: "From sofiadesign.dusk" with nothing saying she
+  // isn't a contact, and a pushy stranger's memo still the biggest thing in its row.
+  it("says a stranger's memo is theirs: who it's from and not in your contacts, a .dusk name or not, then their words, muted and in quotes", () => {
     const urgent = "URGENT: wallet suspended - pay now to restore";
     const { state, draw } = setup({ route: "activity" });
     const at = state.activity.entries.findIndex((entry) => entry.direction === "in" && String(entry.counterparty ?? "") === SENDER);
@@ -400,15 +401,18 @@ describe("the Activity view", () => {
     field.dispatchEvent(new Event("input"));
     expect(body().querySelectorAll(".tx-row")).toHaveLength(1);
     expect(memoLine().className).toContain("tx-memo--theirs");
-    expect(visibleText(memoLine())).toBe(`“${urgent}”From an address not in your contacts`);
+    const from = `From ${shortAddress(SENDER)} · not in your contacts`;
+    expect(visibleText(memoLine())).toBe(`${from}“${urgent}”`);
+    // Who it's from first, in the memo's own size: never cut off by a long memo.
+    expect(memoLine().children.map((el) => el.className)).toEqual(["tx-memo__from", "tx-memo__text"]);
     expect(memoLine().querySelector("a, b, strong")).toBeNull();
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toContain(`memo “${urgent}”, From an address not in your contacts`);
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toContain(`memo “${urgent}”, ${from}`);
 
     // With a .dusk name of its own: from that name.
     state.activity.names = new Map([[SENDER, "sofiadesign.dusk"]]);
     draw();
     field.dispatchEvent(new Event("input"));
-    expect(visibleText(body().querySelector(".tx-row .tx-memo"))).toBe(`“${urgent}”From sofiadesign.dusk`);
+    expect(visibleText(body().querySelector(".tx-row .tx-memo"))).toBe(`From sofiadesign.dusk · not in your contacts“${urgent}”`);
 
     // Its details: the same.
     const hash = state.activity.entries[at].hash;
@@ -416,7 +420,7 @@ describe("the Activity view", () => {
     state.txDetailHash = hash;
     draw();
     const memoRow = body().querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
-    expect(visibleText(memoRow.querySelector(".kv-value"))).toBe(`“${urgent}”From sofiadesign.dusk`);
+    expect(visibleText(memoRow.querySelector(".kv-value"))).toBe(`From sofiadesign.dusk · not in your contacts“${urgent}”`);
 
     // A contact's memo is as ever.
     state.route = "activity";
@@ -497,6 +501,36 @@ describe("the Activity view", () => {
     await settle();
     expect(body().querySelector(".tx-missing")).toBeNull();
     expect([visibleText(body().querySelector(".tx-hero-name")), visibleText(body().querySelector(".tx-hero-amount"))]).toEqual(["Estudio Marta", "+1,100 DUSK"]);
+  });
+
+  // Amélie's: "marché" found nothing till History had been shown three times more, the payments kept all along;
+  // and a stranger's memo found lost its "not in your contacts".
+  it("searches every payment kept on this device when older ones can't be had, a stranger's marked as in the list", async () => {
+    const { state, draw } = setup({ complete: false, route: "activity" });
+    const kept = state.activity.entries.map((entry) => (entry.hash === state.activity.entries.find((e) => e.counterparty === SENDER)?.hash ? { ...entry, memo: "Les fleurs du marché" } : entry));
+    state.activity.limit = 2;
+    state.activity.entries = kept.slice(0, 2);
+    state.activity.epoch = Promise.resolve(1);
+    state.activity.history = {
+      // No network: older blocks can't be had.
+      sync: vi.fn(async () => {
+        throw new Error("Failed to fetch");
+      }),
+      read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, limit), state: null, complete: false, coveredTo: 0 })),
+    };
+    draw();
+    expect(rows().some((row) => row.includes("marché"))).toBe(false);
+    const field = body().querySelector('input[aria-label="Search activity"]');
+    field.value = "marche";
+    field.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(rows()).toHaveLength(1));
+    expect(rows()[0]).toBe(`${short(SENDER)}Received · 16:41From ${short(SENDER)} · not in your contacts“Les fleurs du marché”+1,000 DUSK`);
+    expect(body().querySelector(".tx-row .tx-memo").className).toContain("tx-memo--theirs");
+    // Older payments may still match: it says so, with Show more.
+    field.value = "tulipes";
+    field.dispatchEvent(new Event("input"));
+    await vi.waitFor(() => expect(visibleText(body().querySelector(".tx-empty"))).toBe("Nothing read so far matches that. Show more to look further back."));
+    expect(button("Show more")).toBeTruthy();
   });
 
   // Astra's: a .dusk name searched for found nothing where its payments were all past the page, their names never read.
@@ -616,6 +650,29 @@ describe("the Activity view", () => {
     button("View in Dusk explorer").click();
     await settle();
     expect(openUrl).toHaveBeenCalledWith(`https://explorer.testnet.dusk.network/accounts/?key=${A}`);
+  });
+});
+
+describe("a payment a notice's tap opens", () => {
+  // Issue #214: a payment told by a notice, behind 50 newer ones in Activity, was reported missing though it was kept.
+  it("is looked for among every payment kept on this device, past Activity's page, by its ID", async () => {
+    const { state, draw } = setup({ route: "tx" });
+    const kept = state.activity.entries;
+    const told = kept.find((entry) => entry.counterparty === SENDER);
+    // The page: the newest one alone.
+    state.activity.limit = 1;
+    state.activity.entries = kept.slice(0, 1);
+    state.activity.epoch = Promise.resolve(1);
+    state.activity.history = {
+      read: vi.fn(async ({ limit, before }) => ({ entries: kept.filter((e) => !before || e.blockHeight < before).slice(0, limit), state: null, complete: true, coveredTo: 0 })),
+      needsDetails: () => false,
+      fillDetails: vi.fn(async () => {}),
+    };
+    expect(state.activity.entries.some((entry) => entry.hash === told.hash)).toBe(false);
+    Object.assign(state, { txDetailHash: told.hash, txDetailFrom: "home", txDetailRow: { context: state.activity.key, hash: told.hash, reading: true, row: null } });
+    draw();
+    await vi.waitFor(() => expect(visibleText(body().querySelector(".tx-hero-amount"))).toBe("+1,000 DUSK"));
+    expect(body().querySelector(".tx-missing")).toBeNull();
   });
 });
 

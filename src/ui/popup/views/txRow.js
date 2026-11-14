@@ -494,9 +494,10 @@ export function contactNames(state, actions, ov) {
 /**
  * A payment's memo where it's the sender's own words, not the wallet's: one
  * that came in from an address that isn't one of the wallet's profiles or
- * contacts, said as theirs, under who it's from (app-core's sendersMemo,
- * as the web wallet says it): "From an address not in your contacts", or
- * "From " and their .dusk name. Null for any other memo.
+ * contacts (app-core's sendersMemo, as the web wallet tells it), said as
+ * theirs, with who it's from: "From " their .dusk name or their address, and
+ * " · not in your contacts", which a .dusk name doesn't change: anyone can
+ * register one. Null for any other memo.
  * @param {object} tx - an Activity row
  * @param {{ among?: object }} [contactName] - contactNames', with the profiles and contacts
  * @returns {{ memo: string, from: string } | null}
@@ -505,7 +506,10 @@ export function theirMemo(tx, contactName) {
   if (tx?.route || tx?.bridge || tx?.sozu || tx?.entry?.memoBinary === true) return null;
   const received = tx?.direction === "in" && tx?.kind === TX_KIND.TRANSFER;
   const row = { category: received ? "received" : "sent", memo: String(tx?.memo ?? ""), counterparty: tx?.counterparty, counterpartyName: tx?.counterpartyName || null };
-  return sendersMemo(row, contactName?.among ?? {});
+  const said = sendersMemo(row, contactName?.among ?? {});
+  if (!said) return null;
+  const who = row.counterpartyName || (row.counterparty ? shortAddress(String(row.counterparty)) : "");
+  return { memo: said.memo, from: who ? `From ${who} · not in your contacts` : said.from };
 }
 
 /**
@@ -587,8 +591,9 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
       // The button's name says these already.
       sub ? subEl(desc, when(tx), hidden) : null,
       desc.alike ? h("div", { class: "row-sub tx-alike", "aria-hidden": "true", text: desc.alike }) : null,
+      // A stranger's: who it's from first, then their words, small, muted and in quotes, one line.
       memo && theirs
-        ? h("div", { class: "row-sub tx-memo tx-memo--theirs", "aria-hidden": "true" }, [h("span", { class: "tx-memo__text", text: `“${memo}”` }), h("span", { class: "tx-memo__from", text: theirs.from })])
+        ? h("div", { class: "row-sub tx-memo tx-memo--theirs", "aria-hidden": "true" }, [h("span", { class: "tx-memo__from", text: theirs.from }), h("span", { class: "tx-memo__text", text: `“${memo}”` })])
         : memo
           ? h("div", { class: "row-sub tx-memo", "aria-hidden": "true", text: memo })
           : null,

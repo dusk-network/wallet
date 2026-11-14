@@ -16,7 +16,7 @@ import { requestFileName, stamped } from "../../lib/fileNames.js";
 import { shortAddress } from "../../lib/strings.js";
 import { inCurrencyLine } from "../../lib/inCurrency.js";
 import { makePaymentLink, requestMessage } from "@dusk-network/app-core/payment-links";
-import { rememberRequest } from "../../../shared/paymentRequests.js";
+import { rememberRequest, sameRequest } from "../../../shared/paymentRequests.js";
 import { requestKept, requestNetwork, requestsSection } from "./requests.js";
 import { amountChoices, amountForInput, formatDuskExact } from "../../../shared/amount.js";
 import { amountQuestionEls } from "../../components/AmountQuestion.js";
@@ -37,6 +37,9 @@ function isTauriMobileLike() {
 }
 
 // A test network's name, for a request's picture and its file; "" on Mainnet.
+/** What's said as a request paid already is copied or shared again: its link goes, and no new one is kept. */
+export const PAID_ALREADY_TEXT = "This request was paid already.";
+
 const testNetworkOf = (ov) => {
   const name = String(ov?.networkName ?? "");
   return name && name !== "Mainnet" ? name : "";
@@ -184,11 +187,20 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // The requests made here, drawn again on their own as one is kept, so what's pressed stays as it is.
   const requestsHost = h("div", { class: "receive-requests-host" });
-  const drawRequests = () => requestsHost.replaceChildren(...[requestsSection(ov, { state, actions })].filter(Boolean));
-  // Keeps what's asked in the list as it leaves the wallet: copied, shared or downloaded.
+  const drawRequests = () => requestsHost.replaceChildren(...[requestsSection(ov, { state, actions, share: isTauriMobileLike() ? shareKept : null })].filter(Boolean));
+  // Keeps what's asked in the list as it leaves the wallet: copied, shared or
+  // downloaded. Sofía's: Copy request link on an invoice paid already made a
+  // second, waiting one with its number, which a client could pay again. One
+  // paid already goes as its link, the same one, and it's said: nothing new
+  // is kept (rememberRequest keeps none twice).
   const keepRequest = () => {
     if (!wantRequest) return;
-    rememberRequest(String(ov?.accounts?.[0] ?? ""), { lux: curLux, memo: curMemo, network: requestNetwork(ov), to: curRecipient })
+    const asked = { lux: curLux, memo: curMemo, network: requestNetwork(ov), to: curRecipient };
+    if (sameRequest(state.requests?.list, asked)?.paid) {
+      actions?.showToast?.(PAID_ALREADY_TEXT);
+      return;
+    }
+    rememberRequest(String(ov?.accounts?.[0] ?? ""), asked)
       .then((list) => {
         requestKept(state, list);
         drawRequests();
@@ -222,6 +234,21 @@ export function receiveView(ov, { state, actions } = {}) {
     onCopied: keepRequest,
     attrs: { "data-next": "" },
   });
+  // In the app, the request's own Share, beside its Copy (Chen's and Sofía's:
+  // Share sat up by the address, half under the header once the memo was typed).
+  const shareRequestBtn = isTauriMobileLike()
+    ? h("button", {
+        class: "btn-outline",
+        type: "button",
+        text: "Share",
+        "aria-label": "Share request",
+        onclick: async () => {
+          if (!wantRequest || !curLink) return;
+          if (await shareRequest({ text: requestText(), qrValue: curQrValue, lux: curLux, memo: curMemo, to: curRecipient })) keepRequest();
+        },
+      })
+    : null;
+  const requestActions = shareRequestBtn ? h("div", { class: "btnrow receive-request__actions" }, [copyRequestBtn, shareRequestBtn]) : copyRequestBtn;
 
   // What the QR asks for, once it holds a request.
   const summaryMeta = h("span", { class: "receive-request__meta" });
@@ -242,19 +269,68 @@ export function receiveView(ov, { state, actions } = {}) {
         memoShown,
         linkErr,
         linkNote,
-        copyRequestBtn,
+        requestActions,
       ]),
     ]
   );
 
+  // Opened with a tap: the form in view, at its Amount (Sofía's: it opened
+  // below the screen's edge), not on a redraw that finds it open.
+  let opening = false;
+  requestDetails.querySelector("summary")?.addEventListener("click", () => {
+    opening = !requestDetails.open;
+  });
   requestDetails.addEventListener("toggle", () => {
     r.requestOpen = requestDetails.open;
     update();
+    if (opening && requestDetails.open) {
+      opening = false;
+      requestDetails.scrollIntoView?.({ block: "start", behavior: "smooth" });
+      amountInput.focus?.();
+    }
   });
 
   const sayUnder = (el, text) => {
     el.textContent = text;
     el.hidden = !text;
+  };
+
+  // Through the phone's share sheet: the app's own, else the browser's; copied
+  // where neither can. Whether it went.
+  const shareOut = async (text, title, picture = {}) => {
+    if (await shareText(text, title, picture)) return true;
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title, text });
+        actions?.showToast?.("Shared");
+        return true;
+      } catch (e) {
+        if (e?.name === "AbortError") return false;
+      }
+    }
+    const ok = await copyToClipboard(text);
+    actions?.showToast?.(ok ? "Share not available — copied" : "Copy failed");
+    return ok;
+  };
+  // A request as it goes: a few words of what it asks, its link, and its QR
+  // code's picture, the one Download saves.
+  const shareRequest = async ({ text, qrValue, lux, memo, to }) => {
+    const network = testNetworkOf(ov);
+    let picture = {};
+    try {
+      const caption = requestCaption({ lux, memo, to, name: shownName, network });
+      picture = { image: new Uint8Array(await (await qrPngBlob(qrValue, { caption })).arrayBuffer()), name: requestFileName({ lux, memo }, { network }) };
+    } catch {
+      // Its words and link alone.
+    }
+    return shareOut(text, "Dusk payment request", picture);
+  };
+  // One in the list, as it was asked: its words and link, and its QR code.
+  const shareKept = (request) => {
+    const made = makePaymentLink({ to: request.to, amountLux: request.lux === null ? "" : String(request.lux), memo: request.memo, network: chainId });
+    if (!made.ok) return;
+    const text = requestMessage({ name: shownName || String(ov?.accountNames?.[String(idx)] ?? "").trim() || null, lux: request.lux === null ? null : BigInt(request.lux), memo: request.memo, link: made.https ?? made.dusk, network: testNetworkOf(ov) });
+    shareRequest({ text, qrValue: made.dusk, lux: request.lux === null ? null : BigInt(request.lux), memo: request.memo, to: request.to }).catch(() => {});
   };
 
   // --- Actions ---------------------------------------------------------
@@ -347,48 +423,9 @@ export function receiveView(ov, { state, actions } = {}) {
     ? h("button", {
         class: "btn-outline",
         text: "Share",
+        // The account or address, through the phone's share sheet; a request has its own Share, beside it.
         onclick: async () => {
-          const shareValue = wantRequest && curLink ? requestText() : curRecipient;
-          if (!shareValue) return;
-
-          // The phone's share sheet: the app's own, else the browser's. A
-          // request goes as a few words of what it asks, its link, and its
-          // QR code's picture, the one Download saves.
-          const network = testNetworkOf(ov);
-          let shared;
-          if (wantRequest && curLink) {
-            let picture = {};
-            try {
-              const caption = requestCaption({ lux: curLux, memo: curMemo, to: curRecipient, name: shownName, network });
-              picture = { image: new Uint8Array(await (await qrPngBlob(curQrValue, { caption })).arrayBuffer()), name: requestFileName({ lux: curLux, memo: curMemo }, { network }) };
-            } catch {
-              // Its words and link alone.
-            }
-            shared = await shareText(shareValue, "Dusk payment request", picture);
-          } else {
-            shared = await shareText(shareValue, "Dusk address");
-          }
-          if (shared) {
-            keepRequest();
-            return;
-          }
-          if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
-            try {
-              await navigator.share({
-                title: "Dusk request",
-                text: shareValue,
-              });
-              actions?.showToast?.("Shared");
-              keepRequest();
-              return;
-            } catch (e) {
-              if (e?.name === "AbortError") return;
-            }
-          }
-
-          const ok = await copyToClipboard(shareValue);
-          actions?.showToast?.(ok ? "Share not available — copied" : "Copy failed");
-          if (ok) keepRequest();
+          if (curRecipient) await shareOut(curRecipient, "Dusk address");
         },
       })
     : null;
@@ -493,6 +530,7 @@ export function receiveView(ov, { state, actions } = {}) {
 
     // The fields copy the name and the address; the request link is copied here.
     copyRequestBtn.disabled = !wantRequest;
+    if (shareRequestBtn) shareRequestBtn.disabled = !wantRequest;
     if (wantRequest) {
       summaryMeta.textContent = made.lux !== null ? `${amountForInput(formatDuskPlain(made.lux))} DUSK` : "With memo";
     } else {

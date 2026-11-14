@@ -6,7 +6,7 @@ import { nativeRewardRate, stakingFigures } from "../shared/rewardRate.js";
 import { contactsStore, forgetWalletContacts } from "../shared/contactsStore.js";
 import { askedOf, proveSendPassword, sendPasswordLimit, setSendPasswordLimit } from "../shared/sendPassword.js";
 import { checkVaultPassword, vaultPhrase } from "../shared/vault.js";
-import { wordsMatch } from "../shared/recoveryWords.js";
+import { recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
 import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import {
   getWatchedAssets,
@@ -162,15 +162,25 @@ export async function handleUiCommand(
 
   // Check your recovery words, in Settings: with the password, how many words
   // the open wallet's phrase has; then, with the words typed by their places,
-  // whether they're its words there, and only where they aren't, the phrase,
-  // to be shown again. Compared here; nothing typed is kept.
+  // whether they're its words there: yes or no, and nothing of the phrase,
+  // whatever was typed. Compared here; nothing typed is kept.
   if (type === "DUSK_UI_CHECK_RECOVERY_WORDS") {
     return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
       const status = await getEngineStatus();
       if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
       const phrase = String(await vaultPhrase(message.password, status.walletKey));
       if (!Array.isArray(message.words)) return { ok: true, count: phrase.trim().split(/\s+/).length };
-      return wordsMatch(phrase, message.words) ? { ok: true, match: true } : { ok: true, match: false, phrase };
+      return { ok: true, match: recoveryWordsMatch(phrase, message.words) };
+    });
+  }
+
+  // The open wallet's recovery phrase, shown again (Show my recovery words):
+  // only for the password that opens it, checked against the vault.
+  if (type === "DUSK_UI_RECOVERY_PHRASE") {
+    return withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      const status = await getEngineStatus();
+      if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+      return { ok: true, result: await vaultPhrase(message.password, status.walletKey) };
     });
   }
 

@@ -24,7 +24,7 @@ import { safeTextEl } from "../../components/SafeText.js";
 import { stDuskLines, txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, theirMemo, txIconSvg } from "./txRow.js";
 import { reasonText } from "./sent.js";
-import { activityKey, activityRows, loadActivityDetail, sozuFactOf } from "../activity.js";
+import { activityKey, activityRows, loadActivityDetail, lookForKeptRow, sozuFactOf } from "../activity.js";
 import { migrationFactOf } from "../migrationFacts.js";
 import { waiting } from "../../components/Waiting.js";
 
@@ -268,8 +268,11 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const nodeUrl = String(tx?.sent?.nodeUrl ?? ov?.nodeUrl ?? "");
   const explorerUrl = explorerTxUrl(nodeUrl, hash);
 
-  // Still read for, past Activity's page.
-  if (!tx && given?.reading) return [nav, waiting("Looking for this transaction…", { tag: "p", className: "tx-missing" })];
+  // Still read for, past Activity's page: looked for among every row kept too.
+  if (!tx && given?.reading) {
+    lookForKeptRow({ ov, state, render: actions?.render }, hash);
+    return [nav, waiting("Looking for this transaction…", { tag: "p", className: "tx-missing" })];
+  }
 
   if (!tx) {
     // Where it is, and its explorer is its network's.
@@ -423,7 +426,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
     // Anyone can send a memo: neutralized, so it can't read as something it isn't.
     tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient
       ? theirs
-        ? kv("Memo", [h("span", { class: "memo-theirs" }, [h("span", { class: "memo-theirs__text" }, ["“", safeTextEl(tx.memo), "”"]), h("span", { class: "memo-theirs__from", text: theirs.from })])], { className: "kv--wrap" })
+        ? kv("Memo", [h("span", { class: "memo-theirs" }, [h("span", { class: "memo-theirs__from", text: theirs.from }), h("span", { class: "memo-theirs__text" }, ["“", safeTextEl(tx.memo), "”"])])], { className: "kv--wrap" })
         : kv("Memo", safeTextEl(tx.memo), { className: "kv--wrap" })
       : null,
     ledger ? null : feeRow(tx, desc, hidden),

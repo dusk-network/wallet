@@ -178,6 +178,38 @@ describe("checkNode", () => {
     }
   });
 
+  // Issue #214: an ask held back as the app went away, failing after a newer ask was answered, said the node
+  // couldn't be reached though it answered: a red "Can't reach the network" as the app came back.
+  it("keeps the newest ask's answer over an older one's that ends after it, a full check's too", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let fail;
+      node.mockImplementationOnce(() => new Promise((_resolve, reject) => (fail = reject)));
+      const old = checkNode(ENDPOINTS.nodeUrl, { timeoutMs: 50 });
+      await vi.waitFor(() => expect(node).toHaveBeenCalledTimes(1));
+      vi.setSystemTime(Date.now() + 2_000);
+      await expect(checkNode(ENDPOINTS.nodeUrl, { timeoutMs: 50 })).resolves.toMatchObject({ nodeStatus: "online" });
+      fail(new Error("Failed to fetch"));
+      await old;
+      expect((await getNetworkStatus()).nodeStatus).toBe("online");
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // A full check whose ask of the node fails after a later ask was answered: the prover's and the
+    // archiver's said, the node's not.
+    const { checkAllEndpoints } = await import("./networkStatus.js");
+    let failNode;
+    node.mockImplementation((url) =>
+      new URL(url).pathname === "/on/node/info" && !failNode ? new Promise((_resolve, reject) => (failNode = reject)) : Promise.resolve(new Response('{"chain_id":2}'))
+    );
+    const full = checkAllEndpoints(ENDPOINTS);
+    await vi.waitFor(() => expect(failNode).toBeTypeOf("function"));
+    await expect(checkNode(ENDPOINTS.nodeUrl)).resolves.toMatchObject({ nodeStatus: "online" });
+    failNode(new Error("Failed to fetch"));
+    await expect(full).resolves.toMatchObject({ nodeStatus: "online", proverStatus: "online", archiverStatus: "online" });
+  });
+
   it("keeps nothing of a node the wallet left while it was asked", async () => {
     const { setSettings } = await import("./settings.js");
     const { setNetworkStatus } = await import("./networkStatus.js");

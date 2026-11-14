@@ -111,24 +111,80 @@ async function accountNonce(nodeUrl, account) {
   return BigInt(nonce);
 }
 
+// The account's transactions read for the one at a nonce: those it sent from
+// about when the payment was made, at most this many pages of the archive's.
+const TAKEN_PAGES = 4;
+const TAKEN_PAGE = 50;
+// Blocks come about every 10 seconds: counted back as if every 5, and an hour
+// more, to start before the payment was made.
+const BLOCK_MS_AT_LEAST = 5_000;
+const BLOCKS_BEFORE = 360;
+
+/**
+ * The account's transaction at `nonce`, as the chain shows it: those it sent
+ * since about when the payment was made (`at`), read from the archive with
+ * their nonces. Its ID, or "" where none of those read is at it.
+ * @param {string} nodeUrl
+ * @param {{ account: string, nonce: string | bigint, at?: number }} tx
+ */
+async function nonceTakenBy(nodeUrl, { account, nonce, at }) {
+  const head = await postGraphql(nodeUrl, "query { pair: lastBlockPair { json } }");
+  const tip = Number(decimal(head?.pair?.json?.last_block?.[0]));
+  if (!Number.isSafeInteger(tip)) return "";
+  const made = Number(at) > 0 ? Number(at) : Date.now();
+  const from = Math.max(0, tip - Math.ceil(Math.max(0, Date.now() - made) / BLOCK_MS_AT_LEAST) - BLOCKS_BEFORE);
+  const want = BigInt(nonce);
+  for (let page = 1; page <= TAKEN_PAGES; page++) {
+    const args = [`sender: ${JSON.stringify(String(account))}`, `fromBlock: ${from}`, `maxCount: ${TAKEN_PAGE}`, ...(page > 1 ? [`pageCount: ${page}`] : [])];
+    const rows = (await postGraphql(nodeUrl, `query { h: moonlightHistory(${args.join(", ")}) { json } }`))?.h?.json;
+    const list = Array.isArray(rows) ? rows : [];
+    const hashes = [...new Set(list.map((row) => String(row?.origin ?? "").toLowerCase()).filter((id) => /^[0-9a-f]{64}$/.test(id)))];
+    if (hashes.length) {
+      const txs = await postGraphql(nodeUrl, `query { ${hashes.map((id, i) => `t${i}: tx(hash: ${JSON.stringify(id)}) { tx { json } }`).join(" ")} }`);
+      for (const [i, id] of hashes.entries()) {
+        let said = null;
+        try {
+          said = losslessJson(String(txs?.[`t${i}`]?.tx?.json ?? ""));
+        } catch {
+          said = null;
+        }
+        const its = decimal(said?.nonce);
+        if (said?.type === "moonlight" && String(said?.sender ?? "") === String(account) && its !== undefined && BigInt(its) === want) return id;
+      }
+    }
+    if (list.length < TAKEN_PAGE) break;
+  }
+  return "";
+}
+
 /**
  * Where a public transaction handed to the node without a clear answer
  * stands, as the node says it: "in" its chain or its mempool, so it went;
  * "absent", in neither and its account's nonce not past it, so the node never
  * had it (or turned it down) and it can't go out unless it's sent again;
- * "used", in neither though the account's nonce went past it, so another
- * transaction took its nonce, unless the chain's list is a moment behind;
- * "unknown" where the node couldn't be asked.
+ * "replaced", in neither, the account's nonce past it, and the account's
+ * transaction at its nonce seen, another: it never will go (`by`, that one's
+ * ID); "used", in neither though the account's nonce went past it, with no
+ * transaction seen at its nonce yet, which is no proof: the chain's list may
+ * be behind, and it may yet be this one; "unknown" where the node couldn't be
+ * asked. Without `prove`, a nonce gone past is "used", the transaction at it
+ * not looked for.
  * @param {string} nodeUrl
- * @param {{ hash: string, account: string, nonce: string | bigint }} tx
- * @returns {Promise<{ state: "in" | "absent" | "used" | "unknown", presence?: object }>}
+ * @param {{ hash: string, account: string, nonce: string | bigint, at?: number }} tx - `at`, when the payment was made
+ * @param {{ prove?: boolean }} [opts]
+ * @returns {Promise<{ state: "in" | "absent" | "replaced" | "used" | "unknown", presence?: object, by?: string }>}
  */
-export async function handedOverState(nodeUrl, { hash, account, nonce }) {
+export async function handedOverState(nodeUrl, { hash, account, nonce, at }, { prove = true } = {}) {
   const presence = await classifyTxPresence(nodeUrl, hash);
   if (presence.state === "executed_success" || presence.state === "executed_failed" || presence.state === "mempool") return { state: "in", presence };
   if (presence.state !== "not_found" || !account || !/^\d+$/.test(String(nonce ?? ""))) return { state: "unknown" };
   try {
-    return { state: (await accountNonce(nodeUrl, account)) >= BigInt(nonce) ? "used" : "absent" };
+    if ((await accountNonce(nodeUrl, account)) < BigInt(nonce)) return { state: "absent" };
+    if (!prove) return { state: "used" };
+    const by = await nonceTakenBy(nodeUrl, { account, nonce, at });
+    if (!by) return { state: "used" };
+    // Its own, listed before the chain's lookup by its ID has it: it went.
+    return by === String(hash ?? "").toLowerCase() ? { state: "in" } : { state: "replaced", by };
   } catch {
     return { state: "unknown" };
   }

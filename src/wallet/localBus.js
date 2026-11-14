@@ -4,7 +4,7 @@
 // This lets the same UI (popup/full) run without chrome.runtime messaging,
 // which is how we reuse it in Tauri desktop/mobile.
 
-import { checkResetPassword, clearVault, countVaultWallets, createVault, loadVault, unlockVault, vaultPhrase } from "../shared/vault.js";
+import { checkResetPassword, clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import { getSettings, normalizeAutoLock, rememberNodeChain, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearAllPermissions } from "../shared/permissions.js";
@@ -31,14 +31,14 @@ import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.j
 import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
-import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
-import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, watchAppArrival } from "../platform/notices.js";
+import { WAITING_NOTICE, arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
+import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, waitAppSend, watchAppArrival } from "../platform/notices.js";
 import { incomingNoticeToken, isIncomingNoticeToken, noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import { formatDusk } from "../shared/amount.js";
 import { shortAddress } from "../ui/lib/strings.js";
-import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingForNetwork, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import {
@@ -160,6 +160,26 @@ async function watchArrival(hash, tx) {
   });
 }
 
+// A payment from Send waiting for the network, told to Android for the app's
+// time away (android/ArrivalJob.kt's Waiting): the app signs and sends only
+// while it's open, so the notice says it goes out once the app's opened
+// again, and once the network's back, to open it to send it. Told as one
+// starts or stops waiting, where a payment's notices may show; none for none.
+let waitingTold = Promise.resolve("");
+function tellWaitingForApp() {
+  if (!isPhone()) return waitingTold;
+  waitingTold = waitingTold
+    .then(async (said) => {
+      const [first] = waitingForNetwork();
+      const setup = first && (await mayNotify(appNoticesAllowed)) ? { wallet: first.walletId, nodeUrl: first.nodeUrl, ...WAITING_NOTICE } : null;
+      const key = JSON.stringify(setup);
+      if (key !== said) await waitAppSend(setup).catch(() => {});
+      return key;
+    })
+    .catch(() => "");
+  return waitingTold;
+}
+
 // How the payments from Send that wait for the network reach the wallet, as
 // the extension's background has them: the node asked whether it answers and
 // where one handed over stands, the engine to call one off or forget one that
@@ -184,7 +204,14 @@ const waitingHost = {
         .catch(() => {});
     }
   },
-  tell: (message) => tellPage(message),
+  tell: (message) => {
+    tellPage(message);
+    if (message?.type === "DUSK_UI_SEND_WAITING") tellWaitingForApp();
+  },
+  // A payment began its first try: Android's told, as the app may be left before it's through.
+  changed: () => {
+    tellWaitingForApp();
+  },
 };
 
 // A payment from Send is kept with its transaction's ID and nonce before the
@@ -196,10 +223,19 @@ setHandOverHook(async ({ sendId, hash, nonce }) => {
 });
 followHandedOver(waitingHost).catch(() => {});
 
+// As the app starts, nothing waits here: the payments waiting for the network
+// live in this page, and one that waited as Android ended the app, or as the
+// page went, is said not sent (waitingSends.js). What Android was told of it
+// goes, its notice and its looks for the network with it (Astra's: started
+// again, leaving the app said once more that a payment waits). Told again as
+// the wallet's read, should this first word not reach it.
+tellWaitingForApp();
+
 // The wallet locks: a payment waiting for the network goes out only while its wallet is open.
 async function lockWallet() {
   await stopWaitingSends("locked", waitingHost).catch(() => {});
   lock();
+  tellWaitingForApp();
 }
 
 // Auto-lock in the app, as the extension's background does it: the wallet
@@ -381,15 +417,6 @@ export async function localSend(message) {
       });
     }
 
-    // The open wallet's recovery phrase, shown again in Settings: only for
-    // the password that opens it, checked against the vault.
-    if (message?.type === "DUSK_UI_RECOVERY_PHRASE") {
-      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-        if (!isUnlocked()) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-        return { ok: true, result: await vaultPhrase(message.password, getWalletKey()) };
-      });
-    }
-
     if (message?.type === "DUSK_UI_LOCK") {
       return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         await lockWallet();
@@ -534,6 +561,7 @@ export async function localSend(message) {
 
     // UI asks for overview data (network + addresses + balance)
     if (message?.type === "DUSK_UI_OVERVIEW") {
+      tellWaitingForApp();
       const vault = await loadVault();
       const settings = await ensureEngineConfigured();
       const status = engineStatus();
@@ -674,6 +702,8 @@ export async function localSend(message) {
       // The send on Sent, on its way as the person asked: looked for once they leave.
       const meta = message.hash ? await getTxMeta(String(message.hash)).catch(() => null) : null;
       if (meta && !["executed", "failed", "removed"].includes(meta.status)) await watchArrival(String(message.hash), meta).catch(() => {});
+      // Or still waiting for the network: Android says so while the app's away.
+      tellWaitingForApp();
       return { ok: true, state };
     }
     if (message?.type === "DUSK_UI_NOTICES_SAID") {
@@ -718,7 +748,10 @@ export async function localSend(message) {
       // token for those notices.
       if (message.account) {
         const status = engineStatus();
-        const accounts = status?.isUnlocked ? (status.accounts ?? []).map(String) : [];
+        // Locked, as by its auto-lock while the page still showed it open: the
+        // page keeps the tap for the unlock rather than drop it.
+        if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        const accounts = (status.accounts ?? []).map(String);
         const profileIndex = accounts.indexOf(String(message.account));
         const ours = profileIndex >= 0 && (await isIncomingNoticeToken(accounts[0], token).catch(() => false));
         return { ok: true, result: ours ? { incoming: true, profileIndex } : null };
@@ -791,6 +824,22 @@ export async function localSend(message) {
       // (`madeOn`), whatever was chosen since.
       let made;
       let madeOn = "";
+      // Kept as a sent one as soon as its try has handed it over, before it
+      // leaves the waiting list (waitingSends.js forgets it once the try is
+      // back), under the node it was sent on: another may have been chosen
+      // while it waited or was looked up. Read meanwhile, the wallet's lists
+      // have it in the one or the other, never in neither (Lena's and Chen's:
+      // gone from Home and Activity both for 10 s as it went out). The profile
+      // that paid, as the extension keeps it: a stake's own profile may not be
+      // the one selected.
+      const keptSent = async (tried) => {
+        const hash = tried.result?.hash ?? "";
+        if (!hash) return tried;
+        const nodeUrl = tried.nodeUrl || (await getSettings())?.nodeUrl || "";
+        const record = submittedTxMeta(tried.baseParams, { walletId: String(tried.status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(tried.baseParams, tried.status), nullifiers: tried.result?.nullifiers }, walletSendFields(tried.baseParams, message));
+        await putTxMeta(hash, record, { epoch: tried.txEpoch }).catch(() => {});
+        return { ...tried, record };
+      };
       const attempt = ({ resend = false, found = null } = {}) => withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         const status = engineStatus();
         if (!status.isUnlocked) {
@@ -805,7 +854,7 @@ export async function localSend(message) {
         await ensureEngineConfigured();
         if (found || resend) {
           const result = found ? { ...found, found: true } : await resendSend({ sendId });
-          return { status, txEpoch, baseParams: made ?? applyTxDefaults(reviewed, {}), result, nodeUrl: madeOn };
+          return keptSent({ status, txEpoch, baseParams: made ?? applyTxDefaults(reviewed, {}), result, nodeUrl: madeOn });
         }
         // The node's gas price (kept 30 s) by both wallets' one rule: its
         // median, under a ceiling.
@@ -832,9 +881,9 @@ export async function localSend(message) {
           }
           throw error;
         });
-        return { status, txEpoch, baseParams, result, nodeUrl };
+        return keptSent({ status, txEpoch, baseParams, result, nodeUrl });
       });
-      const { status, txEpoch, baseParams, result, nodeUrl: sentOn } = sendId
+      const { txEpoch, result, nodeUrl: sentOn, record } = sendId
         ? await sendWhenReachable({
             sendId,
             record: waitingRecordOf(message, await getSettings().then((settings) => ({ nodeUrl: settings.nodeUrl, profileIndex: Number(settings.selectedAccountIndex ?? 0) || 0 }))),
@@ -842,23 +891,20 @@ export async function localSend(message) {
             host: waitingHost,
             // Sent again from Home's Send it now, in the place of the one Home said wasn't sent.
             replaces: typeof message.replaces === "string" && /^[\w-]{8,64}$/.test(message.replaces) ? message.replaces : "",
+            // Gone out, or ended without: Android's notice of it waiting goes.
+          }).finally(() => {
+            tellWaitingForApp();
           })
         : await attempt();
       const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
 
-      // Persist metadata (see background/index.js comments), under the node it
-      // was sent on: another may have been chosen while it waited or was looked up.
+      // Kept as sent as it was handed over (keptSent), under the node it was sent on.
       const hash = result?.hash ?? "";
       try {
         const nodeUrl = sentOn || (await getSettings())?.nodeUrl || "";
 
-        if (hash) {
-          // The profile that paid, as the extension keeps it: a stake's own
-          // profile may not be the one selected.
-          const profileIndex = sendingProfile(baseParams, status);
-          const record = submittedTxMeta(baseParams, { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex, nullifiers: result?.nullifiers }, walletSendFields(baseParams, message));
+        if (hash && record) {
           const { pendingNullifiers } = record;
-          await putTxMeta(hash, record, { epoch: txEpoch });
           // Asked for notices: Android looks for it too, once the app leaves the screen.
           watchArrival(hash, record).catch(() => {});
           // Found on the node after a hand-over with no clear answer, maybe in its block already: looked up now.

@@ -53,6 +53,16 @@ const waitingText = () =>
 /** What's said of a payment from Send handed to the network without a clear answer: it's looked up, and sent once if it didn't go. */
 export const UNCLEAR_TEXT = "It may have gone out already. If it didn't, it goes out once the network answers.";
 
+/**
+ * In the app on a phone, what leaving it does to a payment waiting for the
+ * network: the app signs and sends only while it's open, so it goes out once
+ * the app's opened again; with Lock when I leave the app on, the wallet
+ * locks as it's left, and the payment isn't sent (Home offers Send it now).
+ * @param {object} [ov] - the overview
+ */
+export const appLeaveText = (ov) =>
+  ov?.lockOnLeave === true ? "If you leave Dusk Wallet, it locks and this isn't sent." : "If you leave Dusk Wallet, it goes out when you open it again.";
+
 // "13:21 CET": when it was sent, with the time zone it shows in.
 function clock(ts) {
   return zonedClockText(Number(ts) || Date.now());
@@ -458,12 +468,16 @@ export const NOTICE_COMES_TEXT = "You'll get a notice when it arrives.";
 
 /**
  * What Sent says once notices will come in Firefox on a phone, which stops
- * the wallet once Firefox is left: one line for the send and its notice.
+ * the wallet once Firefox is left: one line for the send and its notice. The
+ * wallet runs in its Keep open tab there: closing that stops it.
  */
-export const FIREFOX_NOTICE_COMES_TEXT = "It goes on if you close the wallet; its notice comes only while the wallet stays open.";
+export const FIREFOX_NOTICE_COMES_TEXT = "It goes on if you close the wallet, while its Keep open tab stays open; its notice comes only while the wallet stays open.";
 
 // That the send goes on with the wallet closed: in the extension.
 const CLOSE_WALLET_TEXT = "You can close the wallet; this continues in the background.";
+
+/** The same in Firefox on a phone, whose wallet runs in its Keep open tab: closing that stops it. */
+export const KEEP_OPEN_TEXT = "You can close the wallet; this goes on while its Keep open tab stays open.";
 
 /**
  * On a phone, while a send is on its way: Tell me when it arrives, which alone
@@ -499,7 +513,7 @@ function noticeOffer({ state, actions }) {
   const firefox = !isTauriRuntime();
   // In Firefox, that the send goes on with the wallet closed is said here,
   // with the notice: once notices come, in one line that says both.
-  const closing = () => (firefox ? [h("p", { class: "sent-note", text: CLOSE_WALLET_TEXT })] : []);
+  const closing = () => (firefox ? [h("p", { class: "sent-note", text: KEEP_OPEN_TEXT })] : []);
   const draw = () => {
     if (notices.state === null) {
       el.replaceChildren(...closing(), askButton("Tell me when it arrives", false));
@@ -688,12 +702,19 @@ export function sentView(ov, { state, actions, sozu } = {}) {
       )
     : null;
 
-  // That it goes on: in Firefox on a phone with what's said of its notice (noticeOffer).
+  // That it goes on: in Firefox on a phone with what's said of its notice
+  // (noticeOffer). In the app on a phone, one waiting for the network goes
+  // out only while the app's open, which it says.
+  const waitsHere = phase === "sending" && (sent.waits || offline()) && !sent.handedOver;
   const note = final || (isPhone() && !isTauriRuntime())
     ? null
     : h("p", {
         class: "sent-note",
-        text: isExtensionRuntime() ? CLOSE_WALLET_TEXT : "You can leave this screen; this continues in the background.",
+        text: isExtensionRuntime()
+          ? CLOSE_WALLET_TEXT
+          : isPhone() && waitsHere
+            ? appLeaveText(ov)
+            : "You can leave this screen; this continues in the background.",
       });
 
   return [

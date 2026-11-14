@@ -195,8 +195,9 @@ describe("setting up and unlocking", () => {
     expect(body.querySelectorAll("[role=alert]").filter((el) => !el.hidden).map((el) => el.textContent)).toEqual([]);
   });
 
-  // Amélie's, the seventh time: no way to check the words were written down right.
-  it("asks for three of the words written down, chosen at random, and shows the words again when they don't match", async () => {
+  // Amélie's, the seventh time: no way to check the words were written down right. Then Nandini's and
+  // Amélie's: one word wrong, or three made up, put all twelve on screen.
+  it("asks for three of the words written down, chosen at random, and says no more than that they don't match", async () => {
     const state = { route: "onboard_create_phrase", onboard: onboard() };
     const acts = actions();
     // I wrote it down: three places, chosen then, the same through redraws.
@@ -222,14 +223,32 @@ describe("setting up and unlocking", () => {
     button(body, "Check").click();
     await settle();
     expect(errorOf(body.querySelector("[role=group]"))).toBe("Enter the three words.");
-    // A word wrong: the words again, shown, saying so; nothing made.
+    // One word wrong, then three made up: said, and nothing else; no word of the phrase, and nothing made.
+    const words = MNEMONIC.split(" ");
+    const MISMATCH = "← BackCheck your recovery wordsThat doesn't match your recovery words. Check the words you wrote down.Try againShow my recovery words";
+    for (const typed of [places.map((p, i) => (i === 1 ? "abandn" : words[p - 1])), ["maison", "velo", "gateau"]]) {
+      wordBoxes(body).forEach((input, i) => typeInto(input, typed[i]));
+      button(body, "Check").click();
+      await settle();
+      expect(visibleText(body)).toBe(MISMATCH);
+      expect([body.querySelector(".srp-grid"), wordBoxes(body)]).toEqual([null, []]);
+      expect([state.route, state.onboard.reveal, acts.send.mock.calls]).toEqual(["onboard_create_confirm", false, []]);
+      // Try again: the same three, empty, the first to type in.
+      button(body, "Try again").click();
+      expect(names()).toEqual(places.map((p) => `Word ${p}`));
+      expect(wordBoxes(body).map((i) => i.value)).toEqual(["", "", ""]);
+      expect(dom.document.activeElement).toBe(wordBoxes(body)[0]);
+    }
+
+    // Show my recovery words, apart: back to the words, hidden till Reveal, with nothing said over them.
     for (const input of wordBoxes(body)) typeInto(input, "zoo");
     button(body, "Check").click();
     await settle();
-    expect([state.route, state.onboard.reveal, state.onboard.checkPlaces, acts.send.mock.calls]).toEqual(["onboard_create_phrase", true, null, []]);
+    button(body, "Show my recovery words").click();
+    expect([state.route, state.onboard.reveal]).toEqual(["onboard_create_phrase", false]);
     const phrase = show(onboardingCreatePhraseView({ state, actions: acts }));
-    expect(phrase.querySelector("[role=alert]").textContent).toBe("Those words don't match. Check them against the words below.");
-    expect(phrase.querySelector(".srp-grid").classList.contains("is-blurred")).toBe(false);
+    expect(phrase.querySelector(".srp-grid").classList.contains("srp-grid--blur")).toBe(true);
+    expect(phrase.querySelectorAll("[role=alert]").filter(isShown)).toEqual([]);
 
     // Checked again, right: the wallet made, and said so.
     button(phrase, "I wrote it down").click();

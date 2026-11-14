@@ -329,6 +329,20 @@ export async function resetNetworkStatus() {
 // probing every endpoint again.
 const runningChecks = new Map();
 
+// The node's asks, each numbered as it begins, a full check's too: one that
+// began before an ask already heard, as one a phone held back while the app
+// was away, says nothing of the node now, and its answer isn't kept (issue
+// #214: an old ask's failure over a newer one's answer, a red dot with the
+// node answering).
+let nodeAsksBegun = 0;
+let nodeHeardFrom = 0;
+const beginNodeAsk = () => ++nodeAsksBegun;
+const newestOfNode = (ask) => {
+  if (ask < nodeHeardFrom) return false;
+  nodeHeardFrom = ask;
+  return true;
+};
+
 /**
  * Check all endpoints and update status in storage.
  * This is designed to be called periodically from the background.
@@ -349,6 +363,7 @@ export function checkAllEndpoints(endpoints) {
 }
 
 async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
+  const ask = beginNodeAsk();
   // Mark as checking
   await setNetworkStatus({
     nodeStatus: "checking",
@@ -380,18 +395,22 @@ async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
     await rememberNodeChain(nodeUrl, nodeResult.chainId).catch(() => {});
   }
 
-  // Update status
+  // Update status: the node's only where no ask that began since was heard.
   return setNetworkStatus({
-    nodeStatus: nodeResult.ok ? "online" : "offline",
+    ...(newestOfNode(ask)
+      ? {
+          nodeStatus: nodeResult.ok ? "online" : "offline",
+          nodeError: nodeResult.error ?? null,
+          // What it said, which the screens compare with the chain it's fixed to.
+          nodeUrl: nodeUrl ?? null,
+          nodeChainId: Number.isInteger(nodeResult.chainId) ? nodeResult.chainId : null,
+        }
+      : {}),
     proverStatus: proverResult.ok ? "online" : "offline",
     archiverStatus: archiverResult.ok ? "online" : "offline",
-    nodeError: nodeResult.error ?? null,
     proverError: proverResult.error ?? null,
     archiverError: archiverResult.error ?? null,
     lastChecked: Date.now(),
-    // What it said, which the screens compare with the chain it's fixed to.
-    nodeUrl: nodeUrl ?? null,
-    nodeChainId: Number.isInteger(nodeResult.chainId) ? nodeResult.chainId : null,
   });
 }
 
@@ -419,10 +438,12 @@ export function checkNode(nodeUrl, { timeoutMs = NODE_ANSWER_MS } = {}) {
   // the wallet away can hold back the timer that ends it.
   let ask = running && Date.now() - running.at <= timeoutMs + 1_000 ? running.ask : null;
   if (!ask) {
+    const begun = beginNodeAsk();
     ask = (async () => {
       const result = key ? await probeNode(key, timeoutMs) : { ok: false, error: "No URL configured" };
       if ((await getSettings()).nodeUrl !== key) return getNetworkStatus();
       if (Number.isInteger(result.chainId)) await rememberNodeChain(key, result.chainId).catch(() => {});
+      if (!newestOfNode(begun)) return getNetworkStatus();
       return setNetworkStatus({
         nodeStatus: result.ok ? "online" : "offline",
         nodeError: result.error ?? null,

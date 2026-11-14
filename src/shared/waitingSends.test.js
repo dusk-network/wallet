@@ -36,7 +36,7 @@ beforeEach(async () => {
   network = { answers: false, cancelled: new Set(), handedOver: new Set(), says: "unknown" };
   host = {
     answers: vi.fn(async () => network.answers),
-    // Where a payment handed over stands, as the node says it: "in", "absent", "used" or "unknown".
+    // Where a payment handed over stands, as the node says it: "in", "absent", "replaced", "used" or "unknown".
     check: vi.fn(async () => ({ state: typeof network.says === "function" ? network.says() : network.says })),
     // The engine told one handed over never went.
     release: vi.fn(async () => ({ forgotten: true })),
@@ -160,6 +160,41 @@ describe("a payment from Send that couldn't reach the network before it went out
     await vi.advanceTimersByTimeAsync(300);
     await expect(Promise.all([one, two, three])).resolves.toEqual(["first", "second", "third"]);
     expect(order).toEqual(["first begins", "first out", "second begins", "second out", "third begins", "third out"]);
+  });
+});
+
+// Chen's, in the Android app: a payment confirmed as the signal dropped went out only once he opened the app again.
+// What hasn't reached the node yet is what the app's notice says waits for it to be opened again.
+describe("the payments that haven't reached the node", () => {
+  it("are those on their first try or waiting, said as a first try begins, and not once handed over, sent or called off", async () => {
+    const ids = () => waiting.waitingForNetwork().map(({ sendId, walletId, nodeUrl }) => `${sendId} ${walletId === WALLET} ${nodeUrl === NODE}`);
+    host.changed = vi.fn();
+    // The first try, under way: it hasn't reached the node, and it's said.
+    const first = Promise.withResolvers();
+    const attempt = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce({ hash: "aa" });
+    const sent = waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt, host });
+    await vi.advanceTimersByTimeAsync(0);
+    expect([ids(), host.changed]).toEqual([["s1 true true"], expect.any(Function)]);
+    expect(host.changed).toHaveBeenCalledOnce();
+    // It couldn't reach the network: it waits, as one more behind it does.
+    first.reject(offline());
+    const other = waiting.sendWhenReachable({ sendId: "s2", record: record({ memo: "Hors ligne deux" }), attempt: vi.fn().mockRejectedValue(offline()), host });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ids()).toEqual(["s1 true true", "s2 true true"]);
+    // Called off, it's no longer one; sent, nor is the other.
+    await waiting.cancelWaitingSend("s2", host);
+    await expect(other).rejects.toMatchObject({ data: { cancelled: true } });
+    network.answers = true;
+    await askAgain();
+    await expect(sent).resolves.toEqual({ hash: "aa" });
+    expect(ids()).toEqual([]);
+  });
+
+  it("isn't one handed over without a clear answer: it may have gone out", async () => {
+    const attempt = vi.fn().mockRejectedValue(Object.assign(new TypeError("Failed to fetch"), { data: { sent: "unknown", hash: "ab".repeat(32) } }));
+    waiting.sendWhenReachable({ sendId: "s3", record: record(), attempt, host }).catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(waiting.waitingForNetwork()).toEqual([]);
   });
 });
 
@@ -361,6 +396,56 @@ describe("a payment from Send as it's confirmed", () => {
     expect(await kept()).toEqual([]);
   });
 
+  // Marek's: the browser died before a payment left it; the account's next send took its nonce; still "Not
+  // confirmed" and "on its way" 47 minutes on. Asked of a node as it is, with the wallet's own lookup.
+  it("crashed before it went out, its nonce then taken by another send: not sent once that send is seen at it, never before", async () => {
+    const LOST = "f1".repeat(32);
+    const NEXT = "f2".repeat(32);
+    const { handedOverState } = await import("./txLifecycle.js");
+    // The node: the next send in its chain at nonce 131, the account's nonce 131; the archive's list of the
+    // account's sends behind it at first.
+    const node = { listed: false };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url, init) => {
+        const body = String(init?.body ?? "");
+        const json = (value) => ({ ok: true, status: 200, text: async () => JSON.stringify(value) });
+        if (String(url).endsWith("/on/account:chen-account/status")) return json({ balance: 1, nonce: 131 });
+        if (body.includes("mempoolTxs")) return json({ mempoolTxs: [] });
+        if (body.includes("lastBlockPair")) return json({ pair: { json: { last_block: [4860000, "aa"], last_finalized_block: [4859998, "bb"] } } });
+        if (body.includes("moonlightHistory(sender:")) return json({ h: node.listed ? { json: [{ block_height: 4859990, origin: NEXT, events: [] }] } : null });
+        if (body.includes(`t0: tx(hash: "${NEXT}")`)) return json({ t0: { tx: { json: JSON.stringify({ type: "moonlight", sender: "chen-account", receiver: "lucas-account", value: 1, nonce: 131 }) } } });
+        if (body.includes("tx(hash:")) return json({ tx: null });
+        throw new Error(`Not asked of this node: ${body}`);
+      })
+    );
+    host.check = vi.fn((kept) => handedOverState(kept.nodeUrl, kept));
+    // Handed over as the browser died: the node never got it.
+    const attempt = vi.fn(async () => {
+      await waiting.noteHandingOver("s1", { hash: LOST, nonce: "131" }, host);
+      return new Promise(() => {});
+    });
+    waiting.sendWhenReachable({ sendId: "s1", record: record({ at: Date.now() }), attempt, host }).catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    vi.resetModules();
+    waiting = await import("./waitingSends.js");
+
+    // Back, and another send since took its nonce: the account's nonce is past it, but that send isn't listed yet.
+    await waiting.followHandedOver(host);
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: true, unclear: true, checks: true })]);
+    await vi.advanceTimersByTimeAsync(60 * 60_000);
+    await waiting.followHandedOver(host);
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: true, unclear: true, checks: true })]);
+    expect(host.release).not.toHaveBeenCalled();
+
+    // Listed: the account's send at its nonce is another. Not sent, with Send it now and Don't send on Home.
+    node.listed = true;
+    await waiting.followHandedOver(host);
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: false, ended: "failed", error: waiting.REPLACED_TEXT })]);
+    expect(host.release).toHaveBeenCalledWith("s1");
+    expect(host.follow).not.toHaveBeenCalled();
+  });
+
   it("isn't sent where it can't be kept first", async () => {
     vi.stubGlobal("localStorage", { ...memoryStorage(), getItem: () => null, setItem: () => {
       throw new Error("Storage is full");
@@ -416,6 +501,19 @@ describe("a payment sent again from Home's Send it now", () => {
       expect(attempt).not.toHaveBeenCalled();
       expect(JSON.parse(localStorage.getItem("dusk_waiting_sends_v1"))).toEqual({ old: expect.objectContaining({ sendId: "old", ended: "closed" }) });
     }
+  });
+
+  // Issue #214: one kept by an earlier version, which kept no account, was refused as "changed" from where it was made.
+  it("takes the place of one kept by an earlier version, which names no account, from the same wallet and profile", async () => {
+    const { account: _account, ...earlier } = record();
+    localStorage.setItem("dusk_waiting_sends_v1", JSON.stringify({ old: { ...earlier, sendId: "old", at: 1, ended: "closed" } }));
+    const attempt = vi.fn(async () => ({ hash: "e2" }));
+    await expect(waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt, host, replaces: "old" })).resolves.toEqual({ hash: "e2" });
+    expect(attempt).toHaveBeenCalledOnce();
+    // From another profile, still refused.
+    localStorage.setItem("dusk_waiting_sends_v1", JSON.stringify({ old: { ...earlier, sendId: "old", at: 1, ended: "closed" } }));
+    const error = await waiting.sendWhenReachable({ sendId: "s2", record: record({ profileIndex: 1, account: "another-account" }), attempt, host, replaces: "old" }).catch((e) => e);
+    expect(error.message).toBe(waiting.NOT_IN_PLACE_TEXT);
   });
 
   it("closed on as it waits, is the one notice left", async () => {
@@ -533,15 +631,19 @@ describe("a public payment handed to the node without a clear answer", () => {
     expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", unclear: true })]);
   });
 
-  it("whose nonce another transaction took, is said not sent once the chain still hasn't it a while on", async () => {
+  // Marek's: the account's nonce gone past a payment isn't proof it never went; the transaction seen at its nonce is.
+  it("whose nonce another transaction took, is said not sent once that transaction is seen, never on the nonce alone", async () => {
     const sent = waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt: vi.fn(handsOverAndLoses("c5")), host }).catch((e) => e);
     await vi.advanceTimersByTimeAsync(0);
     network.answers = true;
     network.says = "used";
-    // The chain's list a moment behind: not yet.
+    // The nonce gone past it, nothing seen at it: however long, it may have gone.
     await askAgain();
+    await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", unclear: true })]);
-    await vi.advanceTimersByTimeAsync(waiting.USED_FOR_MS);
+    expect(host.release).not.toHaveBeenCalled();
+    network.says = "replaced";
+    await askAgain();
     const error = await sent;
     expect(error.message).toBe(waiting.REPLACED_TEXT);
     expect(error.data).toMatchObject({ sent: false });

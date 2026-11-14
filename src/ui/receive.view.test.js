@@ -562,7 +562,10 @@ describe("receive", () => {
     lookupPrimaryName.mockResolvedValue("sofiadesign.dusk");
     dom.document.body.replaceChildren(...receiveView({ ...overview, networkName: "Testnet" }, { state, actions }));
     await settle();
-    dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === "Share").click();
+    // Chen's and Sofía's: Share sat up by the address, away from the request. The request's own sits beside its Copy.
+    const form = dom.document.body.querySelector(".receive-request");
+    expect(form.querySelectorAll(".receive-request__actions button").map(visibleText)).toEqual(["Copy request link", "Share"]);
+    form.querySelector('button[aria-label="Share request"]').click();
     await vi.waitFor(() => expect(invoke.mock.calls.some(([cmd]) => cmd === "share_text")).toBe(true));
     const [, args] = invoke.mock.calls.find(([cmd]) => cmd === "share_text");
     expect(args).toEqual({
@@ -572,6 +575,33 @@ describe("receive", () => {
       name: "dusk-testnet-request-0.03-DUSK-Invoice-2026-115-2026-11-10-0412.png",
     });
     expect(dom.clipboard.writeText).not.toHaveBeenCalled();
+
+    // The Share by the address shares the address, the request open or not.
+    invoke.mockClear();
+    dom.document.body.querySelectorAll(".btnrow--grid button").find((b) => visibleText(b) === "Share").click();
+    await vi.waitFor(() => expect(invoke).toHaveBeenCalledWith("share_text", { text: ACCOUNT, title: "Dusk address" }, undefined));
+  });
+
+  // Sofía's: Request payment opened with its Amount at the screen's very bottom edge.
+  it("brings Request payment into view at its Amount as it's opened, and not as the screen draws again", async () => {
+    const state = { receive: { tab: "public" } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
+    const draw = () => dom.document.body.replaceChildren(...receiveView(overview, { state, actions }));
+    draw();
+    const details = () => dom.document.body.querySelector("details.receive-request");
+    const amount = () => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Amount");
+    let scrolled = 0;
+    details().scrollIntoView = () => (scrolled += 1);
+    details().querySelector("summary").dispatchEvent(new Event("click"));
+    details().open = true;
+    details().dispatchEvent(new Event("toggle"));
+    expect([scrolled, dom.document.activeElement]).toEqual([1, amount()]);
+    // Drawn again, open as it was: left where it is.
+    dom.document.activeElement.blur?.();
+    draw();
+    details().scrollIntoView = () => (scrolled += 1);
+    details().dispatchEvent(new Event("toggle"));
+    expect(scrolled).toBe(1);
   });
 
   it("starts a request over when the profile switches, rather than asking for it on the other one", async () => {
@@ -636,6 +666,50 @@ describe("the requests made here", () => {
     dom.document.body.querySelector('button[data-label="Copy request link"]').click();
     await settle();
     expect(items[KEY][ACCOUNT]).toHaveLength(1);
+  });
+
+  // Sofía's, in the app: Copy request link on an invoice paid already, the form still filled in, made a second
+  // request with the same invoice number, Waiting, which a client could pay again.
+  it("copies a request paid already as its own link, keeps no second one, and says it was paid", async () => {
+    items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "10000000", memo: "Factura 2026-151" })] };
+    const entries = [paidIn("a1".repeat(32), "10000000", "Factura 2026-151", T0 + HOUR)];
+    const state = { receive: { tab: "public", requestOpen: true, amountDusk: "0.01", memo: "Factura 2026-151" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
+    const actions = await draw(state);
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid"]));
+    await vi.waitFor(() => expect(items[KEY][ACCOUNT][0].paid).toBeTruthy());
+    await actions.render();
+
+    dom.document.body.querySelector('button[data-label="Copy request link"]').click();
+    await settle();
+    await settle();
+    // The link it was asked with, as before; no second request, and what's said is that it was paid.
+    expect(String(dom.clipboard.writeText.mock.lastCall?.[0] ?? "")).toContain("memo=Factura+2026-151");
+    expect(actions.showToast).toHaveBeenCalledWith("This request was paid already.");
+    expect(items[KEY][ACCOUNT].map((r) => r.id)).toEqual(["a"]);
+    expect(shown().map((row) => row.state)).toEqual(["Paid"]);
+  });
+
+  // Chen's and Sofía's: the requests in the list had Copy link and Remove, and their Share was up by the address.
+  it("shares each request in the list in the app from beside its Copy link, as it was asked", async () => {
+    dom.document.body.dataset.runtime = "tauri";
+    dom.window.matchMedia = () => ({ matches: true });
+    const invoke = vi.fn(async () => null);
+    dom.window.__TAURI_INTERNALS__ = { invoke };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "16000000", memo: "Factura 117" })] };
+    await draw({ receive: { tab: "public" } });
+    expect(shown()[0].buttons).toEqual(["Copy link", "Share", "Remove"]);
+    dom.document.body.querySelector(".request-row__actions").querySelectorAll("button").find((b) => visibleText(b) === "Share").click();
+    await vi.waitFor(() => expect(invoke.mock.calls.some(([cmd]) => cmd === "share_text")).toBe(true));
+    const [, args] = invoke.mock.calls.find(([cmd]) => cmd === "share_text");
+    expect([args.title, args.text]).toEqual([
+      "Dusk payment request",
+      `You're asked to pay 0.016 DUSK · Factura 117\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.016&memo=Factura+117&network=testnet`,
+    ]);
+    // None outside the app.
+    delete dom.document.body.dataset.runtime;
+    await draw({ receive: { tab: "public" } });
+    expect(shown()[0].buttons).toEqual(["Copy link", "Remove"]);
   });
 
   it("says what came in for each: paid, to check, or paid twice, each payment to open, and keeps what paid", async () => {

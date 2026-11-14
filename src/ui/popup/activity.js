@@ -423,12 +423,15 @@ function within(promise, ms) {
 /**
  * Activity's search: the account's whole history, its older blocks synced
  * first as far back as they go, as Show more would, then every row kept read
- * at once. Read again once what's kept changed; the last read stands
- * meanwhile. `whole` is what `activityRows` takes, null until it's read, or
- * where there's no history to read; `reading` while it's read.
+ * at once. Older blocks that can't be had now, as offline, leave every row
+ * kept on this device, searched all the same (Amélie's: "Nothing" for
+ * payments three Show mores down); `complete` says whether that's all of it.
+ * Read again once what's kept changed; the last read stands meanwhile.
+ * `whole` is what `activityRows` takes, null until it's read, or where
+ * there's no history to read; `reading` while it's read.
  * @param {object} ov - the overview
  * @param {{ state: object, render?: () => Promise<void> }} ctx
- * @returns {{ whole: { entries: object[], meta: object | null, shielded: object[] } | null, reading: boolean }}
+ * @returns {{ whole: { entries: object[], meta: object | null, shielded: object[], complete: boolean } | null, reading: boolean }}
  */
 export function searchedActivity(ov, { state, render }) {
   const a = state?.activity;
@@ -440,9 +443,13 @@ export function searchedActivity(ov, { state, render }) {
     a.searching = (async () => {
       if ((await a.epoch) === undefined) throw new Error("The activity store is out of reach");
       let complete = a.complete;
-      for (let run = 0; run < WHOLE_RUNS && !complete && !a.stale; run += 1) {
-        await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
-        ({ complete } = await a.history.read({ limit: 1 }));
+      try {
+        for (let run = 0; run < WHOLE_RUNS && !complete && !a.stale; run += 1) {
+          await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
+          ({ complete } = await a.history.read({ limit: 1 }));
+        }
+      } catch {
+        // What's kept on this device is searched as it is.
       }
       const read = await a.history.read({ limit: Number.MAX_SAFE_INTEGER - 1 });
       // The .dusk names of whom the rows past the page are with too, as the
@@ -454,7 +461,7 @@ export function searchedActivity(ov, { state, render }) {
       if ((await within(checking, NODE_ANSWER_MS)) === LATE) {
         checking.then((named) => named && state.activity === a && redraw(state, render));
       }
-      if (state.activity === a) a.searched = { entries: read.entries, meta: read.state };
+      if (state.activity === a) a.searched = { entries: read.entries, meta: read.state, complete: read.complete === true };
     })()
       .catch(() => {})
       .finally(() => {
@@ -462,7 +469,7 @@ export function searchedActivity(ov, { state, render }) {
         redraw(state, render);
       });
   }
-  const whole = a.searched ? { entries: a.searched.entries, meta: a.searched.meta, shielded: a.shielded } : null;
+  const whole = a.searched ? { entries: a.searched.entries, meta: a.searched.meta, shielded: a.shielded, complete: a.searched.complete } : null;
   return { whole, reading: Boolean(a.searching) };
 }
 
@@ -810,6 +817,45 @@ export function loadActivityDetail({ ov, state, render }, hash) {
       if (now && !a.history.needsDetails(now)) detailLoads.delete(key);
       else detailLoads.set(key, Date.now());
     });
+}
+
+// Each tapped payment looked for among every row kept, once for each change to what's kept.
+const keptLooks = new Map();
+
+/**
+ * A payment a screen opens by its ID, still looked for (`state.txDetailRow`,
+ * `reading`), as a notice's tap opens what came in: looked for among every row
+ * kept on this device, past Activity's page too (issue #214: the payment
+ * reported missing behind 50 newer ones), once for each change to what's kept
+ * as Activity syncs. Found, it's the row the details show.
+ * @param {{ ov: object, state: object, render?: () => Promise<void> }} ctx
+ * @param {string} hash
+ */
+export function lookForKeptRow({ ov, state, render }, hash) {
+  const a = state?.activity;
+  const tap = state?.txDetailRow;
+  const want = String(hash ?? "").toLowerCase();
+  if (!a?.history || !a.loaded || !tap?.reading || tap.context !== a.key || String(tap.hash ?? "").toLowerCase() !== want) return;
+  const key = `${a.key}\n${want}`;
+  const at = a.reads ?? 0;
+  if (keptLooks.has(key) && keptLooks.get(key) === at) return;
+  keptLooks.set(key, at);
+  a.history
+    .read({ limit: Number.MAX_SAFE_INTEGER - 1 })
+    .then(async (read) => {
+      let entry = read.entries.find((e) => e.hash === want);
+      if (!entry || state.activity !== a || state.txDetailRow !== tap) return;
+      // Its time, outcome and fee, as a row opened gets them.
+      if (a.history.needsDetails(entry) && (await a.epoch) !== undefined) {
+        await a.history.fillDetails([entry]).catch(() => {});
+        const { entries: block } = await a.history.read({ before: entry.blockHeight + 1, limit: 1 });
+        entry = block.find((e) => e.hash === want) ?? entry;
+      }
+      if (state.activity !== a || state.txDetailRow !== tap) return;
+      tap.row = activityRows(ov, state, { entries: [entry], meta: read.state, shielded: a.shielded }).find((row) => row.hash === want) ?? null;
+      if (tap.row) redraw(state, render);
+    })
+    .catch(() => {});
 }
 
 /** Whether Show more has more to show: kept rows beyond the page, or older history to sync. */

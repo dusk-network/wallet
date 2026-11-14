@@ -16,7 +16,9 @@ import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
 import { whenAtText } from "./txRow.js";
-import { UNCLEAR_TEXT, reasonText } from "./sent.js";
+import { UNCLEAR_TEXT, appLeaveText, reasonText } from "./sent.js";
+import { isTauriRuntime } from "../../../platform/runtime.js";
+import { isPhone } from "../../lib/device.js";
 
 // In the wallet's words: what a node says of it is that node's to choose.
 const BALANCE_UNREAD = "Couldn't read your balance from this node. Try again in a moment.";
@@ -37,7 +39,14 @@ export function homeView(ov, { state, actions } = {}) {
   // and surface progress in the subtitle.
   const shieldedSync = ov?.shieldedSync || null;
   const shieldedError = ov?.shieldedError ? String(ov.shieldedError) : "";
-  const shieldLux = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
+  const shieldRaw = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
+  // Chen's and Lena's: "Shielded · Not synced 0 DUSK" after an import and each
+  // cold start, "Shielded · Sync failed 0 DUSK" opened with no signal. Till a
+  // sync has gone through, or while one fails, a 0 is no reading: a dash shows,
+  // and what it is; what notes were kept from before still show.
+  const syncState = shieldedSync?.state ?? null;
+  const shieldUnread = (syncState === "idle" || syncState === "syncing" || syncState === "error") && safeBigInt(shieldRaw ?? 0, 0n) <= 0n && !ov?.shieldedStale;
+  const shieldLux = shieldUnread ? null : shieldRaw;
   const hasShieldValue = shieldLux !== undefined && shieldLux !== null;
   // Always show the shielded row for Dusk. If values aren't available yet,
   // we show placeholders + sync state.
@@ -73,9 +82,11 @@ export function homeView(ov, { state, actions } = {}) {
   // We only show a suffix when *not* fully healthy, to avoid "Shielded • Shielded".
   let shieldStatus = null;
   let shieldStatusTitle = shieldedError || shieldedSync?.lastError ? SHIELDED_UNREAD : undefined;
+  // No network, or a node that doesn't answer: it can't be read now, which isn't a failure.
+  const offlineNow = globalThis.navigator?.onLine === false || ov?.networkStatus?.nodeStatus === "offline";
   if (shieldedSync?.state === "idle") {
     const n = Number(shieldedSync?.notes ?? 0);
-    if (n <= 0) shieldStatus = "Not synced";
+    if (n <= 0) shieldStatus = offlineNow ? "can't be read now" : "reading…";
   } else if (shieldedSync?.state === "syncing") {
     const p = Number(shieldedSync.progress ?? 0);
     const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
@@ -83,12 +94,13 @@ export function homeView(ov, { state, actions } = {}) {
     // If progress is >0 but rounds to 0, display "<1%" instead.
     shieldStatus = pct === 0 && p > 0 ? "Syncing <1%" : `Syncing ${pct}%`;
   } else if (shieldedSync?.state === "error") {
-    shieldStatus = "Sync failed";
+    shieldStatus = offlineNow ? "can't be read now" : "Sync failed";
+    if (offlineNow) shieldStatusTitle = undefined;
   }
 
   // One read before stays, under the balance's own line: it isn't unavailable.
   if (shieldedError && shieldedSync?.state !== "syncing" && !ov?.shieldedStale) {
-    shieldStatus = "Unavailable";
+    shieldStatus = offlineNow ? "can't be read now" : "Unavailable";
   }
 
   // If everything is synced and error-free but we have locally reserved notes,
@@ -359,21 +371,30 @@ function waitingSection(ov, { state, actions } = {}) {
       },
     });
 
-  // One handed over without a clear answer may have gone out: it's looked up,
-  // and has no Cancel.
+  // One state at a time (Chen's, Lena's: "Not sent yet … It's being sent.
+  // Cancel" as it went out): Not sent yet while it waits for the network,
+  // Sending while it goes out; gone out, Activity has it as this card goes
+  // (the wallet keeps it as sent before it leaves this list). One handed
+  // over without a clear answer may have gone out: it's looked up, and has no
+  // Cancel. In the app on a phone, one waiting goes out only while the app's
+  // open, which it says.
+  const sending = (send) => !send.waits && !send.checks;
   const waitingNote = (send) =>
     send.unclear && send.checks
       ? "It may have gone out already. The wallet checks once the network answers."
       : send.unclear && send.waits
         ? UNCLEAR_TEXT
         : send.waits
-          ? "It goes out once the network answers."
-          : "It's being sent.";
+          ? isTauriRuntime() && isPhone()
+            ? `It goes out once the network answers. ${appLeaveText(ov)}`
+            : "It goes out once the network answers."
+          : "";
+  const titleOf = (send) => (sending(send) ? "Sending: " : send.unclear ? "Not confirmed: " : "Not sent yet: ");
   const waitingBox = (send) =>
     h("div", { class: "callout home-waiting", role: "status" }, [
-      h("div", { class: "callout-title" }, [send.unclear ? "Not confirmed: " : "Not sent yet: ", ...what(send)]),
+      h("div", { class: "callout-title" }, [titleOf(send), ...what(send)]),
       madeLine(send),
-      h("p", { class: "muted home-waiting__note", text: waitingNote(send) }),
+      waitingNote(send) ? h("p", { class: "muted home-waiting__note", text: waitingNote(send) }) : null,
       send.unclear ? null : h("div", { class: "home-waiting__actions" }, [
         button("Cancel", async () => {
           const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null);

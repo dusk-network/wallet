@@ -11,7 +11,7 @@ import {
   safeBigInt,
 } from "../../../shared/amount.js";
 import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
-import { sozuPosition, sozuRate, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
+import { POSITION_WORDS, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
 import { SOZU_FN, feePercent, leastSozuStake, parsePool, sozuStake, sozuUnstakeAllowed } from "@dusk-network/networks/sozu";
 
 import {
@@ -42,6 +42,7 @@ import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { activityKey, activityRows, keptRatesOf, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
+import { whenAtText } from "./txRow.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
 // rate and the deposit fee are read; null until then.
@@ -381,6 +382,23 @@ function maybeAutoWatchStDusk({ state, actions, st, status, profileIndex }) {
 const accountOf = (ov, idx) => String(ov?.accounts?.[idx] ?? "");
 
 /**
+ * Staking's figures were read from the node, as Home's balance was: with no
+ * network, or a node that stopped answering, they're said to be maybe out of
+ * date, as Home says it, with when they were read where that's known. Null
+ * while they're as read.
+ * @param {object} ov - the overview
+ * @returns {HTMLElement | null}
+ */
+export function stakeStaleNote(ov) {
+  const at = Number(ov?.balanceReadAt);
+  const read = Number.isFinite(at) && at > 0 ? ` Last read ${whenAtText(at)}.` : "";
+  const note = (text) => h("div", { class: "muted balance-stale stake-stale", role: "status", text });
+  if (globalThis.navigator?.onLine === false) return note(`Your stake may be out of date until you're back online.${read}`);
+  if (ov?.balanceStale || ov?.stakeStale || ov?.networkStatus?.nodeStatus === "offline") return note(`Your stake may be out of date.${read}`);
+  return null;
+}
+
+/**
  * What the profile did with Sozu, for its position: read from its whole history
  * once a status is read, as long as that takes; what's on its way is counted when
  * it's through, with the status read again. `reading` until then, and `rows`
@@ -420,19 +438,27 @@ export const FACTS_AGAIN_MS = 20_000;
 
 /**
  * A stake's or an unstake's facts come from the archive a little after its
- * block: while rewards by year wait on some (app-core's `reading`), they're
- * read again 20 seconds on, one read at a time, and the screen drawn again
- * after each read, what came or not (`factsRead`): rewards by year are worked
- * out again, and while some are still read, read again 20 seconds on.
+ * block, and only once its history lists it there, with its block: one just
+ * made is the wallet's own record of it till then, whose facts nothing reads.
+ * While rewards by year wait on some (app-core's `reading`), the whole history
+ * is read again 20 seconds on, as the web wallet reads it, and its facts with
+ * it, one read at a time, and the screen drawn again after each read, what
+ * came or not (`factsRead`): rewards by year are worked out again, and while
+ * some are still read, read again 20 seconds on.
  */
 export function readSozuFactsAgain(ov, { state, actions }) {
   const st = sozuState(state);
   const history = st.history;
   if (!history || history.reading || history.againTimer) return;
   history.againTimer = setTimeout(() => {
-    sozuFactsOf(ov, history.rows)
-      .then((facts) => {
-        if (st.history === history && facts) history.facts = facts;
+    wholeActivity(ov, { state, publicOnly: true })
+      .then((whole) => activityRows(ov, state, whole))
+      .catch(() => history.rows)
+      .then(async (rows) => {
+        const facts = await sozuFactsOf(ov, rows);
+        if (st.history !== history) return;
+        history.rows = rows;
+        if (facts) history.facts = facts;
       })
       .catch(() => {})
       .finally(() => {
@@ -884,24 +910,26 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
-  // The position, as the shared sums make it (sozuPosition): each short, as a row
-  // is, with what it is to the last lux for a pointer. What's put in and earned
-  // waits for the whole history, and the rewards for each stake's deposit fee.
+  // The position, as the shared sums make it (sozuPosition), in both wallets'
+  // words: each short, as a row is, with what it is to the last lux for a
+  // pointer. What's put in and earned waits for the whole history, and the
+  // rewards for each stake's deposit fee; they're before those fees, which the
+  // row above them says, as Rewards by year's growth is after them.
   const held = sozuPosition({ rows: history.rows, status: rateStatus, facts: history.facts, complete: Boolean(history.whole) });
   const money = (lux) => h("span", { title: hidden ? undefined : formatDuskExact(lux.toString()) }, [balance(hidden, fmtLux(lux)), " DUSK"]);
   const reading = h("span", { class: "muted", text: "Reading your history…" });
   const positionGroup = position && (poolBalanceLux > 0n || stDuskLux > 0n || held.putIn > 0n)
     ? h("div", { class: "group sozu-position" }, [
-        history.whole ? kv("Put in", money(held.putIn)) : null,
-        history.whole && held.takenOut > 0n ? kv("Taken out", money(held.takenOut)) : null,
-        kv("Worth now", money(poolBalanceLux)),
-        history.whole && held.depositFees > 0n ? kv(held.feesExact ? "Deposit fees" : "Deposit fees, about", money(held.depositFees)) : null,
+        history.whole ? kv(POSITION_WORDS.putIn, money(held.putIn)) : null,
+        history.whole && held.takenOut > 0n ? kv(POSITION_WORDS.takenOut, money(held.takenOut)) : null,
+        kv(POSITION_WORDS.worthNow, money(poolBalanceLux)),
+        history.whole && held.depositFees > 0n ? kv(held.feesExact ? POSITION_WORDS.depositFees : POSITION_WORDS.depositFeesAbout, money(held.depositFees)) : null,
         history.reading
-          ? kv("Rewards so far", reading)
+          ? kv(POSITION_WORDS.earned, reading)
           : history.whole && held.earned !== null
-            ? kv("Rewards so far", held.earned < 0n ? h("span", {}, [MINUS, money(-held.earned)]) : money(held.earned))
+            ? kv(POSITION_WORDS.earned, held.earned < 0n ? h("span", {}, [MINUS, money(-held.earned)]) : money(held.earned))
             : null,
-        kv("stDUSK", [balance(hidden, fmtLux(stDuskLux)), " stDUSK", stDuskAction].filter(Boolean)),
+        kv(POSITION_WORDS.stDusk, [balance(hidden, fmtLux(stDuskLux)), " stDUSK", stDuskAction].filter(Boolean)),
         held.waiting ? h("p", { class: "stake-cap", text: held.waiting === 1 ? "One more on its way isn't counted yet." : `${held.waiting} more on their way aren't counted yet.` }) : null,
       ].filter(Boolean))
     : null;
@@ -950,6 +978,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     cfg && liveStatus?.reason ? h("div", { class: "muted", text: liveStatus.reason }) : null,
     syncing ? syncWarning() : null,
     positionGroup,
+    positionGroup ? stakeStaleNote(ov) : null,
     assetError,
     actionTabs,
     stakeOff

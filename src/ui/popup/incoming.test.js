@@ -46,6 +46,8 @@ describe("notices of money coming in, in the app on Android", () => {
       archiveUrl: "https://testnet.nodes.dusk.network",
       network: "Testnet",
       title: "You received {amount} DUSK from {name}",
+      // Sofía's: "You received 0.01 DUSK from Profile 2 · Testnet" didn't name her invoice. The payer's memo, in quotes.
+      memoBody: "“{memo}” · Testnet",
       // Astra's: the lock screen showed the amount and who paid, where the phone hides what notices say.
       publicTitle: "Payment received",
       wallet: ACCOUNTS[0],
@@ -85,6 +87,28 @@ describe("notices of money coming in, in the app on Android", () => {
     // Turned off: Android stops looking.
     await keep(open({ hideBalances: true, incomingNotices: false }), 66_000);
     expect(watch.mock.lastCall).toEqual([null]);
+  });
+
+  // Issue #214: turned on, then off before Android answered whether notices are allowed: the first gave Android
+  // its job back after the second had taken it away.
+  it("gives nothing from a turn a later one overtook while it waited, on or off", async () => {
+    const { keepIncomingWatched } = await fresh();
+    const watch = vi.fn(async () => {});
+    const send = async () => ({ ok: true, token: TOKEN });
+    const answer = Promise.withResolvers();
+    const on = keepIncomingWatched(open(), { send, watch, allowedNow: () => answer.promise, now: 1_000 });
+    await keepIncomingWatched(open({ incomingNotices: false }), { send, watch, allowedNow: async () => true, now: 2_000 });
+    answer.resolve(true);
+    await on;
+    expect(watch.mock.calls).toEqual([[null]]);
+    // Off while the wallet gave its token: the same.
+    const token = Promise.withResolvers();
+    const again = keepIncomingWatched(open(), { send: () => token.promise, watch, allowedNow: async () => true, now: 3_000 });
+    await Promise.resolve();
+    await keepIncomingWatched(open({ incomingNotices: false }), { send, watch, allowedNow: async () => true, now: 4_000 });
+    token.resolve({ ok: true, token: TOKEN });
+    await again;
+    expect(watch.mock.calls).toEqual([[null], [null]]);
   });
 
   // Seen on the phone: notices allowed from Settings' switch, and Android's job was given nothing for a minute.

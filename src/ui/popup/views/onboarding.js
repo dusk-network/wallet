@@ -5,8 +5,9 @@ import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
 import { checkboxInput, fieldError, groupLabel, newPasswordField, passwordForm, stepActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
-import { createWordCheck } from "../../components/WordCheck.js";
-import { wordPlaces, wordsMatch } from "../../../shared/recoveryWords.js";
+import { createWordCheck, wordsMismatch } from "../../components/WordCheck.js";
+import { wordPlaces } from "../../../shared/recoveryWords.js";
+import { recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
@@ -339,7 +340,6 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
     text: "I wrote it down",
     onclick: () => {
       state.onboard.checkPlaces = wordPlaces(normalizeMnemonic(mnemonic).split(" ").filter(Boolean).length);
-      state.onboard.checkFailed = false;
       state.route = adding ? "wallet_add_confirm" : "onboard_create_confirm";
       actions?.render?.().catch(() => {});
     },
@@ -356,8 +356,6 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
     h("div", { class: "row onboard-form" }, [
       adding ? walletLanding(ov).el : null,
       h("p", { class: "auth-lead", text: "Write down these 12 words in order and keep them somewhere safe." }),
-      // Back from a check that didn't match: the words again, to put the paper right.
-      state.onboard.checkFailed ? h("p", { class: "field-error", role: "alert", text: "Those words don't match. Check them against the words below." }) : null,
       h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
       srpGridEl(mnemonic, { blurred: !state.onboard.reveal }),
       h("div", { class: "phrase-tools" }, [toggle, copyBtn]),
@@ -370,8 +368,9 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
 /**
  * Check your recovery words, once they're written down: three of them,
  * chosen at random, compared here, with Check and Skip for now; either makes
- * the wallet, and a mismatch shows the words again first. In Add wallet, the
- * password the wallets here share too.
+ * the wallet. A mismatch says so and nothing more, with Try again (the same
+ * three) and Show my recovery words, which goes back to the words, hidden
+ * till Reveal. In Add wallet, the password the wallets here share too.
  */
 export function onboardingCreateConfirmView({ state, actions, adding = false } = {}) {
   const mnemonic = state.onboard.mnemonic;
@@ -479,15 +478,24 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
         wordsError.show("Enter the three words.");
         return;
       }
-      // Compared here, and then forgotten: a mismatch shows the words again, to put the paper right.
-      const match = wordsMatch(expected, words.typed());
+      // Compared here, and then forgotten. A mismatch shows no word.
+      const match = recoveryWordsMatch(expected, words.typed());
       words.clear();
       if (!match) {
-        state.onboard.checkFailed = true;
-        state.onboard.checkPlaces = null;
-        state.onboard.reveal = true;
-        state.route = adding ? "wallet_add_phrase" : "onboard_create_phrase";
-        actions?.render?.().catch(() => {});
+        form.replaceChildren(
+          ...wordsMismatch({
+            tryAgain: () => {
+              ask();
+              words.focus();
+            },
+            showWords: () => {
+              state.onboard.checkPlaces = null;
+              state.onboard.reveal = false;
+              state.route = adding ? "wallet_add_phrase" : "onboard_create_phrase";
+              actions?.render?.().catch(() => {});
+            },
+          })
+        );
         return;
       }
       create({ checked: true });
@@ -495,30 +503,39 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   });
   skipBtn = h("button", { class: "btn-outline btn-full", type: "button", text: "Skip for now", onclick: () => create({ checked: false }) });
 
+  // The words asked, in a form the popup keeps through redraws, as it does
+  // a mismatch said in their place.
+  const label = groupLabel(words.el, "Check your recovery words");
+  const form = h("div", { class: "row onboard-form" });
+  const ask = () =>
+    form.replaceChildren(
+      ...[
+        h("p", { class: "auth-lead", text: "Enter these words from your recovery phrase." }),
+        label,
+        words.el,
+        wordsError.el,
+        ...(current ? current.els : []),
+        err.el,
+        checkBtn,
+        skipBtn,
+        busyBody,
+      ]
+    );
+  ask();
+
   // `busy`: the wallet being made, which the popup keeps the form through.
-  return Object.assign([
-    nav,
-    h("div", { class: "row onboard-form" }, [
-      h("p", { class: "auth-lead", text: "Enter these words from your recovery phrase." }),
-      groupLabel(words.el, "Check your recovery words"),
-      words.el,
-      wordsError.el,
-      ...(current ? current.els : []),
-      err.el,
-      checkBtn,
-      skipBtn,
-      busyBody,
-    ]),
-  ], { busy: () => busy });
+  return Object.assign([nav, form], { busy: () => busy });
 }
 
-// Import wallet's network, Mainnet or Testnet, the ones people hold DUSK on:
-// none is picked to begin with, and Import waits till one is, so a phrase
+// Import wallet's network, Mainnet or Testnet, the ones people hold DUSK on,
+// each saying what its DUSK is (real, or test DUSK with no value): none is
+// picked to begin with, and Import waits till one is, so a phrase
 // used on Testnet doesn't open on Mainnet with nothing in it. Picking one
 // moves the wallet there, as the network menu does, and keeps what's typed.
 // On another network, picked before in Settings, nothing's asked: the top bar
 // names it. `setDisabled` holds it while the wallet is made; `picked` says
 // whether one was, and says to pick one where none was.
+const NETWORK_DUSK = Object.freeze({ mainnet: "real DUSK", testnet: "test DUSK, no value" });
 function networkChoice(ov, actions) {
   const on = detectPresetId({ nodeUrl: ov?.nodeUrl, proverUrl: ov?.proverUrl, archiverUrl: ov?.archiverUrl });
   if (!ov?.nodeUrl || (on !== "mainnet" && on !== "testnet")) return null;
@@ -532,7 +549,7 @@ function networkChoice(ov, actions) {
     host.replaceChildren(
       segmented({
         label: "Network",
-        items: offered.map((preset) => ({ id: preset.id, text: preset.label, disabled: busy || held })),
+        items: offered.map((preset) => ({ id: preset.id, text: preset.label, sub: NETWORK_DUSK[preset.id], disabled: busy || held })),
         selected: picked,
         onSelect: pick,
         none: true,
