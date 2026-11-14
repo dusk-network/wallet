@@ -20,6 +20,10 @@ import { appNoticesAllowed, watchAppIncoming } from "../../platform/notices.js";
 const GIVEN_AGAIN_MS = 60_000;
 let given = null;
 let givenAt = 0;
+// Each giving's turn: one a later one overtook while it asked Android or the
+// wallet gives nothing after it (issue #214: turned on and off quickly, the
+// first gave Android its job back after the second took it away).
+let turn = 0;
 
 // The marks Activity writes an amount with.
 function marks() {
@@ -79,8 +83,13 @@ export async function keepIncomingWatched(ov, { names, send, allowedNow = appNot
   if (key === given && now - givenAt < GIVEN_AGAIN_MS) return;
   given = key;
   givenAt = now;
-  if (!setup || !(await allowedNow().catch(() => false))) return watch(null);
+  const mine = ++turn;
+  if (!setup) return watch(null);
+  const allowed = await allowedNow().catch(() => false);
+  if (mine !== turn) return;
+  if (!allowed) return watch(null);
   const token = (await send({ type: "DUSK_UI_INCOMING_TOKEN" }).catch(() => null))?.token ?? "";
+  if (mine !== turn) return;
   // Not given: asked again with the next draw.
   if (!token) {
     given = null;

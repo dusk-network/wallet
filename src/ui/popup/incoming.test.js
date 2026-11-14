@@ -89,6 +89,28 @@ describe("notices of money coming in, in the app on Android", () => {
     expect(watch.mock.lastCall).toEqual([null]);
   });
 
+  // Issue #214: turned on, then off before Android answered whether notices are allowed: the first gave Android
+  // its job back after the second had taken it away.
+  it("gives nothing from a turn a later one overtook while it waited, on or off", async () => {
+    const { keepIncomingWatched } = await fresh();
+    const watch = vi.fn(async () => {});
+    const send = async () => ({ ok: true, token: TOKEN });
+    const answer = Promise.withResolvers();
+    const on = keepIncomingWatched(open(), { send, watch, allowedNow: () => answer.promise, now: 1_000 });
+    await keepIncomingWatched(open({ incomingNotices: false }), { send, watch, allowedNow: async () => true, now: 2_000 });
+    answer.resolve(true);
+    await on;
+    expect(watch.mock.calls).toEqual([[null]]);
+    // Off while the wallet gave its token: the same.
+    const token = Promise.withResolvers();
+    const again = keepIncomingWatched(open(), { send: () => token.promise, watch, allowedNow: async () => true, now: 3_000 });
+    await Promise.resolve();
+    await keepIncomingWatched(open({ incomingNotices: false }), { send, watch, allowedNow: async () => true, now: 4_000 });
+    token.resolve({ ok: true, token: TOKEN });
+    await again;
+    expect(watch.mock.calls).toEqual([[null], [null]]);
+  });
+
   // Seen on the phone: notices allowed from Settings' switch, and Android's job was given nothing for a minute.
   it("gives it at once once it's turned on in Settings, though it was given a moment before", async () => {
     const { keepIncomingWatched, watchIncomingAgain } = await fresh();

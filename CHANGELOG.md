@@ -101,6 +101,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Sent a payment kept by the previous version again with Send it now, rather than saying the wallet, profile or network changed.
+- Kept notices for money coming in off in the Android app when the setting is turned on and off quickly.
 - Said a payment the wallet stopped on as it went out wasn't sent only once the account's transaction at its nonce is seen to be another, never on the nonce alone.
 - Opened a payment notice tapped after Android had closed the app on its payment once unlocked, rather than on Home with a passing toast, and one for money that came in after the app locked itself.
 - Kept Can't reach the network off the Android app's screen as it reconnects, as when a notice's tap brings it back.

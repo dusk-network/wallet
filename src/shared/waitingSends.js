@@ -225,9 +225,12 @@ const forgetFor = (sendId, prior) =>
 export const NOT_IN_PLACE_TEXT = "The wallet, profile or network changed. Check the send again.";
 
 // The same payment from the same place: wallet, network, profile and account,
-// to whom, how much, with what memo, public or shielded.
+// to whom, how much, with what memo, public or shielded. The account where
+// the one kept names one: an earlier version's kept none, and its wallet and
+// profile say whose it is (issue #214: Send it now refused such a payment as
+// "changed").
 const SAME_PAYMENT = ["walletId", "nodeUrl", "profileIndex", "account", "privacy", "to", "lux", "memo"];
-const samePayment = (a, b) => SAME_PAYMENT.every((key) => String(a?.[key] ?? "") === String(b?.[key] ?? ""));
+const samePayment = (kept, again) => SAME_PAYMENT.every((key) => (key === "account" && !kept?.account) || String(kept?.[key] ?? "") === String(again?.[key] ?? ""));
 
 // Kept, in place of the payment Home said wasn't sent that it sends again
 // (`replaces`): that one, as it was, or null where it isn't one to replace.

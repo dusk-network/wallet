@@ -503,6 +503,19 @@ describe("a payment sent again from Home's Send it now", () => {
     }
   });
 
+  // Issue #214: one kept by an earlier version, which kept no account, was refused as "changed" from where it was made.
+  it("takes the place of one kept by an earlier version, which names no account, from the same wallet and profile", async () => {
+    const { account: _account, ...earlier } = record();
+    localStorage.setItem("dusk_waiting_sends_v1", JSON.stringify({ old: { ...earlier, sendId: "old", at: 1, ended: "closed" } }));
+    const attempt = vi.fn(async () => ({ hash: "e2" }));
+    await expect(waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt, host, replaces: "old" })).resolves.toEqual({ hash: "e2" });
+    expect(attempt).toHaveBeenCalledOnce();
+    // From another profile, still refused.
+    localStorage.setItem("dusk_waiting_sends_v1", JSON.stringify({ old: { ...earlier, sendId: "old", at: 1, ended: "closed" } }));
+    const error = await waiting.sendWhenReachable({ sendId: "s2", record: record({ profileIndex: 1, account: "another-account" }), attempt, host, replaces: "old" }).catch((e) => e);
+    expect(error.message).toBe(waiting.NOT_IN_PLACE_TEXT);
+  });
+
   it("closed on as it waits, is the one notice left", async () => {
     unsent();
     waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt: vi.fn().mockRejectedValue(offline()), host, replaces: "old" }).catch(() => {});
