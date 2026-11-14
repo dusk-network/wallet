@@ -5,6 +5,13 @@
 
 import { safeBigInt } from "../../shared/amount.js";
 
+/**
+ * Who pays and on which network, as a Review was asked for: the wallet, the
+ * profile and the node. A draft for one is refused by another (send.js).
+ * @param {object} ov
+ */
+export const reviewContextOf = (ov) => `${ov?.accounts?.[0] ?? ""} ${Number(ov?.selectedAccountIndex ?? 0) || 0} ${ov?.nodeUrl ?? ""}`;
+
 // The profile the overview shows.
 const profileOf = (ov) => {
   const raw = Number(ov?.selectedAccountIndex ?? 0);

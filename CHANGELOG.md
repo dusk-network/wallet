@@ -79,6 +79,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Took Send it now on a payment Home says wasn't sent straight to Review, to send from there, kept the notice until the payment is handed over, and called Drop Don't send, as the web wallet does.
 - Kept a payment from Send on the device the moment it's confirmed, so one the Android app is ended on before it goes out comes back on Home as not sent, rather than vanishing.
 - Asked the node about a payment handed over just as the signal went, by its ID, its queue and the account's nonce: one it never had goes out once more as the same transaction, or, where the wallet stopped meanwhile, is said not sent with Send it now; none shows in Activity as sent before the node has it.
 - Said on Sent and on Home that a payment handed over without an answer may have gone out already, rather than that nothing had left the wallet, with no Cancel.
@@ -92,7 +93,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed the balance read last, said to be out of date with when it was read, where it can't be read now, as when the wallet opens with no signal, rather than a dash, and named the part the node couldn't give, as the stake.
 - Opened a payment from its notice in the Android app at once, as the notice knew it, without waiting for the network to come back, and said a payment on Sent is being looked up, never that it's taking long, until the node answers.
 - Sent a payment that couldn't reach the network at Confirm once the network answers, as the web wallet does, with Cancel on its screen and on Home until then, and payments that waited one at a time, in their order.
-- Said on Home that a payment waiting for the network wasn't sent once the wallet closed or locked before it went, with Send it now and Drop, never sending it by itself.
+- Said on Home that a payment waiting for the network wasn't sent once the wallet closed or locked before it went, with Send it now and Don't send, never sending it by itself.
 - Listed each payment waiting for the network on Home with its amount, recipient, memo and time, and said on Send and Review when the same payment is waiting already.
 - Left payments waiting for the network out of Send's Available and Max.
 - Showed money that came in on Home and in Activity by itself while the wallet shows, read again every 30 seconds, and had Refresh read Activity too.

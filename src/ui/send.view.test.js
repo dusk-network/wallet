@@ -1165,6 +1165,71 @@ describe("review", () => {
     expect(sent[0].params.memo).toBe(memo);
   });
 
+  // Chen's, Sofía's, Nandini's and Amélie's: Home's Send it now opens Review with the payment Home said wasn't sent,
+  // and Confirm sends it in that one's place, which Home keeps saying till it's handed over.
+  it("sends a payment from Home's Send it now in the place of the one Home said wasn't sent", async () => {
+    const sent = [];
+    const send = async (message) => {
+      if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+      return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "1", max: "1" } : { ok: true, result: { hash: "ab".repeat(32) } };
+    };
+    const here = overview();
+    const reviewedFor = `${here.accounts[0]} ${Number(here.selectedAccountIndex ?? 0)} ${here.nodeUrl}`;
+    review({ to: ALICE.account, privacy: "public", memo: "Factura 141", replaces: "send-kept-1", reviewedFor }, here, send);
+    await settle();
+    pastClickGuard();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    await settle();
+    expect(sent).toEqual([expect.objectContaining({ replaces: "send-kept-1", params: expect.objectContaining({ memo: "Factura 141" }) })]);
+  });
+
+  // Astra's: Send it now, Back to the form and Review again sent it, and Home kept saying the first wasn't sent.
+  it("keeps sending it in the place of the one Home said wasn't sent after Back and Review, while it's that payment", async () => {
+    const here = overview();
+    const draft = { to: ALICE.account, privacy: "public", amountLux: "10000000", amountDusk: "0.01", memo: "Factura 141", replaces: "send-kept-1", reviewedFor: `${here.accounts[0]} ${Number(here.selectedAccountIndex ?? 0)} ${here.nodeUrl}` };
+    const backAndReview = async (change) => {
+      const state = { ...newState(), draft: { ...draft } };
+      const form = mount(state, here);
+      await settle();
+      change?.(form);
+      form.review.click();
+      await settle();
+      return state;
+    };
+    expect((await backAndReview()).draft).toMatchObject({ amountLux: "10000000", memo: "Factura 141", replaces: "send-kept-1" });
+    // Another amount: another payment, sent as itself.
+    const changed = await backAndReview((form) => typeInto(form.amount, "0.02"));
+    expect([changed.route, changed.draft.amountLux, changed.draft.replaces]).toEqual(["confirm", "20000000", undefined]);
+  });
+
+  // Astra's: after Send it now, another profile, wallet or network chosen (here or in another window), its Review
+  // sent it from there, in the place of the first, whose record went.
+  it("sends a payment Home said wasn't sent again only from where it was made, else goes back to Home", async () => {
+    const here = overview();
+    const context = `${here.accounts[0]} ${Number(here.selectedAccountIndex ?? 0)} ${here.nodeUrl}`;
+    const sent = [];
+    const send = async (message) => {
+      if (message.type === "DUSK_UI_SEND_TX") sent.push(message);
+      return message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "1", max: "1" } : { ok: true, result: { hash: "ab".repeat(32) } };
+    };
+    const retry = { to: ALICE.account, privacy: "public", amountLux: "10000000", amountDusk: "0.01", memo: "Factura 141", replaces: "send-kept-1", reviewedFor: context };
+    for (const elsewhere of [{ selectedAccountIndex: 1 }, { nodeUrl: "https://nodes.dusk.network" }, { accounts: ["another-wallet", ...here.accounts.slice(1)] }]) {
+      const state = { ...newState(), route: "confirm", draft: { ...retry } };
+      const view = mount(state, { ...here, ...elsewhere }, send);
+      expect([state.route, state.draft], JSON.stringify(elsewhere)).toEqual(["home", null]);
+      expect(view.actions.showToast).toHaveBeenCalledWith("The wallet, profile or network changed. Check the send again.", 3000);
+      expect(dom.document.body.querySelectorAll("button").some((b) => b.textContent === "Confirm")).toBe(false);
+    }
+    expect(sent).toEqual([]);
+    // Back to the form from its Review, then another profile: Review again sends it as a payment of its own.
+    const state = { ...newState(), draft: { ...retry } };
+    const form = mount(state, { ...here, selectedAccountIndex: 1 });
+    await settle();
+    form.review.click();
+    await settle();
+    expect([state.route, state.draft.replaces]).toEqual(["confirm", undefined]);
+  });
+
   it("says on Review when a memo's number may not read as its digits do", async () => {
     // Marek's memo, from a link: an Arabic-Indic zero in 105.
     review({ to: ALICE.account, privacy: "public", memo: "Invoice 1\u06605" }, overview());

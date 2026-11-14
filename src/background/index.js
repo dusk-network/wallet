@@ -1616,7 +1616,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
-      // Drop, or Send it now, on a payment from Send that wasn't sent.
+      // Don't send on a payment from Send that wasn't sent.
       if (message?.type === "DUSK_UI_DROP_UNSENT") {
         sendResponse({ ok: true, result: { dropped: await dropUnsent(String(message.sendId ?? "")) } });
         return;
@@ -1703,6 +1703,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
               record: waitingRecordOf(message, await getSettings().then((settings) => ({ nodeUrl: settings.nodeUrl, profileIndex: Number(settings.selectedAccountIndex ?? 0) || 0 }))),
               attempt,
               host: waitingHost,
+              // Sent again from Home's Send it now, in the place of the one Home said wasn't sent.
+              replaces: typeof message.replaces === "string" && /^[\w-]{8,64}$/.test(message.replaces) ? message.replaces : "",
             })
           : await attempt();
 

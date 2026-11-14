@@ -213,6 +213,35 @@ const forget = (sendId) =>
     delete kept[sendId];
   });
 
+// Forgotten, and the payment it took the place of (`prior`, sent again from
+// Home's Send it now) back in its place: it never went out either.
+const forgetFor = (sendId, prior) =>
+  changeKept((kept) => {
+    delete kept[sendId];
+    if (prior?.sendId && !kept[prior.sendId]) kept[prior.sendId] = prior;
+  });
+
+/** What a payment sent again in another's place says where it isn't that payment, from where it was made. */
+export const NOT_IN_PLACE_TEXT = "The wallet, profile or network changed. Check the send again.";
+
+// The same payment from the same place: wallet, network, profile and account,
+// to whom, how much, with what memo, public or shielded.
+const SAME_PAYMENT = ["walletId", "nodeUrl", "profileIndex", "account", "privacy", "to", "lux", "memo"];
+const samePayment = (a, b) => SAME_PAYMENT.every((key) => String(a?.[key] ?? "") === String(b?.[key] ?? ""));
+
+// Kept, in place of the payment Home said wasn't sent that it sends again
+// (`replaces`): that one, as it was, or null where it isn't one to replace.
+// Another payment, or one from another wallet, profile or network, is refused,
+// and the one Home said wasn't sent stays as it was.
+const keepInPlace = (record, replaces) =>
+  changeKept((kept) => {
+    const prior = replaces && replaces !== record.sendId && kept[replaces] && !kept[replaces].hash && !active(replaces) ? kept[replaces] : null;
+    if (prior && !samePayment(prior, record)) throw new Error(NOT_IN_PLACE_TEXT);
+    if (prior) delete kept[replaces];
+    kept[record.sendId] = record;
+    return prior;
+  });
+
 // Kept as not sent: whatever was being handed over for it never went.
 const endKept = (sendId, ended, error = "") =>
   changeKept((kept) => {
@@ -243,12 +272,14 @@ const tellWaits = (host, sendId, waits, handedOver = false) => {
 
 // Out of the queue, its record kept as `how` says: forgotten once it went
 // out, was called off with Cancel, or is followed by its transaction's ID;
-// kept as not sent otherwise.
+// kept as not sent otherwise. One called off that took the place of a
+// payment Home said wasn't sent gives that payment its place back.
 function settle(item, how, error) {
   item.state = "settled";
   const at = queue.indexOf(item);
   if (at >= 0) queue.splice(at, 1);
-  if (how === "out" || how === "cancelled" || how === "followed") return forget(item.sendId).catch(() => {});
+  if (how === "cancelled") return forgetFor(item.sendId, item.prior).catch(() => {});
+  if (how === "out" || how === "followed") return forget(item.sendId).catch(() => {});
   return endKept(item.sendId, how, how === "failed" ? String(error?.message ?? error ?? "") : "").catch(() => {});
 }
 
@@ -506,17 +537,20 @@ async function follow(host) {
  * answer, once the network answers. Resolves with what `attempt` gives once
  * it's handed over, and rejects with why it wasn't sent: called off
  * (sendCancelled), the wallet locked or switched, what a try ran into, or,
- * for one that may have gone, with its ID.
+ * for one that may have gone, with its ID. One sent again from Home's Send
+ * it now (`replaces`, the one Home said wasn't sent) takes its place there,
+ * and gives it back where it never went out.
  * @template T
- * @param {{ sendId: string, record: Omit<WaitingRecord, "sendId" | "at">, attempt: (opts?: { waited?: boolean, resend?: boolean, found?: { hash: string, nonce: string } }) => Promise<T>, host: WaitingHost }} send
+ * @param {{ sendId: string, record: Omit<WaitingRecord, "sendId" | "at">, attempt: (opts?: { waited?: boolean, resend?: boolean, found?: { hash: string, nonce: string } }) => Promise<T>, host: WaitingHost, replaces?: string }} send
  * @returns {Promise<T>}
  */
-export async function sendWhenReachable({ sendId, record, attempt, host }) {
+export async function sendWhenReachable({ sendId, record, attempt, host, replaces = "" }) {
   const kept = { ...record, sendId, at: Date.now() };
   // Kept before anything else happens to it: a wallet that closes from here
   // on finds it, and says what came of it. Not kept, it isn't sent.
+  let prior;
   try {
-    await keep(kept);
+    prior = await keepInPlace(kept, String(replaces ?? ""));
   } catch (error) {
     throw notSent(error);
   }
@@ -531,7 +565,7 @@ export async function sendWhenReachable({ sendId, record, attempt, host }) {
     } catch (error) {
       // Called off as it was tried: nothing went out, and it never waits after.
       if (first.cancelled && error?.data?.sent !== "unknown") {
-        await forget(sendId).catch(() => {});
+        await forgetFor(sendId, prior).catch(() => {});
         throw sendCancelled();
       }
       // Handed over with no clear answer: a public one is looked up on the
@@ -544,7 +578,9 @@ export async function sendWhenReachable({ sendId, record, attempt, host }) {
         }
         unclear = true;
       } else if (!unreachableBeforeSent(error)) {
-        await forget(sendId).catch(() => {});
+        // Turned down: Send said why, and one sent again from Home is said
+        // not sent there again, as it was.
+        await forgetFor(sendId, first.handedOver ? null : prior).catch(() => {});
         throw error;
       }
     } finally {
@@ -552,7 +588,7 @@ export async function sendWhenReachable({ sendId, record, attempt, host }) {
     }
   }
   return new Promise((resolve, reject) => {
-    queue.push({ sendId, record: kept, attempt, resolve, reject, state: unclear ? "unclear" : "waiting", handedOver: unclear });
+    queue.push({ sendId, record: kept, attempt, resolve, reject, state: unclear ? "unclear" : "waiting", handedOver: unclear, prior: unclear ? null : prior });
     tellWaits(host, sendId, true, unclear);
     wake();
     follow(host).catch(() => {});
@@ -695,7 +731,8 @@ export async function noteHandingOver(sendId, sent, host) {
   const first = firstTries.get(id);
   const item = queue.find((each) => each.sendId === id && each.state !== "settled");
   if (first) first.handedOver = true;
-  if (item) item.handedOver = true;
+  // Handed over: what it took the place of never comes back.
+  if (item) Object.assign(item, { handedOver: true, prior: null });
   if (first || item) tellWaits(host, id, false, true);
   else await followHandedOver(host);
   return true;

@@ -372,6 +372,62 @@ describe("a payment from Send as it's confirmed", () => {
   });
 });
 
+describe("a payment sent again from Home's Send it now", () => {
+  // Chen's, Sofía's, Nandini's and Amélie's: Send it now dropped the notice before anything was sent again.
+  const unsent = () => localStorage.setItem("dusk_waiting_sends_v1", JSON.stringify({ old: { ...record(), sendId: "old", at: 1, ended: "closed" } }));
+
+  it("takes the place of the one Home said wasn't sent, one notice throughout, gone once it's handed over", async () => {
+    unsent();
+    const out = Promise.withResolvers();
+    const attempt = vi.fn(async () => {
+      await waiting.noteHandingOver("s1", { hash: "e1", nonce: "7" }, host);
+      return out.promise;
+    });
+    const sent = waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt, host, replaces: "old" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await kept()).map((send) => send.sendId)).toEqual(["s1"]);
+    out.resolve({ hash: "e1" });
+    await expect(sent).resolves.toEqual({ hash: "e1" });
+    expect(await kept()).toEqual([]);
+  });
+
+  it("turned down before it's handed over, or called off, gives the one Home said wasn't sent its place back", async () => {
+    unsent();
+    const refused = Object.assign(new Error("Insufficient balance"), { data: { sent: false } });
+    await expect(waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt: vi.fn().mockRejectedValue(refused), host, replaces: "old" })).rejects.toBe(refused);
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "old", waiting: false, ended: "closed" })]);
+
+    // Waiting for the network, then called off: the same.
+    const sent = waiting.sendWhenReachable({ sendId: "s2", record: record(), attempt: vi.fn().mockRejectedValue(offline()), host, replaces: "old" }).catch((e) => e);
+    await vi.advanceTimersByTimeAsync(0);
+    expect((await kept()).map((send) => [send.sendId, send.waiting])).toEqual([["s2", true]]);
+    await expect(waiting.cancelWaitingSend("s2", host)).resolves.toBe(true);
+    expect((await sent).data).toMatchObject({ cancelled: true });
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "old", waiting: false, ended: "closed" })]);
+  });
+
+  // Astra's: Send it now sent from the profile, wallet or network chosen since, and the first one's record went.
+  it("is refused from another wallet, profile or network, or as another payment, the one Home said wasn't sent kept", async () => {
+    for (const other of [{ profileIndex: 1, account: "another-account" }, { nodeUrl: "https://nodes.dusk.network" }, { walletId: "another-wallet" }, { lux: "20000000" }, { memo: "Autre" }]) {
+      unsent();
+      const attempt = vi.fn();
+      const error = await waiting.sendWhenReachable({ sendId: "s1", record: record(other), attempt, host, replaces: "old" }).catch((e) => e);
+      expect([error.message, error.data?.sent], JSON.stringify(other)).toEqual([waiting.NOT_IN_PLACE_TEXT, false]);
+      expect(attempt).not.toHaveBeenCalled();
+      expect(JSON.parse(localStorage.getItem("dusk_waiting_sends_v1"))).toEqual({ old: expect.objectContaining({ sendId: "old", ended: "closed" }) });
+    }
+  });
+
+  it("closed on as it waits, is the one notice left", async () => {
+    unsent();
+    waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt: vi.fn().mockRejectedValue(offline()), host, replaces: "old" }).catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    vi.resetModules();
+    waiting = await import("./waitingSends.js");
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: false, ended: "closed" })]);
+  });
+});
+
 // Astra's: the extension's background started again while the engine, in its own page, was handing a public payment
 // over. The node didn't have it yet, so it was said not sent, with Send it now, and then the engine handed it over.
 describe("a payment the engine hands over after the wallet's background started again", () => {

@@ -704,7 +704,7 @@ export async function localSend(message) {
       return { ok: true, result: { cancelled: await cancelWaitingSend(String(message.sendId ?? ""), waitingHost) } };
     }
 
-    // Drop, or Send it now, on a payment from Send that wasn't sent.
+    // Don't send on a payment from Send that wasn't sent.
     if (message?.type === "DUSK_UI_DROP_UNSENT") {
       return { ok: true, result: { dropped: await dropUnsent(String(message.sendId ?? "")) } };
     }
@@ -788,6 +788,8 @@ export async function localSend(message) {
             record: waitingRecordOf(message, await getSettings().then((settings) => ({ nodeUrl: settings.nodeUrl, profileIndex: Number(settings.selectedAccountIndex ?? 0) || 0 }))),
             attempt,
             host: waitingHost,
+            // Sent again from Home's Send it now, in the place of the one Home said wasn't sent.
+            replaces: typeof message.replaces === "string" && /^[\w-]{8,64}$/.test(message.replaces) ? message.replaces : "",
           })
         : await attempt();
       const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });

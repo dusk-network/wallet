@@ -385,8 +385,9 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     sent.phase = went === false ? "not_sent" : "unconfirmed";
     if (went === "unknown" && res?.error?.data?.hash) sent.hash = String(res.error.data.hash);
     // Said here, a payment that waited and then failed isn't said again on
-    // Home; one the wallet stopped as it locked or switched is, once it's open.
-    if (sent.sendId && went === false && !res?.error?.data?.cancelled) {
+    // Home; one the wallet stopped as it locked or switched is, once it's open,
+    // and one sent again from Home's Send it now stays said there.
+    if (sent.sendId && went === false && !res?.error?.data?.cancelled && !message?.replaces) {
       Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: sent.sendId })).catch(() => {});
     }
   } else {
