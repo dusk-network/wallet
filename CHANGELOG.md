@@ -79,6 +79,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Counted Sozu's deposit fees in what grew while held too, at the same average cost as what unstaking took out, so one is part of the other and a loss shows in both.
 - Took Send it now on a payment Home says wasn't sent straight to Review, to send from there, kept the notice until the payment is handed over, and called Drop Don't send, as the web wallet does.
 - Kept a payment from Send on the device the moment it's confirmed, so one the Android app is ended on before it goes out comes back on Home as not sent, rather than vanishing.
 - Asked the node about a payment handed over just as the signal went, by its ID, its queue and the account's nonce: one it never had goes out once more as the same transaction, or, where the wallet stopped meanwhile, is said not sent with Send it now; none shows in Activity as sent before the node has it.

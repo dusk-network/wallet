@@ -1150,11 +1150,12 @@ describe("a stake with Sozu in figures", () => {
       const overview = ov();
       const history = [move(staked, "sozu_stake", "100000000000", 4_800_001, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "30300000000", 4_800_002, Date.UTC(2026, 5, 1, 12))];
       popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
-      // Held from March at 2 to June at 2.02 (49.875 stDUSK), then on to now at 2.04 (34.875): 0.9975 and 0.6975.
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.695 DUSK", "Sozu, taken out by unstaking: 0.2248 DUSK"]]));
+      // Held from March at 2 to June at 2.02 (49.875 stDUSK), then on to now at 2.04 (34.875): 0.9975 and 0.6975,
+      // less the stake's 0.25 deposit fee, the cost unstaking counts too (Lena's and Nandini's: two cost bases).
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.445 DUSK", "Sozu, taken out by unstaking: 0.2248 DUSK"]]));
       // Lena's: the two lines read as two rewards to add. Under them, in both wallets' words, that one is part of the other, and how it's counted.
       expect(visibleText(body.querySelector(".stake-years-counted"))).toBe(
-        "Taken out by unstaking is part of grown while held: what came back, less that stDUSK's average cost, deposit fees included."
+        "Taken out by unstaking is part of grown while held: both count stDUSK at its average cost, deposit fees included."
       );
     });
 
@@ -1174,12 +1175,15 @@ describe("a stake with Sozu in figures", () => {
       const history = [move(staked, "sozu_stake", "100000000000", 4_800_011, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "99900000000", 4_800_012, Date.UTC(2026, 2, 2, 12))];
       const state = { route: "stake", staking: staking(owner()), sozu: holding(0n, 0n), activity: activityOf(overview, history) };
       popup(state, overview);
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, taken out by unstaking: −0.1 DUSK"]]));
+      // Nandini's: "grown while held 0" beside "taken out −0.0005": the loss shows in both now, one part of the other.
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: −0.1 DUSK", "Sozu, taken out by unstaking: −0.1 DUSK"]]));
 
       // Its worth: under a cent, a loss all the same, never $0.00.
       body.querySelector("#stake-years-value").checked = true;
       body.querySelector("#stake-years-value").dispatchEvent(new Event("change"));
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, taken out by unstaking: −0.1 DUSK · a loss under $0.01"]]));
+      await vi.waitFor(() =>
+        expect(years()).toEqual([["2026", "Sozu, grown while held: −0.1 DUSK · a loss under $0.01", "Sozu, taken out by unstaking: −0.1 DUSK · a loss under $0.01"]])
+      );
     });
 
     // Lena's: opened 10 s after an unstake, both lines said "couldn't be read": the archive
@@ -1223,15 +1227,15 @@ describe("a stake with Sozu in figures", () => {
       const staked = "5d".repeat(32);
       archive.query = archiveWith({ 4800004: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }] });
       const overview = ov();
-      // 49.875 stDUSK that cost 99.75 DUSK, worth 101.745 now.
+      // 49.875 stDUSK that cost 100 DUSK with their 0.25 deposit fee, worth 101.745 now.
       const state = { route: "stake", staking: staking(owner()), sozu: holding(49_875_000_000n, 101_745_000_000n), activity: activityOf(overview, [move(staked, "sozu_stake", "100000000000", 4_800_004, Date.UTC(2026, 2, 1, 12))]) };
       const app = popup(state, overview);
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.995 DUSK"]]));
-      // Read again, worth 103.74: what grew is 3.99.
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 1.745 DUSK"]]));
+      // Read again, worth 103.74: what grew is 3.74.
       const position = { poolBalanceLux: "103740000000", stDuskBalanceLux: "49875000000" };
       Object.assign(state.sozu, { position, status: { ...state.sozu.status, position } });
       app.draw();
-      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 3.99 DUSK"]]));
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held: 3.74 DUSK"]]));
     });
 
     it("says what grew couldn't be read where a new year's rate isn't on the archive yet", async () => {
