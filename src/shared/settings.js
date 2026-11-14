@@ -86,6 +86,8 @@ export const DEFAULT_SETTINGS = {
   hideBalances: false,
   /** The app on a phone: lock as it goes to the background, when the person leaves it. */
   lockOnLeave: false,
+  /** The app on Android: a notice for money that came in, while notices are allowed (android/ArrivalJob.kt). */
+  incomingNotices: true,
   /**
    * Arrival notices on a phone (phoneNotices.js): null until the person taps
    * Tell me when it arrives; then "asked", "on", "off", or "off-said" once
@@ -210,6 +212,7 @@ export async function getSettings() {
     nftMetadataEnabled: false,
     ipfsGateway: normalizeIpfsGateway(merged.ipfsGateway),
     hideBalances: merged.hideBalances === true,
+    incomingNotices: merged.incomingNotices !== false,
     autoLockTimeoutMinutes: normalizeAutoLock(merged.autoLockTimeoutMinutes),
     customGas: normalizeCustomGas(merged.customGas),
     newSiteLastsMs: normalizeSiteLasts(merged.newSiteLastsMs),

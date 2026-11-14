@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Notices in the Android app for money that comes in while it's in the background or closed, saying how much and from whom and opening that payment, with Tell me when money comes in in Settings to turn them off; they can take up to about 15 minutes.
 - Opened the testnet web wallet's request links in the Android app where it's installed, as Android App Links, once the web wallet serves the file that names the app.
 - Said what a request asks comes to in your currency on mainnet, with the price's time, as it's made and in Receive's list, and what an amount comes to on Send and Review; the link stays in DUSK.
 - Added the recovery phrase and Change password to the Android app's Settings, each behind the password.
@@ -42,6 +43,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said how much was paid and to whom in the Android app's notice that a payment arrived, keeping that off a locked screen that hides what notices say.
 - Showed a memo on a payment from an address that isn't one of your profiles or contacts as the sender's words, muted and in quotes, under “From an address not in your contacts” or their .dusk name, in Activity, on Home and in its details.
 - Asked Firefox for the clipboardWrite permission, which it lists at install as “Input data to the clipboard”, to take a pasted recovery phrase off the clipboard there too.
 - Counted the deposit fees as part of what unstaked stDUSK cost in Rewards by year, at its average cost, said under the table, and showed a year's loss with its minus sign, in DUSK and in your currency.
@@ -82,6 +84,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Looked for a send every 10 to 30 seconds for its first two minutes once the Android app is left, so its notice comes within moments of its block rather than minutes after.
+- Opened a tapped payment notice in the Android app on its payment at once, rather than after seconds of the screen left behind.
 - Looked up again the .dusk names Activity couldn't look up without a signal, once the network is back and on Refresh, rather than only after a restart.
 - Kept the password box for turning fingerprint unlock on in the Android app open while the password is typed, rather than closing it at the first letter.
 - Refused a profile's name that is a .dusk name registered to another account, looked up first, rather than asking, and took one that is the profile's own without a question; asked about a name with a digit for a letter, as Dav1d beside David, or a v for a y, as Wendv beside Wendy.

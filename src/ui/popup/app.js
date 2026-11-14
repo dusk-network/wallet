@@ -33,6 +33,7 @@ import { forgetRequestLink, requestDraftOf } from "../lib/requestLink.js";
 import { keepOpenSend, takeOpenSend } from "../lib/sendDraft.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
+import { keepIncomingWatched } from "./incoming.js";
 
 import { homeView } from "./views/home.js";
 import { receiveView } from "./views/receive.js";
@@ -1241,6 +1242,8 @@ function returnAfterUnlock(ov) {
     if (back.context === state.context && state.route === "home") state.route = back.route;
   }
   if (unlockedNow) setTimeout(resumeWatching, 0);
+  // A notice of money that came in, tapped while it was locked: its payment now.
+  if (unlockedNow && incomingTap) setTimeout(() => openIncoming(incomingTap).catch(() => {}), 0);
 }
 
 // The app on the way to the background with Send, or its Review, open: what's
@@ -1277,7 +1280,10 @@ try {
       return;
     }
     stepBack();
-    comeBack();
+    // In the app on a phone, a notice's tap first: what it opened is drawn
+    // before the screen left is drawn again.
+    if (isTauriRuntime() && isPhone()) openNoticed().catch(() => {}).finally(comeBack);
+    else comeBack();
   });
   window.addEventListener("pageshow", (event) => {
     if (event?.persisted) resumeWatching();
@@ -1554,6 +1560,8 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   scheduleArrivalCheck(ov);
   // The account's history: kept rows now, one sync per popup and account.
   ensureActivity(ov, { state, render, send });
+  // Money coming in, told by Android while the app is away: what to look at.
+  if (isTauriRuntime() && isPhone()) keepIncomingWatched(ov, { names: state.activity?.names, send }).catch(() => {});
   // A balance that moved has the history read for it.
   if (overviewRefreshed) noteBalances(ov);
   scheduleFollow(ov);
@@ -1781,32 +1789,83 @@ listenForLinks((url) => {
 
 // --- A notice tapped in the app ----------------------------------------------
 // Its send's details, as Activity opens them: after the unlock, when the
-// wallet is locked. Asked as the app starts, and each time it's back in front.
-// Any app can open the wallet as a notice's tap would: only a tap with the
-// token the wallet gave its send's notice opens anything (DUSK_UI_TX_NOTICED).
+// wallet is locked. Asked as the app starts, and each time it's back in front,
+// before anything else is drawn. Any app can open the wallet as a notice's tap
+// would: only a tap with the token the wallet gave its send's notice opens
+// anything (DUSK_UI_TX_NOTICED), or for money that came in, the wallet's.
 async function openNoticed() {
   const noticed = isTauriRuntime() && isPhone() ? await openedFromNotice().catch(() => null) : null;
   const hash = noticed?.hash ?? "";
   if (!hash || !noticed.token) return;
+  if (noticed.account) return openIncoming(noticed);
+  const open = () => {
+    netMenu.close();
+    acctMenu.close();
+    Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
+  };
   // What the notice knew of it, in its block, on its record before it shows:
   // never "Not confirmed" while the app reconnects. Its fee comes with the lookup.
-  const known = await send({ type: "DUSK_UI_TX_NOTICED", hash, token: noticed.token, ...(noticed.status ? { status: noticed.status, blockHeight: noticed.blockHeight } : {}) }).catch(() => null);
-  if (!known?.result) return;
+  const recorded = send({ type: "DUSK_UI_TX_NOTICED", hash, token: noticed.token, ...(noticed.status ? { status: noticed.status, blockHeight: noticed.blockHeight } : {}) }).catch(() => null);
+  // The app's own notice, as Android knows its token: opened at once, as the
+  // notice knew it, while its record is written, which takes seconds on a
+  // phone just back (Chen's: the Sent screen left showed meanwhile).
+  if (noticed.ours) {
+    const record = Array.isArray(state.overview?.txs) ? state.overview.txs.find((t) => String(t?.hash ?? "") === hash) : null;
+    if (record && noticed.status && !endedStatus(String(record.status ?? ""))) {
+      record.status = noticed.status;
+      if (noticed.blockHeight) record.blockHeight = noticed.blockHeight;
+    }
+    open();
+    await render({ cached: true });
+  }
+  const known = await recorded;
+  if (!known?.result && !noticed.ours) return;
+  if (!noticed.ours) {
+    open();
+    // At once, from what's read, with the notice's news on it (DUSK_UI_TX_STATUS):
+    // a read now could wait seconds on a network still coming back.
+    await render({ cached: true });
+  }
+  state.needsRefresh = true;
+  render({ forceRefresh: true }).catch(() => {});
+}
+
+// A notice of money that came in (android/ArrivalJob.kt's Incoming), tapped
+// while the wallet was locked: opened once it's unlocked.
+let incomingTap = null;
+// How long a payment told is looked for in the history before its details say it isn't there.
+const INCOMING_LOOKED_FOR_MS = 60_000;
+
+// Money that came in, as Android told it: the payment, in the profile it came
+// to, once the wallet's open; looked for in the history while it isn't read yet.
+async function openIncoming(noticed) {
+  if (!state.overview?.isUnlocked) {
+    incomingTap = noticed;
+    return;
+  }
+  incomingTap = null;
+  const known = await send({ type: "DUSK_UI_TX_NOTICED", hash: noticed.hash, token: noticed.token, account: noticed.account }).catch(() => null);
+  const profileIndex = known?.result?.incoming ? Number(known.result.profileIndex) : -1;
+  if (!(profileIndex >= 0)) return;
   netMenu.close();
   acctMenu.close();
-  Object.assign(state, { txDetailHash: hash, txDetailFrom: "home", route: "tx" });
-  // At once, from what's read, with the notice's news on it (DUSK_UI_TX_STATUS):
-  // a read now could wait seconds on a network still coming back.
+  const ov = state.overview;
+  if (profileIndex !== (Number(ov?.selectedAccountIndex) || 0)) {
+    switchContext(state);
+    const switched = await send({ type: "DUSK_UI_SET_ACCOUNT_INDEX", index: profileIndex, walletId: String(ov?.accounts?.[0] ?? "") }).catch(() => null);
+    if (!switched?.ok) return;
+    state.needsRefresh = true;
+    await render({ forceRefresh: true });
+  }
+  const tap = { context: activityKey(state.overview), hash: noticed.hash, reading: true, row: null };
+  Object.assign(state, { txDetailHash: noticed.hash, txDetailFrom: "home", route: "tx", txDetailRow: tap });
   await render({ cached: true });
-  state.needsRefresh = true;
-  await render({ forceRefresh: true });
-}
-try {
-  document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState === "visible") openNoticed().catch(() => {});
-  });
-} catch {
-  // ignore
+  lookForPayments(state.overview, { state, render });
+  setTimeout(() => {
+    if (state.txDetailRow !== tap) return;
+    tap.reading = false;
+    if (state.route === "tx") render({ cached: true }).catch(() => {});
+  }, INCOMING_LOOKED_FOR_MS);
 }
 
 export function mountPopup() {

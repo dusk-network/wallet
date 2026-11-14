@@ -1025,10 +1025,15 @@ describe("wallets", () => {
 
 // The app on a phone: Auto-lock's Immediately, and fingerprint unlock, as phone wallets have them.
 describe("security in the app on a phone", () => {
-  const onPhone = ({ available = true, on = false, enroll = false } = {}) => {
+  const onPhone = ({ available = true, on = false, enroll = false, notices = () => false } = {}) => {
     const asked = [];
     dom.window.__TAURI_INTERNALS__ = {
       invoke: vi.fn(async (cmd, args) => {
+        // The phone's notices: whether they may show, and Android's question.
+        if (cmd === "notices") {
+          if (args.action === "ask") asked.push(["notices: ask"]);
+          return { allowed: notices(args.action) };
+        }
         if (cmd !== "fingerprint") return null;
         asked.push([args.action, args.args?.secret]);
         return args.action === "status" ? { ok: true, available, on, enroll } : { ok: true };
@@ -1120,6 +1125,45 @@ describe("security in the app on a phone", () => {
     await vi.waitFor(() => expect(asked.filter(([action]) => action === "enable")).toHaveLength(1));
     await settle();
     expect(asked.filter(([action]) => action === "enable" || action === "disable")).toEqual([["enable", "right one"]]);
+  });
+
+  // Sofía's: no notice when a client paid her with the app in the background, and Settings had nothing for notices.
+  it("has Tell me when money comes in, on while notices are allowed, saying it can take 15 minutes, and turns it off and on", async () => {
+    let allowed = true;
+    const { asked } = onPhone({ notices: () => allowed });
+    const view = await settings({}, { app: true });
+    const toggle = () => dom.document.body.querySelector("#incoming-notices");
+    await vi.waitFor(() => expect(toggle().checked).toBe(true));
+    const section = view.section("Notices");
+    expect(visibleText(section)).toBe("[Notices]Tell me when money comes inIt can take up to about 15 minutes.");
+    expect(dom.document.getElementById(toggle().getAttribute("aria-describedby")).textContent).toBe("It can take up to about 15 minutes.");
+
+    toggle().checked = false;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_INCOMING_NOTICES", on: false }));
+    expect(view.ov.incomingNotices).toBe(false);
+
+    // On again with notices not allowed: Android's question, and a no leaves it off, saying what to do.
+    allowed = false;
+    view.actions.send.mockClear();
+    toggle().checked = true;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(asked).toContainEqual(["notices: ask"]));
+    await settle();
+    expect([toggle().checked, view.actions.send.mock.calls]).toEqual([false, []]);
+    expect(dom.document.getElementById("incoming-note").textContent).toBe("Allow notices for Dusk Wallet in your phone's settings first.");
+    // A yes: on.
+    allowed = true;
+    toggle().checked = true;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_INCOMING_NOTICES", on: true }));
+    expect(toggle().checked).toBe(true);
+  });
+
+  it("has no notices for money coming in in the extension", async () => {
+    const view = await settings();
+    expect(view.section("Notices")).toBeUndefined();
+    expect(dom.document.body.querySelector("#incoming-notices")).toBeNull();
   });
 
   // Chen's, Sofía's and Lena's: nothing said fingerprint unlock was there until a fingerprint was added.

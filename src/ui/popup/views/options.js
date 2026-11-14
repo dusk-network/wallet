@@ -27,6 +27,8 @@ import { setNetworkSwitching } from "../../components/NetworkMenu.js";
 import { fieldLabel, integerInput, passwordInput, textInput, urlInput } from "../../components/FormControls.js";
 import { profileLabelOf } from "../../components/ProfileName.js";
 import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
+import { appNoticesAllowed, askAppNotices } from "../../../platform/notices.js";
+import { watchIncomingAgain } from "../incoming.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
 import { resetKeptText } from "./wallets.js";
@@ -115,6 +117,51 @@ function fingerprintRow({ actions }) {
     actions?.showToast?.("Fingerprint unlock is off.");
   });
   return row;
+}
+
+/** What Settings says of the notices for money coming in. */
+export const INCOMING_NOTE = "It can take up to about 15 minutes.";
+
+// The app on Android: a notice for money that came in, told by Android about
+// every 15 minutes while the app is away (android/ArrivalJob.kt). On while the
+// phone allows notices, unless it's turned off here; turned on, the phone's
+// question where it has one.
+function incomingRow(ov, { actions }) {
+  const toggle = h("input", { id: "incoming-notices", type: "checkbox", "aria-describedby": "incoming-note" });
+  const note = h("p", { class: "settings-note", id: "incoming-note", text: INCOMING_NOTE });
+  const wanted = ov?.incomingNotices !== false;
+  appNoticesAllowed()
+    .then((allowed) => {
+      toggle.checked = wanted && allowed;
+    })
+    .catch(() => {});
+  toggle.addEventListener("change", async () => {
+    const on = toggle.checked;
+    toggle.disabled = true;
+    try {
+      if (on && (await askAppNotices()) !== "on") {
+        toggle.checked = false;
+        note.textContent = "Allow notices for Dusk Wallet in your phone's settings first.";
+        return;
+      }
+      const res = await actions?.send?.({ type: "DUSK_UI_SET_INCOMING_NOTICES", on });
+      if (res?.error) throw new Error(res.error.message ?? "Couldn't save that");
+      note.textContent = INCOMING_NOTE;
+      if (ov) ov.incomingNotices = on;
+      // Android's job told at once, as the page draws again.
+      watchIncomingAgain();
+      actions?.render?.({ cached: true })?.catch?.(() => {});
+    } catch (e) {
+      toggle.checked = !on;
+      actions?.showToast?.(e?.message ?? String(e), 2500);
+    } finally {
+      toggle.disabled = false;
+    }
+  });
+  return h("div", { class: "settings-incoming" }, [
+    h("label", { class: "settings-switch", for: "incoming-notices" }, [toggle, h("span", { text: "Tell me when money comes in" })]),
+    note,
+  ]);
 }
 
 export function optionsView(ov, { state, actions } = {}) {
@@ -1085,6 +1132,7 @@ export function optionsView(ov, { state, actions } = {}) {
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
       sendPasswordRow || phraseRow ? h("div", { class: "group" }, [phraseRow, sendPasswordRow].filter(Boolean)) : null,
     ]),
+    inApp && ov?.isUnlocked ? section("Notices", [incomingRow(ov, { actions })]) : null,
     sitesSection ? section("Connected sites", sitesSection) : null,
     section("Contacts", [h("div", { class: "group" }, [contactsRow])]),
     section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), switchError, nodeDetails]),

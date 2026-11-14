@@ -132,9 +132,9 @@ vi.mock("../platform/notices.js", () => ({
     phoneNotices.asked.push("ask");
     return phoneNotices.allowed() ? "on" : "off";
   },
-  showAppNotice: async ({ title, body, hash, token }) => {
+  showAppNotice: async ({ title, body, publicBody, hash, token }) => {
     phoneNotices.asked.push(`notify: ${title}`);
-    phoneNotices.shown = { title, body, hash, token };
+    phoneNotices.shown = { title, body, publicBody, hash, token };
     return phoneNotices.allowed();
   },
   // What Android looks for once the app leaves the screen (android/ArrivalJob.kt).
@@ -1249,10 +1249,10 @@ describe("arrival notices in the app on a phone", () => {
     vi.stubGlobal("document", { visibilityState: "hidden" });
     return phoneNotices.asked;
   };
-  const sendAndSettle = async (localSend, hash) => {
+  const sendAndSettle = async (localSend, hash, { to = ACCOUNT, amount = "1", toName } = {}) => {
     engine.executed = Promise.withResolvers();
     engine.sendTransaction.mockResolvedValueOnce({ hash, nonce: 1n });
-    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1" } });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to, amount }, ...(toName ? { toName } : {}) });
     engine.executed.resolve({ data: { err: null } });
   };
   // What a send left behind, done: its watcher's steps, as many as it takes.
@@ -1274,13 +1274,21 @@ describe("arrival notices in the app on a phone", () => {
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
     expect(asked).toEqual(["ask"]);
-    await sendAndSettle(localSend, "d2".repeat(32));
-    // For the lock screen: what came of it and the network, never the amount or whom it was for.
+    // Chen's and Sofía's: "Your payment arrived · Testnet" didn't say which payment. How much and to whom, as
+    // Activity names them; a locked phone that hides what notices say shows what came of it and the network.
+    await sendAndSettle(localSend, "d2".repeat(32), { amount: "10000000", toName: "lena.dusk" });
     await vi.waitFor(() => expect(asked.at(-1)).toEqual("notify: Your payment arrived"));
     // With the token made for its send's notice, by which its tap is known as the notice's.
     const { noticeTokenFor } = await import("../shared/noticeTokens.js");
-    expect(phoneNotices.shown).toEqual({ title: "Your payment arrived", body: "Mainnet", hash: "d2".repeat(32), token: await noticeTokenFor("d2".repeat(32)) });
+    expect(phoneNotices.shown).toEqual({ title: "Your payment arrived", body: "0.01 DUSK to lena.dusk · Mainnet", publicBody: "Mainnet", hash: "d2".repeat(32), token: await noticeTokenFor("d2".repeat(32)) });
     expect(phoneNotices.shown.token).toMatch(/^[0-9a-f]{32}$/);
+    // To a profile of this wallet, by its name; with balances hidden, no amount.
+    const { setSettings } = await import("../shared/settings.js");
+    await setSettings({ hideBalances: true });
+    await sendAndSettle(localSend, "d6".repeat(32), { to: `account 1 of ${engine.wallet}`, amount: "10000000" });
+    await vi.waitFor(() => expect(phoneNotices.shown?.hash).toBe("d6".repeat(32)));
+    expect([phoneNotices.shown.body, phoneNotices.shown.publicBody]).toEqual(["To Profile 2 · Mainnet", "Mainnet"]);
+    await setSettings({ hideBalances: false });
 
     // Learned another way, as the app looks a send up again: a notice all the same, once.
     const { patchTxMeta, putTxMeta } = await import("../shared/txStore.js");
@@ -1319,16 +1327,18 @@ describe("arrival notices in the app on a phone", () => {
     await putTxMeta("e1".repeat(32), { status: "submitted", kind: "transfer", nodeUrl: "https://testnet.nodes.dusk.network", walletId: ACCOUNT });
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK", hash: "e1".repeat(32) })).resolves.toMatchObject({ state: "on" });
     expect(phoneNotices.watched).toEqual([
-      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet", wallet: ACCOUNT, token: expect.stringMatching(/^[0-9a-f]{32}$/) },
+      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet", publicBody: "Testnet", wallet: ACCOUNT, token: expect.stringMatching(/^[0-9a-f]{32}$/) },
     ]);
     // Its notice's token, by which its tap is known as the notice's, kept on the phone.
     const { noticeTokenFor } = await import("../shared/noticeTokens.js");
     expect(await noticeTokenFor("e1".repeat(32))).toBe(phoneNotices.watched[0].token);
     // Notices on, each send after: looked for from the start, and no more once its outcome is heard.
-    await sendAndSettle(localSend, "e2".repeat(32));
+    await sendAndSettle(localSend, "e2".repeat(32), { amount: "30000000", toName: "sofiadesign.dusk" });
     await settled("e2".repeat(32));
     await vi.waitFor(() => expect(phoneNotices.watched.map((w) => w.hash)).toEqual(["e1".repeat(32), "e2".repeat(32)]));
     expect(phoneNotices.watched[1].token).toBe(await noticeTokenFor("e2".repeat(32)));
+    // The notice Android shows says which payment, and on a locked phone that hides it, only what came of it.
+    expect([phoneNotices.watched[1].title, phoneNotices.watched[1].body, phoneNotices.watched[1].publicBody]).toEqual(["Your payment arrived", "0.03 DUSK to sofiadesign.dusk · Mainnet", "Mainnet"]);
     await vi.waitFor(() => expect(phoneNotices.settled).toContain("e2".repeat(32)));
   });
 
@@ -1347,6 +1357,40 @@ describe("arrival notices in the app on a phone", () => {
     await localSend({ type: "DUSK_UI_LOCK" });
     await expect(localSend({ type: "DUSK_UI_RESTORE_WALLET", mnemonic: "wallet A", password: "new password" })).resolves.toMatchObject({ ok: true });
     expect(phoneNotices.forgotten).toEqual(["", ""]);
+  });
+
+  // Sofía's: no notice when a client paid her with the app away. Android's job tells those (android/ArrivalJob.kt);
+  // its tap opens the payment in the profile it came to, by the wallet's token for those notices, and nothing else.
+  it("takes a tap on a notice of money that came in only with the open wallet's token, to one of its profiles", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    const HASH = "e5".repeat(32);
+    const { token } = await localSend({ type: "DUSK_UI_INCOMING_TOKEN" });
+    expect(token).toMatch(/^[0-9a-f]{32}$/);
+    await expect(localSend({ type: "DUSK_UI_INCOMING_TOKEN" })).resolves.toMatchObject({ token });
+    // Kept apart from the sends' tokens: as many sends after as you like, it still opens.
+    const { noticeTokenFor } = await import("../shared/noticeTokens.js");
+    for (let i = 0; i < 55; i++) await noticeTokenFor(i.toString(16).padStart(64, "0"));
+    const tap = (over) => localSend({ type: "DUSK_UI_TX_NOTICED", hash: HASH, token, account: `account 1 of ${engine.wallet}`, ...over });
+    await expect(tap()).resolves.toMatchObject({ ok: true, result: { incoming: true, profileIndex: 1 } });
+    // Again: taken more than once, as each of its notices carries it.
+    await expect(tap({ account: `account of ${engine.wallet}` })).resolves.toMatchObject({ result: { incoming: true, profileIndex: 0 } });
+    // Another token, a send's, an account of no profile here, or a locked wallet: nothing opens.
+    await expect(tap({ token: "d5".repeat(16) })).resolves.toMatchObject({ ok: true, result: null });
+    await expect(tap({ token: await noticeTokenFor(HASH) })).resolves.toMatchObject({ ok: true, result: null });
+    await expect(tap({ account: ACCOUNT })).resolves.toMatchObject({ ok: true, result: null });
+    engine.unlocked = false;
+    await expect(tap()).resolves.toMatchObject({ ok: true, result: null });
+    engine.unlocked = true;
+  });
+
+  it("keeps notices of money coming in on until they're turned off in Settings, and says so in the overview", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ incomingNotices: true });
+    await expect(localSend({ type: "DUSK_UI_SET_INCOMING_NOTICES", on: false })).resolves.toMatchObject({ ok: true, incomingNotices: false });
+    await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ incomingNotices: false });
+    await expect(localSend({ type: "DUSK_UI_SET_INCOMING_NOTICES", on: true })).resolves.toMatchObject({ incomingNotices: true });
   });
 
   it("asks Android to look for nothing while the person hasn't asked for notices", async () => {

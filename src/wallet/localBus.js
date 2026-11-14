@@ -33,9 +33,11 @@ import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletComm
 import { getWalletDirectory } from "../shared/wallets.js";
 import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
 import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, watchAppArrival } from "../platform/notices.js";
-import { noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
+import { incomingNoticeToken, isIncomingNoticeToken, noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
-import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
+import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
+import { formatDusk } from "../shared/amount.js";
+import { shortAddress } from "../ui/lib/strings.js";
 import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
@@ -101,33 +103,61 @@ let chainAskedAt = -Infinity;
 // (DUSK_UI_TX_NOTICED). One token a send, whichever notice asks first.
 const noticeTokenOf = (hash, walletId) => noticeTokenFor(hash, String(walletId ?? "")).catch(() => "");
 
+// What a payment's notice says of it, as Activity does: how much, but not
+// while balances are hidden, and to whom: the contact's name, a profile's of
+// this wallet, the .dusk name it was sent to, else its short address.
+async function paymentOf({ kind, to, amount, toName, walletId }) {
+  if (String(kind ?? "") !== TX_KIND.TRANSFER || !to) return {};
+  const hidden = (await getSettings().catch(() => null))?.hideBalances === true;
+  const address = String(to);
+  const contacts = await contactsStore(engineContactsVault(localEngineCall))
+    .list()
+    .catch(() => []);
+  const own = isUnlocked() ? [getAccounts(), getAddresses()].map((list) => (Array.isArray(list) ? list.indexOf(address) : -1)).find((i) => i >= 0) : undefined;
+  const label = own === undefined ? "" : String((await getAccountNames(String(walletId ?? getAccounts()[0] ?? "")).catch(() => ({})))?.[String(own)] ?? "").trim() || `Profile ${own + 1}`;
+  const name = contacts.find((contact) => contact?.address === address)?.name || label || typedRecipientName(toName) || shortAddress(address);
+  return { amount: hidden || !amount ? "" : formatDusk(String(amount)), to: name };
+}
+
 // A payment's arrival as a notice, in the app on a phone: once the person
 // asked for notices (phoneNotices.js) and while Android lets the app show
-// them, read each time, and only while they're away from it. Its lock screen
-// says what came of it, never the amount or whom it was for. Heard here,
-// Android stops looking for it (watchArrival); each send's notice shows once.
-async function noticeArrival({ hash, ok, kind, nodeUrl, walletId }) {
+// them, read each time, and only while they're away from it: what came of
+// it, how much and to whom, but on a locked phone that hides what notices
+// say, only what came of it. Heard here, Android stops looking for it
+// (watchArrival); each send's notice shows once.
+async function noticeArrival({ hash, ok, tx }) {
   if (!isPhone()) return;
   settleAppArrival(hash).catch(() => {});
   if (globalThis.document?.visibilityState !== "hidden") return;
   if (!(await mayNotify(appNoticesAllowed))) return;
-  const { title, network } = arrivalNotice({ kind, ok, nodeUrl });
-  await showAppNotice({ title, body: network, hash, token: await noticeTokenOf(hash, walletId) }).catch(() => {});
+  const { title, network, body } = arrivalNotice({ kind: tx.kind, ok, nodeUrl: tx.nodeUrl, ...(await paymentOf(tx)) });
+  await showAppNotice({ title, body, publicBody: network, hash, token: await noticeTokenOf(hash, tx.walletId) }).catch(() => {});
 }
 
 // However a send's outcome is learned, while the app is away.
 onTxSettled((hash, tx) => {
-  noticeArrival({ hash, ok: tx.status === "executed", kind: tx.kind, nodeUrl: tx.nodeUrl, walletId: tx.walletId }).catch(() => {});
+  noticeArrival({ hash, ok: tx.status === "executed", tx }).catch(() => {});
 });
 
 // A send the person asked to hear of, for Android to look for once the app
 // leaves the screen, when it cuts the page's network (android/ArrivalJob.kt):
 // its notice, for either outcome, comes from there.
-async function watchArrival(hash, { kind, nodeUrl, walletId }) {
+async function watchArrival(hash, tx) {
   if (!hash || !isPhone() || !(await mayNotify(appNoticesAllowed))) return;
-  const went = arrivalNotice({ kind, ok: true, nodeUrl });
-  const failed = arrivalNotice({ kind, ok: false, nodeUrl });
-  await watchAppArrival({ hash, nodeUrl, title: went.title, failTitle: failed.title, body: went.network, wallet: String(walletId ?? ""), token: await noticeTokenOf(hash, walletId) });
+  const { kind, nodeUrl, walletId } = tx;
+  const payment = await paymentOf(tx);
+  const went = arrivalNotice({ kind, ok: true, nodeUrl, ...payment });
+  const failed = arrivalNotice({ kind, ok: false, nodeUrl, ...payment });
+  await watchAppArrival({
+    hash,
+    nodeUrl,
+    title: went.title,
+    failTitle: failed.title,
+    body: went.body,
+    publicBody: went.network,
+    wallet: String(walletId ?? ""),
+    token: await noticeTokenOf(hash, walletId),
+  });
 }
 
 // How the payments from Send that wait for the network reach the wallet, as
@@ -613,6 +643,7 @@ export async function localSend(message) {
         nftMetadataEnabled: settings.nftMetadataEnabled !== false,
         ipfsGateway: settings.ipfsGateway ?? "",
         hideBalances: settings.hideBalances === true,
+        incomingNotices: settings.incomingNotices !== false,
         lockOnLeave: settings.lockOnLeave === true,
         autoLockTimeoutMinutes: settings.autoLockTimeoutMinutes ?? 15,
         sendPasswordLimit: (await sendPasswordLimit())?.toString() ?? null,
@@ -649,6 +680,17 @@ export async function localSend(message) {
       await saidNoticesOff(appNoticesAllowed);
       return { ok: true };
     }
+    // Notices for money coming in (android/ArrivalJob.kt): turned on or off in
+    // Settings, and the open wallet's token for their taps.
+    if (message?.type === "DUSK_UI_SET_INCOMING_NOTICES") {
+      const next = await setSettings({ incomingNotices: message.on === true });
+      return { ok: true, incomingNotices: next.incomingNotices !== false };
+    }
+    if (message?.type === "DUSK_UI_INCOMING_TOKEN") {
+      const status = engineStatus();
+      if (!status?.isUnlocked || !status.accounts?.[0]) return { ok: true, token: "" };
+      return { ok: true, token: await incomingNoticeToken(String(status.accounts[0])) };
+    }
 
     // The network checked now, as when the phone is back online.
     if (message?.type === "DUSK_UI_CHECK_NETWORK") {
@@ -671,6 +713,16 @@ export async function localSend(message) {
       const hash = String(message.hash ?? "").trim();
       const token = String(message.token ?? "");
       if (!hash) throw rpcError(ERROR_CODES.INVALID_PARAMS, "hash is required");
+      // Money that came in to one of the open wallet's accounts, as Android's
+      // job told it: its profile, to open the payment in, with the wallet's
+      // token for those notices.
+      if (message.account) {
+        const status = engineStatus();
+        const accounts = status?.isUnlocked ? (status.accounts ?? []).map(String) : [];
+        const profileIndex = accounts.indexOf(String(message.account));
+        const ours = profileIndex >= 0 && (await isIncomingNoticeToken(accounts[0], token).catch(() => false));
+        return { ok: true, result: ours ? { incoming: true, profileIndex } : null };
+      }
       if (!(await takeNoticeToken(hash, token).catch(() => false))) return { ok: true, result: null };
       const meta = await getTxMeta(hash).catch(() => null);
       const status = message.status === "executed" || message.status === "failed" ? message.status : "";
@@ -808,7 +860,7 @@ export async function localSend(message) {
           const { pendingNullifiers } = record;
           await putTxMeta(hash, record, { epoch: txEpoch });
           // Asked for notices: Android looks for it too, once the app leaves the screen.
-          watchArrival(hash, { kind: baseParams.kind, nodeUrl, walletId: record.walletId }).catch(() => {});
+          watchArrival(hash, record).catch(() => {});
           // Found on the node after a hand-over with no clear answer, maybe in its block already: looked up now.
           if (result?.found) {
             recheckTx(hash)
