@@ -22,7 +22,7 @@ import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { askNodeChainId, chainRefusal, listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem, isAllowedDappOrigin } from "../shared/securityPolicy.js";
-import { classifyTxPresence } from "../shared/txLifecycle.js";
+import { classifyTxPresence, handedOverState } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx, reconcileTxPresence } from "../shared/txReconcile.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
@@ -69,7 +69,7 @@ import {
 } from "../shared/txStore.js";
 import { sendingProfile, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
-import { cancelWaitingSend, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import { SEND_PASSWORD_COMMANDS, assertScreenWallet, engineContactsVault, handleUiCommand, sendParams } from "../wallet/uiCommands.js";
@@ -211,29 +211,46 @@ async function lastSend() {
   const last = [
     sent && { at: Number(sent.submittedAt), state: String(sent.status ?? "submitted") },
     kept && Number(kept.at) >= since && { at: Number(kept.at), state: String(keptRecord?.status ?? kept.state) },
-    waiting && { at: Number(waiting.at), state: waiting.waiting ? "waiting" : "not_sent" },
+    waiting && { at: Number(waiting.at), state: waiting.unclear ? "unclear" : waiting.waiting ? "waiting" : "not_sent" },
   ].filter(Boolean);
   return last.sort((a, b) => b.at - a.at)[0] ?? null;
 }
 
 // How the payments from Send that wait for the network reach the wallet: the
-// node asked whether it answers, the engine to call one off, the pages told
-// whether one waits (waitingSends.js).
+// node asked whether it answers and where one handed over stands, the engine
+// to call one off or forget one that never went, the pages told whether one
+// waits (waitingSends.js).
 const waitingHost = {
   answers: async () => (await checkNode((await getSettings()).nodeUrl))?.nodeStatus === "online",
   cancelInEngine: (sendId) => engineCall("dusk_cancelSend", { sendId }),
-  // Handed to the node, or maybe: kept as a send with no clear answer, looked up by its ID.
-  follow: async ({ record, hash }) => {
+  check: (record) => handedOverState(record.nodeUrl, record),
+  release: (sendId) => engineCall("dusk_forgetHandedOver", { sendId }),
+  // Still being handed over by the engine, which goes on as the background starts again.
+  underWay: async (sendId) => (await engineCall("dusk_sendUnderWay", { sendId }).catch(() => null))?.underWay === true,
+  // Handed to the node: kept as a sent one, from when it was made, and looked
+  // up by its ID at once; `unclear`, as a send with no clear answer.
+  follow: async ({ record, hash, unclear = false }) => {
     const params = { kind: TX_KIND.TRANSFER, privacy: record.privacy, to: record.to, amount: record.lux, memo: record.memo };
     const sent = { walletId: record.walletId, origin: "Wallet", nodeUrl: record.nodeUrl, profileIndex: Number(record.profileIndex) || 0 };
-    await putTxMeta(hash, unclearTxMeta(params, sent, { toName: typedRecipientName(record.toName) }), { epoch: await getTxEpoch() });
+    const extras = { toName: typedRecipientName(record.toName) };
+    const meta = unclear ? unclearTxMeta(params, sent, extras) : { ...submittedTxMeta(params, sent, extras), submittedAt: Number(record.at) || Date.now() };
+    await putTxMeta(hash, meta, { epoch: await getTxEpoch() });
+    if (!unclear) lookUpFound(hash);
   },
   tell: (message) => {
     runtimeSendMessage(message).catch(() => {});
   },
 };
 
-// Payments that were being handed to the node as the background stopped: followed by their IDs.
+// A payment the node has after a hand-over with no clear answer: what came
+// of it, looked up now, and the pages told.
+function lookUpFound(hash) {
+  recheckTx(hash)
+    .then(({ event }) => emitUiTxStatus(event))
+    .catch(() => {});
+}
+
+// Payments that were being handed to the node as the background stopped: asked of the node.
 followHandedOver(waitingHost).catch(() => {});
 
 // Firefox's engine tab closed, and the wallet open in it with it: as a lock
@@ -693,8 +710,7 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           sendResponse({ ok: false });
           return;
         }
-        await noteHandingOver(String(message.sendId ?? ""), String(message.hash ?? ""), waitingHost);
-        sendResponse({ ok: true });
+        sendResponse({ ok: await noteHandingOver(String(message.sendId ?? ""), { hash: String(message.hash ?? ""), nonce: String(message.nonce ?? "") }, waitingHost).catch(() => false) });
         return;
       }
 
@@ -1488,6 +1504,9 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // draw again.
         const networkStatus = await getNetworkStatus();
         const refusal = statusChainRefusal(networkStatus, settings.nodeUrl, chainId);
+        // Payments handed over as the background stopped, asked of the node
+        // as the wallet draws, at most every 10 seconds: pages hear what changed.
+        followHandedOver(waitingHost, { every: 10_000 }).catch(() => {});
         const failing = Boolean(balanceError) || Boolean(refusal) || networkStatus?.nodeStatus === "offline" || !Number.isInteger(chainId);
         if (isStatusStale(networkStatus, checkEveryMs(networkStatus, { failing, read: Boolean(balance) && !balanceError }))) {
           checkAllEndpoints({
@@ -1627,9 +1646,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         }
         // Sent from the wallet unlocked as it goes, the one its Review was on
         // (`walletId`): a switch, lock or reset waits for it, as for a site's.
-        // A payment that waited (`waited`) is kept with its transaction's ID
-        // before it's handed over (`sendKept`).
-        const attempt = ({ waited = false } = {}) => withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        // A payment handed over without a clear answer that the node has
+        // after all (`found`), or never had and is sent again as it is
+        // (`resend`), records the transaction its try made (`made`), on the
+        // node it was made for (`madeOn`), whatever was chosen since.
+        let made;
+        let madeOn = "";
+        const attempt = ({ resend = false, found = null } = {}) => withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
           const status = await getEngineStatus();
           if (!status.isUnlocked) {
             throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
@@ -1641,6 +1664,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // What this send and its watcher keep is dropped after a reset meanwhile.
           const txEpoch = await getTxEpoch();
           await ensureEngineConfigured();
+          if (found || resend) {
+            const result = found ? { ...found, found: true } : await engineCall("dusk_resendSend", { sendId, txEpoch });
+            return { status, txEpoch, baseParams: made ?? applyTxDefaults(reviewed, {}), result, nodeUrl: madeOn };
+          }
           // The node's gas price (kept 30 s) by both wallets' one rule: its
           // median, under a ceiling.
           let dynamicPrice;
@@ -1655,19 +1682,22 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           // Above the amount chosen in Settings, only with the password checked for it.
           const { nodeUrl } = await getSettings();
           granted = await sendPasswordOnce(baseParams, granted, { ticket: message.sendTicket, walletId: String(status.accounts?.[0] ?? ""), nodeUrl });
-          const result = await engineCall("dusk_sendTransaction", { ...baseParams, txEpoch, ...(sendId ? { sendId } : {}), ...(sendId && waited ? { sendKept: true } : {}) }).catch(async (error) => {
-            // Handed over with no clear answer: kept, to be looked up by its ID.
+          made = baseParams;
+          madeOn = nodeUrl;
+          const result = await engineCall("dusk_sendTransaction", { ...baseParams, txEpoch, ...(sendId ? { sendId } : {}) }).catch(async (error) => {
+            // Handed over with no clear answer: kept, to be looked up by its ID;
+            // a public payment from Send is asked of the node first (waitingSends.js).
             const hash = error?.data?.sent === "unknown" ? String(error.data.hash ?? "") : "";
-            if (hash) {
+            if (hash && !(sendId && checkedOnNode(baseParams))) {
               const sent = { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(baseParams, status, await getSettings()) };
               await putTxMeta(hash, unclearTxMeta(baseParams, sent, walletSendFields(baseParams, message)), { epoch: txEpoch }).catch(() => {});
               await keepLastSend({ walletId: sent.walletId, nodeUrl, hash, state: "unknown" }).catch(() => {});
             }
             throw error;
           });
-          return { status, txEpoch, baseParams, result };
+          return { status, txEpoch, baseParams, result, nodeUrl };
         });
-        const { status, txEpoch, baseParams, result } = sendId
+        const { status, txEpoch, baseParams, result, nodeUrl: sentOn } = sendId
           ? await sendWhenReachable({
               sendId,
               record: waitingRecordOf(message, await getSettings().then((settings) => ({ nodeUrl: settings.nodeUrl, profileIndex: Number(settings.selectedAccountIndex ?? 0) || 0 }))),
@@ -1676,11 +1706,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             })
           : await attempt();
 
-        // Persist metadata (see rpc.js comments).
+        // Persist metadata (see rpc.js comments), under the node it was sent
+        // on: another may have been chosen while it waited or was looked up.
         const hash = result?.hash ?? "";
         try {
           const settings = await getSettings();
-          const nodeUrl = settings?.nodeUrl ?? "";
+          const nodeUrl = sentOn || settings?.nodeUrl || "";
 
           if (hash) {
             const profileIndex = sendingProfile(baseParams, status, settings);
@@ -1690,6 +1721,8 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
               { epoch: txEpoch }
             );
             await keepLastSend({ walletId: String(status?.accounts?.[0] ?? ""), nodeUrl, hash, state: "submitted" }).catch(() => {});
+            // Found on the node after a hand-over with no clear answer: no watcher follows it.
+            if (result?.found) lookUpFound(hash);
           }
 
           await notifyTxSubmitted({ hash, origin: "Wallet", nodeUrl });

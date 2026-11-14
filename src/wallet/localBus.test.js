@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), resendSend: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -110,6 +110,10 @@ vi.mock("../shared/walletEngine.js", () => ({
   sendTransaction: engine.sendTransaction,
   // A payment from Send called off unless it was handed over, as walletEngine.js settles it.
   cancelSend: ({ sendId }) => ({ cancelled: !engine.handedOver.has(sendId) }),
+  // The transaction a payment's try handed over without a clear answer, sent again as it was made; or forgotten.
+  resendSend: engine.resendSend,
+  forgetHandedOver: vi.fn(() => ({ forgotten: true })),
+  sendUnderWay: vi.fn(() => ({ underWay: false })),
   // What's told of a payment that waited before it's handed over: the app's bus keeps it.
   setHandOverHook: (hook) => {
     engine.handOverHook = hook;
@@ -180,6 +184,7 @@ const ACCOUNT =
 beforeEach(() => {
   vi.stubGlobal("localStorage", memoryStorage());
   engine.sendTransaction.mockReset();
+  engine.resendSend.mockReset();
   engine.unlocked = true;
   engine.wallet = "wallet A";
   engine.key = "";
@@ -424,10 +429,10 @@ describe("a payment from Send that can't reach the network before it goes out", 
     statusChecks.nodeAnswers = true;
     await vi.advanceTimersByTimeAsync(5_000);
     await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "ae".repeat(32) } });
-    // Both tries from profile 1; the second, which waited, told of before it's handed over.
-    expect(engine.sendTransaction.mock.calls.map(([sent]) => [sent.profileIndex, sent.sendKept])).toEqual([
-      [1, undefined],
-      [1, true],
+    // Both tries from profile 1, each the payment's own.
+    expect(engine.sendTransaction.mock.calls.map(([sent]) => [sent.profileIndex, sent.sendId])).toEqual([
+      [1, "send-0004"],
+      [1, "send-0004"],
     ]);
   });
 
@@ -492,6 +497,129 @@ describe("a payment from Send that can't reach the network before it goes out", 
     expect(await waitingNow(localSend)).toEqual([expect.objectContaining({ sendId: "send-0003", memo: "Hors ligne un", waiting: false, ended: "locked" })]);
     await expect(localSend({ type: "DUSK_UI_DROP_UNSENT", sendId: "send-0003" })).resolves.toEqual({ ok: true, result: { dropped: true } });
     expect(await waitingNow(localSend)).toEqual([]);
+  });
+});
+
+describe("a payment from Send in the app, as Android ends it or the signal goes as it's handed over", () => {
+  const params = { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "10000000", memo: "Cendol" };
+  const HASH = "c3".repeat(32);
+  const page = () => {
+    const told = vi.fn();
+    vi.stubGlobal("window", { dispatchEvent: told });
+    return () => told.mock.calls.map(([event]) => event.detail).filter((m) => m.type === "DUSK_UI_SEND_WAITING");
+  };
+  // The node, as its GraphQL and its account status answer: what it has of the payment, and the account's nonce.
+  const node = { has: "nothing", nonce: 130 };
+  const stubNode = () =>
+    vi.stubGlobal("fetch", async (input, init = {}) => {
+      const url = String(input);
+      const body = String(init.body ?? "");
+      const json = (value) => ({ ok: true, status: 200, text: async () => JSON.stringify(value) });
+      if (url.endsWith("/on/graphql/query") && body.includes("tx(hash")) return json({ tx: node.has === "chain" ? { id: HASH, err: null, blockHeight: 4848915 } : null });
+      if (url.endsWith("/on/graphql/query") && body.includes("mempoolTxs")) return json({ mempoolTxs: node.has === "mempool" ? [{ id: HASH }] : [] });
+      if (/\/on\/account:[^/]+\/status$/.test(url)) return json({ balance: 481844605, nonce: node.nonce, next_nonce: node.nonce + 1 });
+      throw new TypeError("Failed to fetch");
+    });
+  // A try that hands the payment over, its ID and nonce kept first, and loses the answer as the signal goes.
+  const handsOverAndLoses = async ({ sendId }) => {
+    await engine.handOverHook({ sendId, hash: HASH, nonce: "131" });
+    throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: "unknown", hash: HASH } });
+  };
+  const overview = (localSend) => localSend({ type: "DUSK_UI_OVERVIEW" });
+  const kept = (over = {}) => ({ sendId: "send-0009", walletId: "account of wallet A", nodeUrl: "", profileIndex: 0, account: "account of wallet A", privacy: "public", to: ACCOUNT, lux: "10000000", feeLux: "2500000", memo: "Cendol", at: 1, ...over });
+
+  beforeEach(() => {
+    node.has = "nothing";
+    node.nonce = 130;
+    stubNode();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  // Sofía's: Android ended the app during the first try, and the payment vanished without a word.
+  it("is kept as it's confirmed: an app ended during its first try says, once open again, that it wasn't sent", async () => {
+    const { localSend } = await import("./localBus.js");
+    engine.sendTransaction.mockImplementationOnce(() => new Promise(() => {}));
+    localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0008", walletId: "account of wallet A", params }).catch(() => {});
+    await vi.waitFor(async () => expect((await overview(localSend)).waitingSends).toEqual([expect.objectContaining({ sendId: "send-0008", memo: "Cendol", waiting: true, waits: false })]));
+
+    // Android ends the app: the page and all it held start again.
+    vi.resetModules();
+    const again = await import("./localBus.js");
+    expect((await overview(again.localSend)).waitingSends).toEqual([expect.objectContaining({ sendId: "send-0008", waiting: false, ended: "closed" })]);
+  });
+
+  // Chen's: confirmed as the Wi-Fi died, phone pocketed; back, "It may still have reached the network", and Activity
+  // said "Sent −0.01 Not confirmed", though the node never had it.
+  it("isn't in Activity as sent while unclear, and goes out once more as it was made where the node never had it", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    const heard = page();
+    engine.sendTransaction.mockImplementationOnce(handsOverAndLoses);
+    engine.resendSend.mockResolvedValueOnce({ hash: HASH, nonce: 131n });
+    statusChecks.nodeAnswers = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reviewed = { ...params, _approvalContext: { walletId: "account of wallet A", profileIndex: 0, account: "account of wallet A", nodeUrl } };
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0008", walletId: "account of wallet A", params: reviewed });
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0008", waits: true, handedOver: true }));
+    const ov = await overview(localSend);
+    expect(ov.waitingSends).toEqual([expect.objectContaining({ sendId: "send-0008", waiting: true, unclear: true })]);
+    expect(ov.txs).toEqual([]);
+
+    // The network back: the node has nothing of it, and the account's nonce hasn't reached it.
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: HASH } });
+    expect(engine.resendSend).toHaveBeenCalledWith({ sendId: "send-0008" });
+    expect(engine.sendTransaction).toHaveBeenCalledOnce();
+    const after = await overview(localSend);
+    expect(after.waitingSends).toEqual([]);
+    expect(after.txs).toEqual([expect.objectContaining({ hash: HASH, status: "submitted", memo: "Cendol" })]);
+  });
+
+  // Astra's: a Testnet payment lost its answer, Mainnet was chosen meanwhile, and the payment the node had all the same
+  // was kept as Mainnet's.
+  it("keeps a payment the node had after all under the network it was sent on, whatever was chosen since", async () => {
+    const { localSend } = await import("./localBus.js");
+    const settings = await import("../shared/settings.js");
+    const { nodeUrl } = await settings.getSettings();
+    const other = nodeUrl.includes("testnet") ? "https://nodes.dusk.network" : "https://testnet.nodes.dusk.network";
+    const heard = page();
+    engine.sendTransaction.mockImplementationOnce(handsOverAndLoses);
+    statusChecks.nodeAnswers = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const reviewed = { ...params, _approvalContext: { walletId: "account of wallet A", profileIndex: 0, account: "account of wallet A", nodeUrl } };
+      const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0011", walletId: "account of wallet A", params: reviewed });
+      await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0011", waits: true, handedOver: true }));
+      // The other network chosen; the node it was sent to has it in its mempool.
+      await settings.setSettings({ nodeUrl: other });
+      node.has = "mempool";
+      statusChecks.nodeAnswers = true;
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(response).resolves.toMatchObject({ ok: true, result: { hash: HASH } });
+      const { getTxMeta } = await import("../shared/txStore.js");
+      expect(await getTxMeta(HASH)).toMatchObject({ nodeUrl, status: expect.any(String) });
+    } finally {
+      await settings.setSettings({ nodeUrl });
+    }
+  });
+
+  it("handed over as the app was ended, is said not sent once open again where the node never had it, and sent where it has", async () => {
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    localStorage.setItem("dusk_waiting_sends_v1", JSON.stringify({ "send-0009": kept({ nodeUrl, hash: HASH, nonce: "131" }) }));
+    // The app opened again.
+    vi.resetModules();
+    const { localSend } = await import("./localBus.js");
+    await vi.waitFor(async () => expect((await overview(localSend)).waitingSends).toEqual([expect.objectContaining({ sendId: "send-0009", waiting: false, ended: "closed" })]));
+    expect((await overview(localSend)).txs).toEqual([]);
+
+    // Another, which the node has in its block: in Activity, never said not sent.
+    vi.resetModules();
+    node.has = "chain";
+    localStorage.setItem("dusk_waiting_sends_v1", JSON.stringify({ "send-0010": kept({ sendId: "send-0010", nodeUrl, hash: HASH, nonce: "131" }) }));
+    const again = await import("./localBus.js");
+    await vi.waitFor(async () => expect((await overview(again.localSend)).txs).toEqual([expect.objectContaining({ hash: HASH, memo: "Cendol" })]));
+    expect((await overview(again.localSend)).waitingSends).toEqual([]);
   });
 });
 

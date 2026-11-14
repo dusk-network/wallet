@@ -414,7 +414,10 @@ const runningNodeAsks = new Map();
  */
 export function checkNode(nodeUrl, { timeoutMs = NODE_ANSWER_MS } = {}) {
   const key = String(nodeUrl ?? "");
-  let ask = runningNodeAsks.get(key);
+  const running = runningNodeAsks.get(key);
+  // One asked longer ago than it can take isn't waited on: a phone that put
+  // the wallet away can hold back the timer that ends it.
+  let ask = running && Date.now() - running.at <= timeoutMs + 1_000 ? running.ask : null;
   if (!ask) {
     ask = (async () => {
       const result = key ? await probeNode(key, timeoutMs) : { ok: false, error: "No URL configured" };
@@ -426,8 +429,10 @@ export function checkNode(nodeUrl, { timeoutMs = NODE_ANSWER_MS } = {}) {
         nodeUrl: key,
         nodeChainId: Number.isInteger(result.chainId) ? result.chainId : null,
       });
-    })().finally(() => runningNodeAsks.delete(key));
-    runningNodeAsks.set(key, ask);
+    })().finally(() => {
+      if (runningNodeAsks.get(key)?.ask === ask) runningNodeAsks.delete(key);
+    });
+    runningNodeAsks.set(key, { ask, at: Date.now() });
   }
   return ask;
 }

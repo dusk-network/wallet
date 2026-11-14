@@ -346,6 +346,27 @@ describe("after Confirm", () => {
     expect(steps()[0]).toEqual(["failed", "Not sent", "Couldn't reach the network. No fee was charged."]);
   });
 
+  // Chen's: the Wi-Fi went just as a payment was handed over; the screen said "Nothing has left your wallet yet" of a
+  // payment that had reached the node, and offered Cancel.
+  it("says a payment handed over may have gone out already, offline or waiting, never that nothing left, without Cancel", async () => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    await app.confirm();
+    // The wallet says it's being handed over (DUSK_UI_SEND_WAITING, handedOver).
+    state.sent.handedOver = true;
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    app.draw();
+    expect(steps()[0]).toEqual(["current", "Sending", "You're offline. It may have gone out already. If it didn't, it goes out once the network answers."]);
+    expect(button("Cancel")).toBeUndefined();
+    // Online, its answer lost: looked up, and sent once if it didn't go.
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
+    state.sent.waits = true;
+    app.draw();
+    expect(steps()[0]).toEqual(["current", "Sending", "It may have gone out already. If it didn't, it goes out once the network answers."]);
+    expect(button("Cancel")).toBeUndefined();
+  });
+
   it("says a payment that waits for the network does, and Cancel calls it off: not sent, no fee", async () => {
     const state = reviewState();
     const app = popup(state);

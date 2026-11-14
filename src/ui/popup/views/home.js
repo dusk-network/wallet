@@ -16,7 +16,7 @@ import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
 import { whenAtText } from "./txRow.js";
-import { reasonText } from "./sent.js";
+import { UNCLEAR_TEXT, reasonText } from "./sent.js";
 
 // In the wallet's words: what a node says of it is that node's to choose.
 const BALANCE_UNREAD = "Couldn't read your balance from this node. Try again in a moment.";
@@ -358,12 +358,22 @@ function waitingSection(ov, { state, actions } = {}) {
       },
     });
 
+  // One handed over without a clear answer may have gone out: it's looked up,
+  // and has no Cancel.
+  const waitingNote = (send) =>
+    send.unclear && send.checks
+      ? "It may have gone out already. The wallet checks once the network answers."
+      : send.unclear && send.waits
+        ? UNCLEAR_TEXT
+        : send.waits
+          ? "It goes out once the network answers."
+          : "It's being sent.";
   const waitingBox = (send) =>
     h("div", { class: "callout home-waiting", role: "status" }, [
-      h("div", { class: "callout-title" }, ["Not sent yet: ", ...what(send)]),
+      h("div", { class: "callout-title" }, [send.unclear ? "Not confirmed: " : "Not sent yet: ", ...what(send)]),
       madeLine(send),
-      h("p", { class: "muted home-waiting__note", text: send.waits ? "It goes out once the network answers." : "It's being sent." }),
-      h("div", { class: "home-waiting__actions" }, [
+      h("p", { class: "muted home-waiting__note", text: waitingNote(send) }),
+      send.unclear ? null : h("div", { class: "home-waiting__actions" }, [
         button("Cancel", async () => {
           const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null);
           actions?.showToast?.(
@@ -376,7 +386,7 @@ function waitingSection(ov, { state, actions } = {}) {
           refresh();
         }),
       ]),
-    ]);
+    ].filter(Boolean));
 
   const unsentBox = (send) =>
     h("div", { class: "callout warn home-waiting home-waiting--unsent", role: "status" }, [

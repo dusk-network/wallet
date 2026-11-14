@@ -15,7 +15,8 @@ export const LAST_SEND_EVERY_MS = 5_000;
 /**
  * Where the last payment stands, in a sentence: "" for none.
  * @param {{ at: number, state: string } | null | undefined} last
- *   `state`: "waiting" (for the network), "not_sent", or the record's status
+ *   `state`: "waiting" (for the network), "unclear" (handed over without a
+ *   clear answer), "not_sent", or the record's status
  */
 export function lastSendText(last) {
   if (!last || !Number.isFinite(Number(last.at))) return "";
@@ -25,6 +26,8 @@ export function lastSendText(last) {
       return `${at} hasn't gone out yet. It goes out once the network answers.`;
     case "not_sent":
       return `${at} wasn't sent.`;
+    case "unclear":
+      return `${at} may have gone out already. The wallet checks once the network answers.`;
     case "executed":
       return `${at} went through.`;
     case "failed":

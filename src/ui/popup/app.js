@@ -818,8 +818,11 @@ function installTxStatusListener() {
         // Home lists it.
         if (msg?.type === "DUSK_UI_SEND_WAITING") {
           const sent = state.sent;
-          if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && sent.waits !== Boolean(msg.waits)) {
+          // Handed over, it may have gone out from then on, whatever comes after.
+          const handedOver = Boolean(msg.handedOver) && !sent?.handedOver;
+          if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && (sent.waits !== Boolean(msg.waits) || handedOver)) {
             sent.waits = Boolean(msg.waits);
+            if (handedOver) sent.handedOver = true;
             if (state.route === "sent") {
               toaster.announce(sentAnnouncement(sent, state.overview));
               render({ cached: true }).catch(() => {});

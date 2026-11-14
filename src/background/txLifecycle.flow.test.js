@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   listener: null,
   sentMessages: [],
   classifyTxPresence: vi.fn(),
+  // Where a payment handed over without a clear answer stands, as the node says it.
+  handedOverState: vi.fn(async () => ({ state: "unknown" })),
   notifyTxExecuted: vi.fn(async () => true),
   requestUserApproval: vi.fn(async () => null),
   bindPendingWallet: vi.fn(() => true),
@@ -45,6 +47,7 @@ function makeLocalStorage() {
 vi.mock("../shared/txLifecycle.js", async (importOriginal) => ({
   ...(await importOriginal()),
   classifyTxPresence: mocks.classifyTxPresence,
+  handedOverState: mocks.handedOverState,
 }));
 
 vi.mock("../background/engineHost.js", () => ({
@@ -1209,9 +1212,8 @@ describe("background Phoenix tx lifecycle flow", () => {
         await vi.advanceTimersByTimeAsync(5_000);
         await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "0xprofile" } });
         expect(sends().map(([, sent]) => sent.profileIndex)).toEqual([1, 1]);
-        // Its second try, which waited, is told of before it's handed over.
-        expect(sends()[1][1]).toMatchObject({ sendId: "send-prof-1", sendKept: true });
-        expect(sends()[0][1].sendKept).toBeUndefined();
+        // Both tries the payment's own, each told of before it's handed over.
+        expect(sends().map(([, sent]) => sent.sendId)).toEqual(["send-prof-1", "send-prof-1"]);
       } finally {
         mocks.nodeAnswers = true;
         vi.useRealTimers();
@@ -1232,6 +1234,111 @@ describe("background Phoenix tx lifecycle flow", () => {
       const overview = await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" });
       expect(overview.waitingSends).toEqual([]);
       await expect(getTxMeta("0xkept")).resolves.toMatchObject({ status: "unknown", recoveryReason: "handover_unclear", to: "acct1", amount: "1", walletId: "acct0" });
+    });
+
+    // Astra's: the background started again while the engine was handing a public payment over; the node didn't
+    // have it yet, so it was said not sent, with Send it now, and the engine handed it over all the same.
+    it("never says a payment the engine is still handing over wasn't sent, after the background started again", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      let underWay = true;
+      engineCall.mockImplementation(async (method) => (method === "dusk_sendUnderWay" ? { underWay } : true));
+      mocks.handedOverState.mockResolvedValue({ state: "absent" });
+      try {
+        localStorage.setItem(
+          "dusk_waiting_sends_v1",
+          JSON.stringify({ "send-kept-2": { sendId: "send-kept-2", walletId: "acct0", nodeUrl: "https://testnet.nodes.dusk.network", profileIndex: 0, account: "acct0", privacy: "public", to: "acct1", lux: "1", feeLux: "0", memo: "En route", at: 1 } })
+        );
+        await expect(sendBackgroundMessage({ type: "DUSK_ENGINE_HANDING_OVER", sendId: "send-kept-2", hash: "0xunder", nonce: "40" }, { url: "chrome-extension://wallet/offscreen.html" })).resolves.toEqual({ ok: true });
+        const waiting = async () => (await sendBackgroundMessage({ type: "DUSK_UI_OVERVIEW" })).waitingSends;
+        expect(await waiting()).toEqual([expect.objectContaining({ sendId: "send-kept-2", hash: "0xunder", waiting: true })]);
+        expect(engineCall).toHaveBeenCalledWith("dusk_sendUnderWay", { sendId: "send-kept-2" });
+        expect(engineCall).not.toHaveBeenCalledWith("dusk_forgetHandedOver", expect.anything());
+      } finally {
+        mocks.handedOverState.mockResolvedValue({ state: "unknown" });
+      }
+    });
+
+    // Chen's, as the extension has it: a public payment handed over as the connection went, which the node never had,
+    // was said to "may still have reached the network", and Activity listed it as sent.
+    it("handed over without a clear answer, isn't in Activity as sent, and goes out once more as it was made where the node never had it", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const { getTxMeta } = await import("../shared/txStore.js");
+      engineCall.mockImplementation(async (method, sent) => {
+        if (method === "dusk_sendTransaction") {
+          // The engine tells of it with its ID and nonce before it's handed over, and loses the answer.
+          const kept = await sendBackgroundMessage({ type: "DUSK_ENGINE_HANDING_OVER", sendId: sent.sendId, hash: "0xlost", nonce: "131" }, { url: "chrome-extension://wallet/offscreen.html" });
+          if (kept?.ok !== true) throw Object.assign(new Error("Not kept"), { data: { sent: false } });
+          throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: "unknown", hash: "0xlost" } });
+        }
+        if (method === "dusk_resendSend") return { hash: "0xlost", nonce: "131" };
+        return true;
+      });
+      const reviewed = { ...params, privacy: "public", _approvalContext: { walletId: "acct0", profileIndex: 0, account: "acct0", nodeUrl: "https://testnet.nodes.dusk.network" } };
+      mocks.nodeAnswers = false;
+      mocks.handedOverState.mockResolvedValue({ state: "absent" });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const response = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-lost-1", params: reviewed }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-lost-1", waits: true, handedOver: true }));
+        const overview = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_OVERVIEW" }, {}, resolve));
+        await vi.advanceTimersByTimeAsync(0);
+        expect((await overview).waitingSends).toEqual([expect.objectContaining({ sendId: "send-lost-1", waiting: true, unclear: true })]);
+        await expect(getTxMeta("0xlost")).resolves.toBeNull();
+
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "0xlost" } });
+        expect(mocks.handedOverState).toHaveBeenCalledWith("https://testnet.nodes.dusk.network", expect.objectContaining({ hash: "0xlost", nonce: "131", account: "acct0" }));
+        expect(engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction")).toHaveLength(1);
+        expect(engineCall).toHaveBeenCalledWith("dusk_resendSend", expect.objectContaining({ sendId: "send-lost-1" }));
+        await expect(getTxMeta("0xlost")).resolves.toMatchObject({ status: "submitted", walletId: "acct0" });
+      } finally {
+        mocks.nodeAnswers = true;
+        mocks.handedOverState.mockResolvedValue({ state: "unknown" });
+        vi.useRealTimers();
+      }
+    });
+
+    // Astra's, as the extension has it: a Testnet payment lost its answer, Mainnet was chosen meanwhile, and the
+    // payment the node had all the same was kept as Mainnet's.
+    it("keeps a payment the node had after all under the network it was sent on, whatever was chosen since", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const { getTxMeta } = await import("../shared/txStore.js");
+      const { setSettings } = await import("../shared/settings.js");
+      const TESTNET = "https://testnet.nodes.dusk.network";
+      engineCall.mockImplementation(async (method, sent) => {
+        if (method === "dusk_sendTransaction") {
+          await sendBackgroundMessage({ type: "DUSK_ENGINE_HANDING_OVER", sendId: sent.sendId, hash: "0xfound", nonce: "132" }, { url: "chrome-extension://wallet/offscreen.html" });
+          throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: "unknown", hash: "0xfound" } });
+        }
+        return true;
+      });
+      await setSettings({ nodeUrl: TESTNET });
+      const reviewed = { ...params, privacy: "public", _approvalContext: { walletId: "acct0", profileIndex: 0, account: "acct0", nodeUrl: TESTNET } };
+      mocks.nodeAnswers = false;
+      mocks.handedOverState.mockResolvedValue({ state: "absent" });
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const response = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-found-1", params: reviewed }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-found-1", waits: true, handedOver: true }));
+        // Mainnet chosen; Testnet's node has it after all.
+        await setSettings({ nodeUrl: "https://nodes.dusk.network" });
+        mocks.handedOverState.mockResolvedValue({ state: "in" });
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "0xfound" } });
+        expect(mocks.handedOverState).toHaveBeenCalledWith(TESTNET, expect.objectContaining({ hash: "0xfound" }));
+        await expect(getTxMeta("0xfound")).resolves.toMatchObject({ nodeUrl: TESTNET, walletId: "acct0" });
+      } finally {
+        mocks.nodeAnswers = true;
+        mocks.handedOverState.mockResolvedValue({ state: "unknown" });
+        await setSettings({ nodeUrl: TESTNET });
+        vi.useRealTimers();
+      }
+    });
+
+    it("refuses the engine's hand-over of a payment nothing here keeps", async () => {
+      await expect(sendBackgroundMessage({ type: "DUSK_ENGINE_HANDING_OVER", sendId: "send-none", hash: "0xnone" }, { url: "chrome-extension://wallet/offscreen.html" })).resolves.toEqual({ ok: false });
     });
 
     it("calls off a payment from Send waiting for the network, from a wallet page only, and sends nothing", async () => {

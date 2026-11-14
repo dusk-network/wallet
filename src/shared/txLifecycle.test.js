@@ -96,4 +96,43 @@ describe("txLifecycle reconciliation", () => {
       state: "unavailable",
     });
   });
+
+  // Chen's: a payment handed over as the Wi-Fi died, which the node never had, was said to "may still have reached
+  // the network". Where it stands is asked of the node: its chain, its mempool, and the account's nonce.
+  describe("where a public transaction handed over without a clear answer stands", () => {
+    const tx = { hash: "abc", account: "chen-account", nonce: "131" };
+    const status = (nonce) => ({ balance: 481844605, nonce, next_nonce: nonce + 1 });
+
+    it("is in the chain, or in the node's mempool: it went", async () => {
+      mockFetchJson({ tx: { id: "abc", err: null } });
+      const { handedOverState } = await import("./txLifecycle.js");
+      await expect(handedOverState("https://node.example", tx)).resolves.toMatchObject({ state: "in" });
+      mockFetchJson({ tx: null }, { mempoolTxs: [{ id: "abc" }] });
+      await expect(handedOverState("https://node.example", tx)).resolves.toMatchObject({ state: "in" });
+    });
+
+    it("is absent where neither has it and the account's nonce hasn't reached it: the node never had it", async () => {
+      const fetchMock = mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(130));
+      const { handedOverState } = await import("./txLifecycle.js");
+      await expect(handedOverState("https://node.example", tx)).resolves.toEqual({ state: "absent" });
+      expect(String(fetchMock.mock.calls[2][0])).toBe("https://node.example/on/account:chen-account/status");
+    });
+
+    it("is used where neither has it though the account's nonce went past it", async () => {
+      mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(131));
+      const { handedOverState } = await import("./txLifecycle.js");
+      await expect(handedOverState("https://node.example", tx)).resolves.toEqual({ state: "used" });
+    });
+
+    it("is unknown where the node can't be asked, or gives no nonce", async () => {
+      const { handedOverState } = await import("./txLifecycle.js");
+      globalThis.fetch = vi.fn().mockRejectedValue(new TypeError("Failed to fetch"));
+      await expect(handedOverState("https://node.example", tx)).resolves.toEqual({ state: "unknown" });
+      mockFetchJson({ tx: null }, { mempoolTxs: [] }, { balance: 1 });
+      await expect(handedOverState("https://node.example", tx)).resolves.toEqual({ state: "unknown" });
+      // Nothing to tell by without a nonce: never absent.
+      mockFetchJson({ tx: null }, { mempoolTxs: [] });
+      await expect(handedOverState("https://node.example", { hash: "abc" })).resolves.toEqual({ state: "unknown" });
+    });
+  });
 });

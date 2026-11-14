@@ -25,7 +25,7 @@ import {
   executionEventOk,
   waitForTxExecution,
 } from "../shared/txExecution.js";
-import { classifyTxPresence, finalizedTxMetadata } from "../shared/txLifecycle.js";
+import { classifyTxPresence, finalizedTxMetadata, handedOverState } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx } from "../shared/txReconcile.js";
 import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.js";
 import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
@@ -36,7 +36,7 @@ import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, watc
 import { noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
-import { cancelWaitingSend, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import {
@@ -64,6 +64,9 @@ import {
   sealContactsRecord,
   sendTransaction,
   cancelSend,
+  resendSend,
+  forgetHandedOver,
+  sendUnderWay,
   setHandOverHook,
   selectAccountIndex,
   setShieldedCheckpointNow,
@@ -128,24 +131,39 @@ async function watchArrival(hash, { kind, nodeUrl, walletId }) {
 }
 
 // How the payments from Send that wait for the network reach the wallet, as
-// the extension's background has them: the node asked whether it answers,
-// the engine to call one off, the page told whether one waits (waitingSends.js).
+// the extension's background has them: the node asked whether it answers and
+// where one handed over stands, the engine to call one off or forget one that
+// never went, the page told whether one waits (waitingSends.js).
 const waitingHost = {
   answers: async () => (await checkNode((await getSettings()).nodeUrl))?.nodeStatus === "online",
   cancelInEngine: async (sendId) => cancelSend({ sendId }),
-  // Handed to the node, or maybe: kept as a send with no clear answer, looked up by its ID.
-  follow: async ({ record, hash }) => {
+  check: (record) => handedOverState(record.nodeUrl, record),
+  release: async (sendId) => forgetHandedOver({ sendId }),
+  underWay: async (sendId) => sendUnderWay({ sendId })?.underWay === true,
+  // Handed to the node: kept as a sent one, from when it was made, and looked
+  // up by its ID at once; `unclear`, as a send with no clear answer.
+  follow: async ({ record, hash, unclear = false }) => {
     const params = { kind: TX_KIND.TRANSFER, privacy: record.privacy, to: record.to, amount: record.lux, memo: record.memo };
     const sent = { walletId: record.walletId, origin: "Wallet", nodeUrl: record.nodeUrl, profileIndex: Number(record.profileIndex) || 0 };
-    await putTxMeta(hash, unclearTxMeta(params, sent, { toName: typedRecipientName(record.toName) }), { epoch: await getTxEpoch() });
+    const extras = { toName: typedRecipientName(record.toName) };
+    const meta = unclear ? unclearTxMeta(params, sent, extras) : { ...submittedTxMeta(params, sent, extras), submittedAt: Number(record.at) || Date.now() };
+    await putTxMeta(hash, meta, { epoch: await getTxEpoch() });
+    if (!unclear) {
+      recheckTx(hash)
+        .then(({ event }) => tellPage({ type: "DUSK_UI_TX_STATUS", ...event }))
+        .catch(() => {});
+    }
   },
   tell: (message) => tellPage(message),
 };
 
-// A payment that waited is kept with its transaction's ID before the engine
-// hands it to the node (waitingSends.js); those being handed over as the app
-// stopped are followed by their IDs.
-setHandOverHook(({ sendId, hash }) => noteHandingOver(sendId, hash, waitingHost));
+// A payment from Send is kept with its transaction's ID and nonce before the
+// engine hands it to the node, on every try (waitingSends.js): one that can't
+// be kept isn't handed over. Those being handed over as the app stopped are
+// looked up on the node.
+setHandOverHook(async ({ sendId, hash, nonce }) => {
+  if (!(await noteHandingOver(sendId, { hash, nonce }, waitingHost))) throw new Error("Not kept");
+});
 followHandedOver(waitingHost).catch(() => {});
 
 // The wallet locks: a payment waiting for the network goes out only while its wallet is open.
@@ -565,6 +583,9 @@ export async function localSend(message) {
       }
 
       const networkStatus = await networkStatusFor(settings, { failing: Boolean(balanceError) || !Number.isInteger(settings.chainId), read: Boolean(balance) && !balanceError });
+      // Payments handed over as the app stopped, asked of the node as the
+      // wallet draws, at most every 10 seconds: the page hears what changed.
+      followHandedOver(waitingHost, { every: 10_000 }).catch(() => {});
       // What couldn't be read now, as with no signal: what was read last on
       // this phone, said to be maybe out of date; what was read, kept.
       const kept = status.isUnlocked
@@ -711,10 +732,14 @@ export async function localSend(message) {
         });
       }
       // Sent from the wallet unlocked as it goes, the one its Review was on
-      // (`walletId`): a switch, lock or reset waits for it. A payment that
-      // waited (`waited`) is kept with its transaction's ID before it's
-      // handed over (`sendKept`).
-      const attempt = ({ waited = false } = {}) => withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      // (`walletId`): a switch, lock or reset waits for it. A payment handed
+      // over without a clear answer that the node has after all (`found`),
+      // or never had and is sent again as it is (`resend`), records the
+      // transaction its try made (`made`), on the node it was made for
+      // (`madeOn`), whatever was chosen since.
+      let made;
+      let madeOn = "";
+      const attempt = ({ resend = false, found = null } = {}) => withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
         const status = engineStatus();
         if (!status.isUnlocked) {
           throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
@@ -726,6 +751,10 @@ export async function localSend(message) {
         // What this send and its watcher keep is dropped after a reset meanwhile.
         const txEpoch = await getTxEpoch();
         await ensureEngineConfigured();
+        if (found || resend) {
+          const result = found ? { ...found, found: true } : await resendSend({ sendId });
+          return { status, txEpoch, baseParams: made ?? applyTxDefaults(reviewed, {}), result, nodeUrl: madeOn };
+        }
         // The node's gas price (kept 30 s) by both wallets' one rule: its
         // median, under a ceiling.
         let dynamicPrice;
@@ -739,18 +768,21 @@ export async function localSend(message) {
         // Above the amount chosen in Settings, only with the password checked for it.
         const { nodeUrl } = await getSettings();
         granted = await sendPasswordOnce(baseParams, granted, { ticket: message.sendTicket, walletId: String(status.accounts?.[0] ?? ""), nodeUrl });
-        const result = await sendTransaction({ ...baseParams, ...(sendId ? { sendId } : {}), ...(sendId && waited ? { sendKept: true } : {}) }).catch(async (error) => {
-          // Handed over with no clear answer: kept, to be looked up by its ID.
+        made = baseParams;
+        madeOn = nodeUrl;
+        const result = await sendTransaction({ ...baseParams, ...(sendId ? { sendId } : {}) }).catch(async (error) => {
+          // Handed over with no clear answer: kept, to be looked up by its ID;
+          // a public payment from Send is asked of the node first (waitingSends.js).
           const hash = error?.data?.sent === "unknown" ? String(error.data.hash ?? "") : "";
-          if (hash) {
+          if (hash && !(sendId && checkedOnNode(baseParams))) {
             const sent = { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(baseParams, status) };
             await putTxMeta(hash, unclearTxMeta(baseParams, sent, walletSendFields(baseParams, message)), { epoch: txEpoch }).catch(() => {});
           }
           throw error;
         });
-        return { status, txEpoch, baseParams, result };
+        return { status, txEpoch, baseParams, result, nodeUrl };
       });
-      const { status, txEpoch, baseParams, result } = sendId
+      const { status, txEpoch, baseParams, result, nodeUrl: sentOn } = sendId
         ? await sendWhenReachable({
             sendId,
             record: waitingRecordOf(message, await getSettings().then((settings) => ({ nodeUrl: settings.nodeUrl, profileIndex: Number(settings.selectedAccountIndex ?? 0) || 0 }))),
@@ -760,10 +792,11 @@ export async function localSend(message) {
         : await attempt();
       const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
 
-      // Persist metadata (see background/index.js comments).
+      // Persist metadata (see background/index.js comments), under the node it
+      // was sent on: another may have been chosen while it waited or was looked up.
       const hash = result?.hash ?? "";
       try {
-        const nodeUrl = (await getSettings())?.nodeUrl ?? "";
+        const nodeUrl = sentOn || (await getSettings())?.nodeUrl || "";
 
         if (hash) {
           // The profile that paid, as the extension keeps it: a stake's own
@@ -774,6 +807,12 @@ export async function localSend(message) {
           await putTxMeta(hash, record, { epoch: txEpoch });
           // Asked for notices: Android looks for it too, once the app leaves the screen.
           watchArrival(hash, { kind: baseParams.kind, nodeUrl, walletId: record.walletId }).catch(() => {});
+          // Found on the node after a hand-over with no clear answer, maybe in its block already: looked up now.
+          if (result?.found) {
+            recheckTx(hash)
+              .then(({ event }) => tellPage({ type: "DUSK_UI_TX_STATUS", ...event }))
+              .catch(() => {});
+          }
 
           // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
           (async () => {

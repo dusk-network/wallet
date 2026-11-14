@@ -79,6 +79,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept a payment from Send on the device the moment it's confirmed, so one the Android app is ended on before it goes out comes back on Home as not sent, rather than vanishing.
+- Asked the node about a payment handed over just as the signal went, by its ID, its queue and the account's nonce: one it never had goes out once more as the same transaction, or, where the wallet stopped meanwhile, is said not sent with Send it now; none shows in Activity as sent before the node has it.
+- Said on Sent and on Home that a payment handed over without an answer may have gone out already, rather than that nothing had left the wallet, with no Cancel.
+- Sent a payment waiting for the network as soon as the Android app is open again, rather than up to a minute after.
 - Kept the field being typed in on show above the keyboard with a phone turned sideways, the Testnet band and the top bar out of its way, and showed the screen whole again once it's upright and the keyboard's gone.
 - Took a recovery phrase pasted into its boxes off the clipboard, where any app or page could read it, and said it's still there where the browser won't let it go.
 - Gave the tab Firefox for Android keeps the wallet running in Open the wallet, and said on it whether the last payment went through, is on its way or waits for the network, rather than a page with no way back.

@@ -161,6 +161,23 @@ describe("checkNode", () => {
     await expect(checkNode(ENDPOINTS.nodeUrl)).resolves.toMatchObject({ nodeStatus: "online", nodeError: null, nodeChainId: 2 });
   });
 
+  // Chen's, on Android: a node asked as the app went away, its answer and its time-out both held back, left every
+  // later ask waiting on it, a payment's among them, long after the app was back.
+  it("doesn't wait on an ask older than its time-out: asks again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      // Held: neither an answer nor its time-out comes.
+      node.mockImplementationOnce(() => new Promise(() => {}));
+      checkNode(ENDPOINTS.nodeUrl, { timeoutMs: 50 });
+      await vi.waitFor(() => expect(node).toHaveBeenCalledTimes(1));
+      vi.setSystemTime(Date.now() + 2_000);
+      await expect(checkNode(ENDPOINTS.nodeUrl, { timeoutMs: 50 })).resolves.toMatchObject({ nodeStatus: "online", nodeChainId: 2 });
+      expect(node).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps nothing of a node the wallet left while it was asked", async () => {
     const { setSettings } = await import("./settings.js");
     const { setNetworkStatus } = await import("./networkStatus.js");

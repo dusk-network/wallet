@@ -48,6 +48,7 @@ import {
 import { contactsNamespace, deriveContactsKey, openContacts, sealContacts } from "./contactsCrypto.js";
 import { serializeStakeInfo } from "./transport.js";
 import { activityNetworkKey, archiveAt, historyArchiverUrl } from "./activityHistory.js";
+import { handedOverState } from "./txLifecycle.js";
 import {
   StaleActivityError,
   clearShieldedActivity,
@@ -66,6 +67,11 @@ const transactionLocks = new Map();
 // profile: kept through a switch to another wallet and back, while a send
 // may still be pending; gone on lock, and with the wallet it's for.
 const moonlightNonces = new Map();
+// Public transactions handed over without a clear answer that nothing else
+// looks after (a site's, a contract call: anything but a payment from Send,
+// which waitingSends.js follows), by their nonce's key: their nonce stays
+// taken only while the node may have them (settleUncertainNonce).
+const uncertainNonces = new Map();
 
 // Reads shared for a few seconds: the popup asks for the same public balance,
 // Sozu status and token balances many times as it opens and draws. Each is
@@ -114,6 +120,9 @@ function forgetNonces(walletId) {
   if (!walletId) return;
   for (const key of [...moonlightNonces.keys()]) {
     if (key.split("|").at(-2) === walletId) moonlightNonces.delete(key);
+  }
+  for (const key of [...uncertainNonces.keys()]) {
+    if (key.split("|").at(-2) === walletId) uncertainNonces.delete(key);
   }
 }
 
@@ -643,16 +652,44 @@ function withPhoenixSpendMutex(profileIndex, fn) {
   return withProfileLock(phoenixSpendLocks, profileIndex, fn);
 }
 
-async function executeMoonlightTransaction(network, tx, profileIndex, sendId = "", waited = false) {
+// The nonce of a transaction handed over without a clear answer that nothing
+// else looks after, looked up on its node before the next transaction of the
+// profile is made: in the node's chain or mempool, it stays taken; never there
+// and the account's nonce not up to it, it's free again, where nothing was
+// made after it; its nonce used, the node's nonce says what's next. Where the
+// node can't be asked, it stays taken.
+async function settleUncertainNonce(key, account) {
+  const uncertain = uncertainNonces.get(key);
+  if (!uncertain) return;
+  const { state: where } = await handedOverState(uncertain.nodeUrl, { hash: uncertain.hash, account, nonce: uncertain.nonce.toString() }).catch(() => ({ state: "unknown" }));
+  if (where === "unknown" || uncertainNonces.get(key) !== uncertain) return;
+  uncertainNonces.delete(key);
+  if (where === "absent" && moonlightNonces.get(key) === uncertain.nonce) moonlightNonces.set(key, uncertain.nonce - 1n);
+}
+
+async function executeMoonlightTransaction(network, tx, profileIndex, sendId = "") {
   const key = `${getNetworkKey()}|${getWalletId()}|${Number(profileIndex) || 0}`;
   const profile = await ensureProfileIndex(profileIndex);
+  await settleUncertainNonce(key, profile.account.toString());
   const balance = await state.treasury.account(profile.account);
   let nonce = BigInt(balance?.nonce ?? 0) + 1n;
   const previous = moonlightNonces.get(key);
   if (previous != null && previous >= nonce) nonce = previous + 1n;
   if (typeof tx?.nonce === "function") tx = tx.nonce(nonce - 1n);
 
-  const result = await network.execute(gated(tx, sendId, waited));
+  let result;
+  try {
+    result = await network.execute(gated(tx, sendId, key));
+  } catch (error) {
+    // Handed over with no clear answer, it may be in the node's mempool: the
+    // next transaction comes after it, never with its nonce. One nothing else
+    // looks after is looked up on the node before then (settleUncertainNonce).
+    if (error?.data?.sent === "unknown") {
+      moonlightNonces.set(key, nonce > (moonlightNonces.get(key) ?? 0n) ? nonce : moonlightNonces.get(key));
+      if (!sendId && error.data.hash) uncertainNonces.set(key, { nonce, hash: String(error.data.hash), nodeUrl: String(engineConfig.nodeUrl ?? "") });
+    }
+    throw error;
+  }
   // ponytail: session-local nonce memory; add a durable submission journal for restart recovery.
   moonlightNonces.set(key, BigInt(result?.nonce ?? nonce));
   return result;
@@ -799,6 +836,8 @@ export function lock() {
   forgetSharedReads();
   clearWalletState();
   moonlightNonces.clear();
+  uncertainNonces.clear();
+  unclearSends.clear();
   heldWalletIds.clear();
   state.vaultWallets.clear();
   state.vaultWallets = new Map();
@@ -1485,10 +1524,17 @@ function sayRefusalsPlainly(network) {
         handedOver.add(bytes);
         return asked(...args);
       };
-      // A payment that waited is kept with its transaction's ID first: never
-      // handed over without it.
+      // A payment from Send is kept with its transaction's ID and nonce
+      // first: never handed over without them.
       if (!toldOfBytes.has(bytes)) return handTo();
-      return tellHandOver(gateOfBytes.get(bytes), hashOfBytes.get(bytes) ?? "").then(handTo);
+      // Being handed over from then till the node answers (sendUnderWay).
+      const sendId = gateOfBytes.get(bytes);
+      if (sendId) handingOver.add(sendId);
+      return tellHandOver(sendId, hashOfBytes.get(bytes) ?? "", nonceOfBytes.get(bytes))
+        .then(handTo)
+        .finally(() => {
+          if (sendId) handingOver.delete(sendId);
+        });
     };
   }
   return sayWhetherItWent(network);
@@ -1497,27 +1543,43 @@ function sayRefusalsPlainly(network) {
 // The transactions handed to the node to propagate, by their bytes.
 const handedOver = new WeakSet();
 
-// What's told of a payment that waited for the network before it's handed to
-// the node: its send's ID and its transaction's (waitingSends.js keeps it with
-// the payment, so a payment handed over is followed by its ID, never said not
-// sent, whatever stops the wallet after). The hand-over waits for it, and a
-// payment it can't be told of isn't handed over.
+// The payments from Send being handed over now, by their send's ID: told of
+// to waitingSends.js, the node's answer not heard yet.
+const handingOver = new Set();
+
+/**
+ * Whether a payment from Send is being handed to the node now. One that is
+ * may yet go out: it's never said not sent meanwhile, as when the wallet's
+ * background starts again during its hand-over (waitingSends.js's
+ * followHandedOver asks).
+ * @param {{ sendId?: string }} [params]
+ * @returns {{ underWay: boolean }}
+ */
+export function sendUnderWay({ sendId } = {}) {
+  return { underWay: handingOver.has(String(sendId ?? "")) };
+}
+
+// What's told of a payment from Send before it's handed to the node, on every
+// try: its send's ID, and its transaction's ID and nonce (waitingSends.js
+// keeps them with the payment, so one handed over is looked up by them, never
+// said not sent, whatever stops the wallet after). The hand-over waits for
+// it, and a payment it can't be told of isn't handed over.
 let handOverHook = null;
 const NOT_KEPT_TEXT = "The payment couldn't be kept on this device before it went out, so nothing was sent.";
 
 /**
- * Sets what's told of a payment that waited for the network, before it's
- * handed to the node: what's kept of it takes its transaction's ID then.
- * @param {((sent: { sendId: string, hash: string }) => Promise<unknown> | unknown) | null} hook
+ * Sets what's told of a payment from Send before it's handed to the node:
+ * what's kept of it takes its transaction's ID and nonce then.
+ * @param {((sent: { sendId: string, hash: string, nonce?: string }) => Promise<unknown> | unknown) | null} hook
  */
 export function setHandOverHook(hook) {
   handOverHook = typeof hook === "function" ? hook : null;
 }
 
-async function tellHandOver(sendId, hash) {
+async function tellHandOver(sendId, hash, nonce) {
   try {
     if (!handOverHook || !hash) throw new Error("No one to tell");
-    await handOverHook({ sendId, hash });
+    await handOverHook({ sendId, hash, ...(nonce ? { nonce } : {}) });
   } catch {
     throw markSent(new Error(NOT_KEPT_TEXT), { sent: false });
   }
@@ -1532,13 +1594,23 @@ async function tellHandOver(sendId, hash) {
 const sendGates = new Map();
 const SEND_GATES_KEPT = 64;
 // A gated transaction's builder, and the bytes it built, by its send's ID;
-// the transaction's ID by its bytes; and the builders and bytes of payments
-// that waited, told of before they're handed over (tellHandOver).
+// the transaction's ID and nonce by its bytes; and the builders and bytes of
+// payments from Send, told of before they're handed over (tellHandOver). A
+// public payment's builder carries its profile's key in the nonces kept.
 const gateOfBuilder = new WeakMap();
 const gateOfBytes = new WeakMap();
 const hashOfBytes = new WeakMap();
+const nonceOfBytes = new WeakMap();
+const nonceKeyOfBuilder = new WeakMap();
 const toldOfBuilders = new WeakSet();
 const toldOfBytes = new WeakSet();
+
+// A public payment from Send handed over without a clear answer, by its
+// send's ID: the transaction made for it, as it is, to send again once should
+// the node turn out never to have had it (resendSend), and the profile's key
+// in the nonces kept. Gone with a lock; the last few kept.
+const unclearSends = new Map();
+const UNCLEAR_SENDS_KEPT = 16;
 
 function setSendGate(sendId, now) {
   sendGates.delete(sendId);
@@ -1547,11 +1619,13 @@ function setSendGate(sendId, now) {
 }
 
 // The transaction `tx` builds is the send `sendId`'s, called off up to its
-// hand-over; told of before it, where it waited for the network (`waited`).
-function gated(tx, sendId, waited = false) {
+// hand-over and told of before it; a public one's with its profile's key in
+// the nonces kept (`nonceKey`).
+function gated(tx, sendId, nonceKey = "") {
   if (sendId && tx && typeof tx === "object") {
     gateOfBuilder.set(tx, sendId);
-    if (waited) toldOfBuilders.add(tx);
+    toldOfBuilders.add(tx);
+    if (nonceKey) nonceKeyOfBuilder.set(tx, nonceKey);
   }
   return tx;
 }
@@ -1604,12 +1678,14 @@ function sayWhetherItWent(network) {
     // The payment from Send it is, if one: its bytes are handed over through its gate.
     const sendId = tx && typeof tx === "object" ? gateOfBuilder.get(tx) : undefined;
     const told = Boolean(sendId) && toldOfBuilders.has(tx);
+    const nonceKey = sendId ? nonceKeyOfBuilder.get(tx) : undefined;
     if (build) {
       tx.build = async function (...args) {
         built = await build.apply(this, args);
         if (sendId && built?.buffer && typeof built.buffer === "object") {
           gateOfBytes.set(built.buffer, sendId);
           hashOfBytes.set(built.buffer, String(built.hash ?? ""));
+          if (built.nonce !== undefined && built.nonce !== null) nonceOfBytes.set(built.buffer, String(built.nonce));
           if (told) toldOfBytes.add(built.buffer);
         }
         return built;
@@ -1620,6 +1696,7 @@ function sayWhetherItWent(network) {
     } catch (error) {
       // Handed over, and not turned down in so many words: it may have gone.
       const went = built?.buffer && handedOver.has(built.buffer) && error?.data?.sent !== false;
+      if (went && nonceKey && built.nonce !== undefined && built.nonce !== null) keepUnclear(sendId, built, nonceKey);
       throw markSent(error, went ? { sent: "unknown", hash: String(built.hash ?? "") || undefined } : { sent: false });
     } finally {
       if (ownBuild) tx.build = build;
@@ -1627,6 +1704,68 @@ function sayWhetherItWent(network) {
     }
   };
   return network;
+}
+
+function keepUnclear(sendId, built, nonceKey) {
+  unclearSends.delete(sendId);
+  unclearSends.set(sendId, { buffer: built.buffer, hash: String(built.hash ?? ""), nonce: BigInt(built.nonce), nonceKey, walletId: getWalletId(), nodeUrl: String(engineConfig.nodeUrl ?? "") });
+  while (unclearSends.size > UNCLEAR_SENDS_KEPT) unclearSends.delete(unclearSends.keys().next().value);
+}
+
+/**
+ * Sends a public payment from Send again, the very transaction its try
+ * handed to the node without a clear answer, which the node turned out never
+ * to have had (waitingSends.js): the same ID and nonce, so it goes out once
+ * at most, whichever copy the node takes. Checked by the node first, as any
+ * send is. Fails as a send does, saying whether it went (`data.sent`), and
+ * with `data.gone` where there's nothing of it here to send again, as after
+ * a lock.
+ * @param {{ sendId?: string }} params
+ * @returns {Promise<{ hash: string, nonce: bigint }>}
+ */
+export async function resendSend({ sendId } = {}) {
+  const id = String(sendId ?? "");
+  const kept = unclearSends.get(id);
+  if (!kept || !state.unlocked || kept.walletId !== getWalletId()) {
+    throw markSent(new Error("This payment can't be sent again from here."), { sent: false, gone: true });
+  }
+  // Made for the network chosen then: never handed to another chain, it waits
+  // till that one's chosen again, as for a network out of reach.
+  if (kept.nodeUrl && kept.nodeUrl !== String(engineConfig.nodeUrl ?? "")) {
+    throw markSent(new Error("This payment waits for the network it was made for."), { sent: false, unreachable: true });
+  }
+  const network = await ensureNetwork();
+  try {
+    await network.transactions.preverify(kept.buffer);
+  } catch (error) {
+    throw markSent(error, { sent: false });
+  }
+  try {
+    await network.transactions.propagate(kept.buffer);
+  } catch (error) {
+    throw markSent(error, error?.data?.sent === false ? { sent: false } : { sent: "unknown", hash: kept.hash });
+  }
+  unclearSends.delete(id);
+  const previous = moonlightNonces.get(kept.nonceKey);
+  if (previous == null || previous < kept.nonce) moonlightNonces.set(kept.nonceKey, kept.nonce);
+  return { hash: kept.hash, nonce: kept.nonce };
+}
+
+/**
+ * A public payment from Send handed over without a clear answer that the node
+ * never had, and that won't be sent again (waitingSends.js): what's kept of
+ * it goes, and its nonce is free for the next transaction where none came
+ * after it.
+ * @param {{ sendId?: string }} params
+ * @returns {{ forgotten: boolean }}
+ */
+export function forgetHandedOver({ sendId } = {}) {
+  const id = String(sendId ?? "");
+  const kept = unclearSends.get(id);
+  if (!kept) return { forgotten: false };
+  unclearSends.delete(id);
+  if (moonlightNonces.get(kept.nonceKey) === kept.nonce) moonlightNonces.set(kept.nonceKey, kept.nonce - 1n);
+  return { forgotten: true };
 }
 
 // An error with what's known of whether its send went out added to its data.
@@ -3149,10 +3288,9 @@ export async function transfer(params) {
     throw new Error("Shielded transfer requires a shielded recipient (base58 address)");
   }
   const isShieldedTransfer = privacyRaw === "shielded";
-  // A payment from Send, which can be called off until it's handed over; one
-  // that waited for the network is told of before it is (`sendKept`).
+  // A payment from Send, which can be called off until it's handed over, and
+  // is told of before it is.
   const sendId = typeof params?.sendId === "string" ? params.sendId : "";
-  const waited = Boolean(sendId) && params?.sendKept === true;
   openSendGate(sendId);
 
   const network = await ensureNetwork();
@@ -3210,7 +3348,7 @@ export async function transfer(params) {
       await assertApprovalContext(params, idx);
 
       const session = walletSession();
-      const result = await network.execute(gated(tx, sendId, waited));
+      const result = await network.execute(gated(tx, sendId));
       await persistPendingNullifiersForTx(result, idx, session);
       return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
     });
@@ -3226,7 +3364,7 @@ export async function transfer(params) {
   if (gas) tx = tx.gas(gas);
 
   await assertApprovalContext(params, idx);
-  const result = await executeMoonlightTransaction(network, tx, idx, sendId, waited);
+  const result = await executeMoonlightTransaction(network, tx, idx, sendId);
 
   // network.execute returns the tx object returned by tx.build, frozen
   return { hash: result.hash, nonce: result.nonce, nullifiers: result.nullifiers };
