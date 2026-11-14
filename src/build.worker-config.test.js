@@ -53,6 +53,16 @@ describe("what a site can load of the extension's own files", () => {
 });
 
 describe("Firefox for Android", () => {
+  // Marek's: Firefox let no add-on page empty the clipboard without clipboardWrite, so a pasted recovery phrase
+  // stayed there for any page to read. Firefox's build asks for it; Chrome's, which lets the paste's own gesture
+  // write, doesn't.
+  it("asks Firefox alone for clipboardWrite, to take a pasted recovery phrase off the clipboard", async () => {
+    const firefox = JSON.parse(await readFile(path.resolve(process.cwd(), "config", "manifest.firefox.json"), "utf8"));
+    const chrome = JSON.parse(await readFile(path.resolve(process.cwd(), "public", "manifest.json"), "utf8"));
+    expect(firefox.permissions).toContain("clipboardWrite");
+    expect(chrome.permissions).not.toContain("clipboardWrite");
+  });
+
   it("is declared, from the version that reads what data the add-on collects, so it can be listed for phones", async () => {
     const firefox = JSON.parse(await readFile(path.resolve(process.cwd(), "config", "manifest.firefox.json"), "utf8"));
     expect(firefox.browser_specific_settings.gecko_android).toEqual({ strict_min_version: "142.0" });
