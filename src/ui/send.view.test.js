@@ -2112,6 +2112,15 @@ describe("a request link", () => {
       expect(refusal(), amount).toEqual(["This link's amount can't be read. Ask for a new one."]);
       expect([typo.to.value, typo.amount.value], amount).toEqual(["", ""]);
     }
+    // Marek's, the round after: a tab in a pasted link's amount, as a chat or mail can put in, was taken out
+    // ("0.001" + tab + "5" filled 0.0015); any space there, of any kind, refuses the link.
+    for (const space of ["\t", "\u00a0", "\u2009", "\u202f", "\u3000"]) {
+      const spaced = mount(newState());
+      paste(spaced, httpsLink(`to=${ALICE.account}&amount=0.001${space}5&memo=x&network=testnet`));
+      await settle();
+      expect(refusal(), JSON.stringify(space)).toEqual(["This link's amount can't be read. Ask for a new one."]);
+      expect([spaced.to.value, spaced.amount.value], JSON.stringify(space)).toEqual(["", ""]);
+    }
   });
 
   const refusal = () => dom.document.body.querySelectorAll(".field-error").filter((el) => isShown(el)).map((el) => el.textContent);

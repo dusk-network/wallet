@@ -218,7 +218,8 @@ describe("contacts", () => {
   it("won't save a contact named like a .dusk name it isn't saved from", async () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list" });
     typeInto(view.field("Address"), ACCOUNT);
-    for (const name of ["alice.dusk", "ALICE.Dusk", " alice.dusk ", "alice.dusk."]) {
+    // Marek's: a .dusk name in small capitals, or after a fullwidth point, passed too.
+    for (const name of ["alice.dusk", "ALICE.Dusk", " alice.dusk ", "alice.dusk.", "alice.\u1d05\u1d1c\ua731\u1d0b", "alice\uff0edusk"]) {
       typeInto(view.field("Name"), name);
       view.button("Save").click();
       await settle();
@@ -355,6 +356,16 @@ describe("contacts", () => {
       expect(shownNote()).toEqual([`That looks like your contact Wendy, at ${shortAddress(ADDRESS)}. Is this someone else?`]);
       typeInto(name, "Davina");
       expect(shownNote()).toEqual([]);
+    });
+
+    // Marek's, the round after: "Davld" (a small L for the i) and "Dav!d" were saved silently beside David.
+    it("asks about a name with an l, a 1, a ! or a | for an i, as it asks of other look-alikes", () => {
+      const view = edit({ items: [{ id: "d", name: "David", address: ACCOUNT, type: "account" }] });
+      const name = view.field("Name");
+      for (const typed of ["Davld", "Dav!d", "Dav|d", "DAV!D"]) {
+        typeInto(name, typed);
+        expect(shownNote(), typed).toEqual([`That looks like your contact David, at ${shortAddress(ACCOUNT)}. Is this someone else?`]);
+      }
     });
 
     it("refuses a name with hidden characters, as it's typed and on Save", async () => {

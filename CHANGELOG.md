@@ -44,6 +44,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Took an l, 1, ! or | for an i, as in Davld or Dav!d beside David, and a .dusk name in small capitals, circled letters or after a fullwidth point, as the look-alikes they are, in contact and profile names.
+- Refused a link with any space in its amount, a tab too.
 - Read a shared request pasted into Send's To by its link, as the web wallet does, with its line break or without, saying why where it has two links or words after its link.
 - Said on Liquid staking that Sozu's rewards so far are before deposit fees, and in Rewards by year that what grew while held is after them.
 - Said in the Android app that a payment waiting for the network goes out when the app is opened again, on Sent and Home, and in a notice while it's away, which says to open the app once the network's back.

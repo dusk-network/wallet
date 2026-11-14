@@ -230,10 +230,14 @@ describe("profile names", () => {
   it("refuse a .dusk name registered to another account, take this profile's own without asking, and refuse digit and v-for-y look-alikes", async () => {
     const SOFIA = "sEeMSo7oiV2rxo6aZD3H75XGFZD95BtrmgFD3AezyUkC5W9bUyRwqFr6VuybvuvmvX5kTRt4STaSKbE6FEeMGoPDZNaX1LL82rGzN6BDbajY8qJcweu1mp7m1budNv9kgd7";
     const { duskNameOwners } = await import("../shared/duskNames.js");
+    const { nameDuskNames } = await import("@dusk-network/app-core/names");
+    // As the name service says, of the .dusk names a name holds, read as the wallet reads them.
     duskNameOwners.mockImplementation(async (typed) => {
       const said = new Map();
-      if (/sofiadesign\.dusk/i.test(typed)) said.set("sofiadesign.dusk", { account: SOFIA });
-      if (/mine\.dusk/i.test(typed)) said.set("mine.dusk", { account: ACCOUNTS[1] });
+      for (const dusk of nameDuskNames(typed)) {
+        if (dusk === "sofiadesign.dusk") said.set(dusk, { account: SOFIA });
+        if (dusk === "mine.dusk") said.set(dusk, { account: ACCOUNTS[1] });
+      }
       return said;
     });
     listAddressBook.mockResolvedValue([
@@ -260,6 +264,16 @@ describe("profile names", () => {
       expect(shownError(2)).toBe("That looks like your contact David. Choose another name.");
       await name(2, "Wendv");
       expect(shownError(2)).toBe("That looks like your contact Wendy. Choose another name.");
+      // Marek's, the round after: "Davld" and "Dav!d" went by, and Sofía's name in small capitals or circled letters
+      // was saved without a word, History then calling his own transfers hers.
+      for (const typed of ["Davld", "Dav!d"]) {
+        await name(2, typed);
+        expect(shownError(2), typed).toBe("That looks like your contact David. Choose another name.");
+      }
+      for (const typed of ["sofiadesign.\u1d05\u1d1c\ua731\u1d0b", "\u24e2\u24de\u24d5\u24d8\u24d0\u24d3\u24d4\u24e2\u24d8\u24d6\u24dd.dusk"]) {
+        await name(2, typed);
+        expect([shownError(2), question(2)], typed).toEqual(["That looks like sofiadesign.dusk, which belongs to another account. Choose another name.", []]);
+      }
       expect(setAccountName).not.toHaveBeenCalled();
       // This profile's own: saved, nothing asked.
       await name(2, "mine.dusk");
