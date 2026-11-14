@@ -2375,6 +2375,21 @@ p.field-hint {
   line-height: 1.4;
 }
 
+/* An amount that could be read two ways: the question, then a button for each reading. */
+.amount-question__text {
+  display: block;
+}
+.amount-question__choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.amount-question__choice {
+  min-height: 44px;
+  padding: 0 16px;
+}
+
 .field-error {
   display: flex;
   align-items: flex-start;

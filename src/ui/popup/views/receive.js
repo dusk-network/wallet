@@ -18,7 +18,8 @@ import { inCurrencyLine } from "../../lib/inCurrency.js";
 import { makePaymentLink, requestMessage } from "@dusk-network/app-core/payment-links";
 import { rememberRequest } from "../../../shared/paymentRequests.js";
 import { requestKept, requestNetwork, requestsSection } from "./requests.js";
-import { amountForInput, formatDuskExact } from "../../../shared/amount.js";
+import { amountChoices, amountForInput, formatDuskExact } from "../../../shared/amount.js";
+import { amountQuestionEls } from "../../components/AmountQuestion.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { lookupPrimaryName, lookupShieldedName } from "../../../shared/duskNames.js";
 import { safeText } from "../../../shared/safeText.js";
@@ -443,7 +444,23 @@ export function receiveView(ov, { state, actions } = {}) {
     // The checks Send has, so the link is one the payer can use. Said only with the panel open.
     const made = makePaymentLink({ to: curRecipient, amount: amountInput.value, memo: memoInput.value, network: chainId });
     const valid = made.ok;
-    sayUnder(amountErr, requestDetails.open ? made.problems.amount ?? "" : "");
+    // An amount that could be read two ways: the question, with a button for each reading.
+    const twoWays = requestDetails.open && made.problems.amount ? amountChoices(amountInput.value) : null;
+    if (twoWays) {
+      amountErr.replaceChildren(
+        ...amountQuestionEls(twoWays, {
+          onPick: (picked) => {
+            amountInput.value = picked;
+            r.amountDusk = picked;
+            amountInput.focus();
+            update();
+          },
+        })
+      );
+      amountErr.hidden = false;
+    } else {
+      sayUnder(amountErr, requestDetails.open ? made.problems.amount ?? "" : "");
+    }
     sayUnder(memoErr, requestDetails.open ? made.problems.memo ?? "" : "");
     sayUnder(linkErr, requestDetails.open && curRecipient ? made.problems.to ?? "" : "");
 

@@ -336,15 +336,20 @@ describe("receive", () => {
       expect(meta()).toBe("");
     });
 
-    it("says an amount that could be two amounts is that, in the language's own way", async () => {
+    // Nandini's and Chen's: the question had no buttons, and asked to retype.
+    it("says an amount that could be two amounts is that, in the language's own way, with a button for each", async () => {
       inLanguage("nl-NL");
       let view = await receive("public", { state: open({ amountDusk: "1.234" }) });
-      expect(amountError()).toBe("Is that 1,2340 or 1234? Write the one you mean.");
+      expect(amountError()).toBe("Is that 1,2340 or 1234?1,2340 DUSK1234 DUSK");
       expect(view.button("Copy request link").disabled).toBe(true);
       inLanguage("en-US");
       view = await receive("public", { state: open({ amountDusk: "1,234" }) });
-      expect(amountError()).toBe("Is that 1.2340 or 1234? Write the one you mean.");
+      expect(amountError()).toBe("Is that 1.2340 or 1234?1.2340 DUSK1234 DUSK");
       expect(view.button("Copy request link").disabled).toBe(true);
+      // A reading tapped: in the field, which asks nothing, and the request can go.
+      view.button("1.2340 DUSK").click();
+      await settle();
+      expect([dom.document.body.querySelector(".receive-request input").value, amountError(), view.button("Copy request link").disabled]).toEqual(["1.2340", "", false]);
     });
 
     it("gives Dutch separators in its example", async () => {

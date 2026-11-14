@@ -4,7 +4,6 @@ import {
   formatDuskExact,
   formatFee,
   amountForInput,
-  amountProblem,
   formatLuxForInput,
   formatLuxToDusk,
   parseDuskToLux,
@@ -55,7 +54,7 @@ import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
 import { whenAtText } from "./txRow.js";
 import { sendFromReview } from "./sent.js";
-import { MAX_MEMO_BYTES, chainLabel, networkMismatch } from "@dusk-network/app-core/payment-links";
+import { MAX_MEMO_BYTES, chainLabel, linkAmount, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
 import { reviewContextOf, sameWaiting, waitingLux } from "../../lib/waiting.js";
 import { homeView } from "./home.js";
@@ -295,7 +294,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     try {
       lux = safeBigInt(parseDuskToLux(raw), 0n);
     } catch {
-      field.setError(amountProblem(raw));
+      field.setProblem(raw);
       return null;
     }
     if (lux <= 0n) {
@@ -400,12 +399,13 @@ export function sendFormView(ov, { state, actions } = {}) {
     to.value = req.to;
 
     if (isDuskReq) {
-      // A full dusk: request link should define the form values.
-      field.setValue(amountForInput(req.amountDusk || ""));
+      // A full dusk: request link should define the form values, its amount
+      // as typing reads it (app-core's linkAmount): 2.125 asks, as typed does.
+      field.setValue(linkAmount(req).field);
       memo.value = req.memo || "";
     } else {
       // A raw recipient QR should not clobber what the user already typed.
-      if (req.amountDusk) field.setValue(amountForInput(req.amountDusk));
+      if (req.amountDusk) field.setValue(linkAmount(req).field);
       if (req.memo) memo.value = req.memo;
     }
 

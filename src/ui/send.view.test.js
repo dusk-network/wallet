@@ -755,16 +755,17 @@ describe("send's amount", () => {
     typeInto(last.amount, "0.0000000001");
     expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("Is that 1.2340 or 1234? Write the one you mean.");
+    expect(last.amountError()).toBe("Is that 1.2340 or 1234?1.2340 DUSK1234 DUSK");
   });
 
   // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
   // decimal; where the comma is, "1.000" asks, in the web wallet's words. And
   // the question's "1.000" read as a thousand to her: it names 1 and 1000.
+  // Nandini's and Chen's: the question had no buttons, and asked to retype.
   it.each([
-    ["de-DE", "1.000", "Is that 1 or 1000? Write the one you mean."],
-    ["nl-NL", "1.000", "Is that 1 or 1000? Write the one you mean."],
-    ["en-GB", "1,000", "Is that 1 or 1000? Write the one you mean."],
+    ["de-DE", "1.000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
+    ["nl-NL", "1.000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
+    ["en-GB", "1,000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
     ["es-ES", "1 234,5", "Leave out the space: 1234,5."],
   ])("asks which amount is meant where it could be two, in the language's reading: %s %s", (language, typed, asked) => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language });
@@ -772,6 +773,22 @@ describe("send's amount", () => {
     typeInto(form.to, ALICE.account);
     typeInto(form.amount, typed);
     expect([form.amountError(), form.review.disabled]).toEqual([asked, true]);
+  });
+
+  it("puts the reading tapped in the field, which reads it then, with Review on; typing stays as it was", () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
+    const form = mount(newState());
+    typeInto(form.to, ALICE.account);
+    typeInto(form.amount, "2.125");
+    const choices = () => dom.document.body.querySelectorAll(".amount-question__choice");
+    expect(choices().map((b) => b.textContent)).toEqual(["2.1250 DUSK", "2125 DUSK"]);
+    // 2125: read as that, which is more than there is.
+    choices()[1].click();
+    expect([form.amount.value, choices().length]).toEqual(["2125", 0]);
+    expect(form.amountError()).toMatch(/^That's .* more than your public balance/);
+    typeInto(form.amount, "2.125");
+    choices()[0].click();
+    expect([form.amount.value, form.amountError(), form.review.disabled]).toEqual(["2.1250", "", false]);
   });
 
   it("keeps Review off while an amount typed won't do, and on for an empty one to say what's missing", () => {
@@ -1989,6 +2006,21 @@ describe("a request link", () => {
     await settle();
     expect(again.to.value).toBe(ALICE.account);
     expect(again.amount.value).toBe("1,5");
+  });
+
+  // Nandini's and Chen's: a link's amount=2.125 was filled in as 2.1250 without a question, where typing 2.125 asks.
+  it("reads a link's amount as typing does: 2.125 asks, with a button for each reading; a wallet's 2.1250 doesn't", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
+    const form = mount(newState());
+    paste(form, httpsLink(`to=${ALICE.account}&amount=2.125&memo=laksa&network=testnet`));
+    await settle();
+    expect(form.amount.value).toBe("2.125");
+    expect([form.amountError(), form.review.disabled]).toEqual(["Is that 2.1250 or 2125?2.1250 DUSK2125 DUSK", true]);
+
+    const made = mount(newState());
+    paste(made, httpsLink(`to=${ALICE.account}&amount=2.1250&memo=laksa&network=testnet`));
+    await settle();
+    expect([made.amount.value, made.amountError()]).toEqual(["2.1250", ""]);
   });
 
   // Sofía's, in the app: Chen picked from Contacts in place of the link's recipient, and the line stayed.

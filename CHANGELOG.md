@@ -46,7 +46,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Asked Firefox for the clipboardWrite permission, which it lists at install as “Input data to the clipboard”, to take a pasted recovery phrase off the clipboard there too.
 - Counted the deposit fees as part of what unstaked stDUSK cost in Rewards by year, at its average cost, said under the table, and showed a year's loss with its minus sign, in DUSK and in your currency.
 - Split Sozu's part of Rewards by year into what grew while held and what unstaking took out, saying where either couldn't be read.
-- Worded the question for an amount that could be two as "Is that 1 or 1000?".
+- Worded the question for an amount that could be two as "Is that 1 or 1000?", with a button for each, which puts that amount in the field, on Send, Staking, Shield and Request.
+- Read a link's amount as typing does, so a link's 2.125 asks which it is, as typing 2.125 does, where a wallet's own link writes 2.1250 and asks nothing.
 - Answered a site's request made while its last one waits with -32002, request already pending, rather than a refusal.
 - Told a site its request ended as the wallet locked with 4100, wallet locked, rather than a refusal.
 - Showed the bar with Connect only for a site that asked the wallet for something or is connected.
