@@ -487,18 +487,19 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
 }
 
 // Import wallet's network, Mainnet or Testnet, the ones people hold DUSK on:
-// the wallet opens on the one picked, so a phrase used on Testnet doesn't open
-// on Mainnet with nothing in it. Picking one moves the wallet there, as the
-// network menu does, and keeps what's typed. On another network, picked
-// before in Settings, nothing's asked: the top bar names it. `setDisabled`
-// holds it while the wallet is made.
+// none is picked to begin with, and Import waits till one is, so a phrase
+// used on Testnet doesn't open on Mainnet with nothing in it. Picking one
+// moves the wallet there, as the network menu does, and keeps what's typed.
+// On another network, picked before in Settings, nothing's asked: the top bar
+// names it. `setDisabled` holds it while the wallet is made; `picked` says
+// whether one was, and says to pick one where none was.
 function networkChoice(ov, actions) {
   const on = detectPresetId({ nodeUrl: ov?.nodeUrl, proverUrl: ov?.proverUrl, archiverUrl: ov?.archiverUrl });
   if (!ov?.nodeUrl || (on !== "mainnet" && on !== "testnet")) return null;
   const offered = NETWORK_PRESETS.filter((preset) => preset.id === "mainnet" || preset.id === "testnet");
   const host = h("div", { class: "onboard-network" });
   const err = formError();
-  let picked = on;
+  let picked = null;
   let busy = false;
   let held = false;
   const draw = () =>
@@ -508,6 +509,7 @@ function networkChoice(ov, actions) {
         items: offered.map((preset) => ({ id: preset.id, text: preset.label, disabled: busy || held })),
         selected: picked,
         onSelect: pick,
+        none: true,
       })
     );
   async function pick(id) {
@@ -538,6 +540,12 @@ function networkChoice(ov, actions) {
     setDisabled(on) {
       held = Boolean(on);
       draw();
+    },
+    picked() {
+      if (picked) return true;
+      err.show("Choose Mainnet or Testnet.");
+      host.querySelector("[role=tab]")?.focus?.();
+      return false;
     },
   };
 }
@@ -627,6 +635,8 @@ function phraseForm({ state, actions, title, lead = "", landing = null, network 
       try {
         if (busy) return;
         err.show("");
+        // Its network first, where it's asked: Import waits till one is picked.
+        if (network && !network.picked()) return;
         const m = readPhrase();
         if (m == null) return;
         const password = fields.read();

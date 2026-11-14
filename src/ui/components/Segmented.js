@@ -14,8 +14,10 @@ import { h } from "../lib/dom.js";
  * }} opts
  * @returns {HTMLElement}
  */
-export function segmented({ label, items, selected, onSelect, className = "" }) {
-  const index = Math.max(0, items.findIndex((item) => item.id === selected));
+export function segmented({ label, items, selected, onSelect, className = "", none = false }) {
+  // With `none`, nothing's picked until one is: no tab shows as chosen, and the first takes the focus.
+  const found = items.findIndex((item) => item.id === selected);
+  const index = none && found < 0 ? -1 : Math.max(0, found);
   const pick = (i) => {
     const item = items[(i + items.length) % items.length];
     if (item && !item.disabled && item.id !== items[index]?.id) onSelect?.(item.id);
@@ -28,7 +30,7 @@ export function segmented({ label, items, selected, onSelect, className = "" }) 
         type: "button",
         role: "tab",
         "aria-selected": i === index,
-        tabindex: i === index ? "0" : "-1",
+        tabindex: i === Math.max(0, index) ? "0" : "-1",
         disabled: Boolean(item.disabled),
         onclick: () => pick(i),
         onkeydown: (e) => {
@@ -47,10 +49,10 @@ export function segmented({ label, items, selected, onSelect, className = "" }) 
   return h(
     "div",
     {
-      class: ["tabs", className].filter(Boolean).join(" "),
+      class: ["tabs", index < 0 ? "tabs--none" : "", className].filter(Boolean).join(" "),
       role: "tablist",
       "aria-label": label,
-      style: `--seg-index: ${index};`,
+      style: `--seg-index: ${Math.max(0, index)};`,
     },
     tabs
   );

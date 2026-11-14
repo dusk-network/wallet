@@ -2071,6 +2071,11 @@ button.balance-refresh:hover {
   pointer-events: none;
 }
 
+/* Nothing picked yet: no tab shows as chosen. */
+.tabs.tabs--none::before {
+  visibility: hidden;
+}
+
 .tabs.tabs--mini .tab {
   height: 30px;
   font-size: 12.5px;

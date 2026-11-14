@@ -301,8 +301,9 @@ describe("the password on big sends, in Settings", () => {
 });
 
 describe("Import wallet's network", () => {
-  // Amélie's: her phrase, used on Testnet, imported opened on Mainnet with "TOTAL BALANCE 0 DUSK", twice.
-  it("asks which network first, moves the wallet there keeping what's typed, and imports it there", async () => {
+  // Amélie's: her phrase, used on Testnet, imported opened on Mainnet with "TOTAL BALANCE 0 DUSK", twice. Sofía's and
+  // Lena's: with Mainnet picked to begin with, importing the old way still landed there.
+  it("asks which network first, none picked to begin with, moves the wallet there keeping what's typed, and imports it there", async () => {
     const messages = [];
     const answer = async (message) => {
       messages.push(message);
@@ -314,14 +315,19 @@ describe("Import wallet's network", () => {
     const t = await popupAt("onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, answer, fresh);
     const tabs = () => t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]').map((tab) => [tab.textContent, tab.getAttribute("aria-selected")]);
     expect(tabs()).toEqual([
-      ["Mainnet", "true"],
+      ["Mainnet", "false"],
       ["Testnet", "false"],
     ]);
 
-    // The words and the password typed first, then the network.
+    // The words and the password typed first: Import waits for a network.
     const names = [...WORDS.map((_, i) => `Word ${i + 1}`), "Password", "Confirm password"];
     const fields = fieldsOf(t.app, names);
     typeAll(fields);
+    button(t.app, "Import wallet").click();
+    await flush();
+    expect(messages.filter((m) => m.type === "DUSK_UI_CREATE_WALLET")).toEqual([]);
+    expect(t.app.querySelectorAll(".form-error, [role=alert]").map((el) => el.textContent).filter(Boolean)).toContain("Choose Mainnet or Testnet.");
+
     t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]')[1].click();
     await flush();
     expect(messages.filter((m) => m.type === "DUSK_UI_SET_NODE_URL")).toEqual([
