@@ -21,7 +21,11 @@
 // account's nonce, once the network answers. Found, it went; nowhere, and its
 // nonce unused, the node never had it: while the payment still waits here it
 // goes out once, as the very transaction made for it, and once the wallet has
-// stopped meanwhile it's said not sent, with Send it now and Don't send. A
+// stopped meanwhile it's said not sent, with Send it now and Don't send. Its
+// nonce used, it's said not sent only once the account's transaction at that
+// nonce is seen to be another: a nonce gone past it alone is no proof, and it
+// stays looked up (Marek's: one the browser died on before it left, its nonce
+// taken by the next send, was "on its way" for good). A
 // shielded one, which has no nonce to tell by, is followed by its ID as a
 // send with no clear answer (`host.follow`), never said not sent.
 //
@@ -36,13 +40,6 @@ export { SEND_CANCELLED_TEXT };
 
 /** How long a waiting payment waits before the network is asked again, where the browser doesn't say first that it's back. */
 export const ASK_AGAIN_AFTER_MS = 5_000;
-
-/**
- * How long a handed-over payment whose nonce was used by something else must
- * stay missing from the chain before it's said not sent: the chain's list of
- * transactions can be a moment behind the account's nonce.
- */
-export const USED_FOR_MS = 10_000;
 
 /** Why a waiting payment wasn't sent, as the wallet stopped waiting for it. */
 export const NOT_SENT_TEXT = Object.freeze({
@@ -73,17 +70,18 @@ export const REPLACED_TEXT = "Another transaction from this account took its pla
  *   privacy: "public" | "shielded", to: string, toName?: string, lux: string,
  *   feeLux: string, memo: string, at: number, hash?: string, nonce?: string,
  *   ended?: "closed" | "locked" | "switched" | "failed", error?: string,
- *   stopped?: "closed" | "locked" | "switched", usedSince?: number,
+ *   stopped?: "closed" | "locked" | "switched",
  * }} WaitingRecord
  */
 
 /**
  * Where a payment handed over without a clear answer stands, as the node says
  * it (txLifecycle.js handedOverState): "in" the chain or the node's mempool;
- * "absent", nowhere and its nonce unused, so the node never had it; "used",
- * nowhere though its account's nonce went past it; "unknown" where the node
- * couldn't be asked.
- * @typedef {{ state: "in" | "absent" | "used" | "unknown" }} HandedOverState
+ * "absent", nowhere and its nonce unused, so the node never had it;
+ * "replaced", nowhere, and the account's transaction at its nonce seen, another;
+ * "used", nowhere though its account's nonce went past it, nothing seen at
+ * its nonce yet; "unknown" where the node couldn't be asked.
+ * @typedef {{ state: "in" | "absent" | "replaced" | "used" | "unknown" }} HandedOverState
  */
 
 /**
@@ -248,14 +246,9 @@ const keepInPlace = (record, replaces) =>
 const endKept = (sendId, ended, error = "") =>
   changeKept((kept) => {
     if (!kept[sendId]) return;
+    // (`usedSince`: kept by an earlier version.)
     const { hash: _hash, nonce: _nonce, stopped: _stopped, usedSince: _usedSince, ...record } = kept[sendId];
     kept[sendId] = { ...record, ended, ...(error ? { error } : {}) };
-  });
-
-// A change to what's kept of one payment, where it still is.
-const patchKept = (sendId, patch) =>
-  changeKept((kept) => {
-    if (kept[sendId]) kept[sendId] = { ...kept[sendId], ...patch };
   });
 
 // ----------------------------------------------------------------------------
@@ -385,9 +378,10 @@ async function endUnsent(item, host, ended, error) {
 
 // A payment handed over without a clear answer, looked up on the node once
 // it answers: found, it went; nowhere, and its nonce unused, the transaction
-// made for it goes out again, once, as it is; its nonce used by another, it
-// never will, which the chain is given a moment to say otherwise. Whether
-// the ones after it may go now: not while this one's still unclear.
+// made for it goes out again, once, as it is; the account's transaction at
+// its nonce seen to be another, it never will; its nonce gone past it alone,
+// it's looked up again. Whether the ones after it may go now: not while this
+// one's still unclear.
 async function settleUnclear(item, host) {
   // As it's kept: with the ID and nonce its hand-over noted.
   const record = (await keptRecord(item.sendId)) ?? item.record;
@@ -411,14 +405,11 @@ async function settleUnclear(item, host) {
     item.resolve(result);
     return true;
   }
-  if (state === "used") {
-    item.usedSince ??= Date.now();
-    if (Date.now() - item.usedSince < USED_FOR_MS) return false;
+  if (state === "replaced") {
     await endUnsent(item, host, "failed", item.refused ?? new Error(REPLACED_TEXT));
     return true;
   }
   if (state !== "absent") return false;
-  delete item.usedSince;
   // The node never had it: the transaction made for it, as it is, once more.
   item.state = "sending";
   let result;
@@ -766,9 +757,10 @@ let lookedUpAt = -Infinity;
  * waits on any more, as after the wallet's background or page stopped, or
  * the wallet locked, during its try. A public one found in the chain or the
  * node's mempool went: it's followed as a sent one, and its record goes. One
- * the node never had, its nonce unused (or used by another a while now), is
- * kept as not sent, with why the wallet stopped. One the node can't be asked
- * of waits for the next look, as does one the engine is still handing over
+ * the node never had, its nonce unused, is kept as not sent, with why the
+ * wallet stopped; one whose nonce the account's transaction seen at it took,
+ * as not sent, with that. One whose nonce is gone past it with nothing seen
+ * at it yet, or the node can't be asked of, waits for the next look, as does one the engine is still handing over
  * (`host.underWay`: it went on as the background started again), which may
  * reach the node yet. A shielded one, or one kept before nonces were, is
  * followed by its ID as a send with no clear answer. The page is told of each
@@ -801,11 +793,9 @@ export async function followHandedOver(host, { every = 0 } = {}) {
         } else if (state === "absent") {
           await host.release?.(record.sendId).catch(() => {});
           await endKept(record.sendId, record.stopped ?? "closed");
-        } else if (state === "used" && Number(record.usedSince) > 0 && Date.now() - Number(record.usedSince) >= USED_FOR_MS) {
+        } else if (state === "replaced") {
+          await host.release?.(record.sendId).catch(() => {});
           await endKept(record.sendId, "failed", REPLACED_TEXT);
-        } else if (state === "used") {
-          if (!(Number(record.usedSince) > 0)) await patchKept(record.sendId, { usedSince: Date.now() });
-          continue;
         } else {
           continue;
         }

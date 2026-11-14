@@ -661,7 +661,7 @@ function withPhoenixSpendMutex(profileIndex, fn) {
 async function settleUncertainNonce(key, account) {
   const uncertain = uncertainNonces.get(key);
   if (!uncertain) return;
-  const { state: where } = await handedOverState(uncertain.nodeUrl, { hash: uncertain.hash, account, nonce: uncertain.nonce.toString() }).catch(() => ({ state: "unknown" }));
+  const { state: where } = await handedOverState(uncertain.nodeUrl, { hash: uncertain.hash, account, nonce: uncertain.nonce.toString() }, { prove: false }).catch(() => ({ state: "unknown" }));
   if (where === "unknown" || uncertainNonces.get(key) !== uncertain) return;
   uncertainNonces.delete(key);
   if (where === "absent" && moonlightNonces.get(key) === uncertain.nonce) moonlightNonces.set(key, uncertain.nonce - 1n);

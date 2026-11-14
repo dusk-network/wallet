@@ -118,10 +118,43 @@ describe("txLifecycle reconciliation", () => {
       expect(String(fetchMock.mock.calls[2][0])).toBe("https://node.example/on/account:chen-account/status");
     });
 
-    it("is used where neither has it though the account's nonce went past it", async () => {
-      mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(131));
+    // Marek's: the browser died before a payment left it, and the account's next send took its nonce: it said "on
+    // its way" for good. Not sent only once the account's transaction at its nonce is seen, and is another.
+    const OTHER = "e7".repeat(32);
+    const OWN = "ab".repeat(32);
+    const made = Date.now() - 60_000;
+    const head = { pair: { json: { last_block: [4860000, "aa"], last_finalized_block: [4859998, "bb"] } } };
+    const sent = (...ids) => ({ h: { json: ids.map((origin, i) => ({ block_height: 4859990 + i, origin, events: [] })) } });
+    const nonces = (...list) => Object.fromEntries(list.map((n, i) => [`t${i}`, { tx: { json: JSON.stringify({ type: "moonlight", sender: "chen-account", receiver: "someone", value: 1, nonce: n }) } }]));
+
+    it("is replaced where neither has it, the account's nonce went past it, and its transaction at that nonce is another", async () => {
+      const fetchMock = mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(132), head, sent("c1".repeat(32), OTHER), nonces(130, 131));
       const { handedOverState } = await import("./txLifecycle.js");
-      await expect(handedOverState("https://node.example", tx)).resolves.toEqual({ state: "used" });
+      await expect(handedOverState("https://node.example", { ...tx, at: made })).resolves.toEqual({ state: "replaced", by: OTHER });
+      // The account's own sends, from before the payment was made on.
+      const history = String(fetchMock.mock.calls[4][1].body);
+      expect(history).toContain('moonlightHistory(sender: "chen-account", fromBlock: ');
+      expect(Number(history.match(/fromBlock: (\d+)/)[1])).toBeLessThan(4860000 - 6);
+    });
+
+    it("is used, which says nothing yet, where the account's nonce went past it with no transaction seen at its nonce", async () => {
+      const { handedOverState } = await import("./txLifecycle.js");
+      // The chain's list is behind: what it has of the account isn't at that nonce.
+      mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(131), head, sent("c1".repeat(32)), nonces(130));
+      await expect(handedOverState("https://node.example", { ...tx, at: made })).resolves.toEqual({ state: "used" });
+      // Nothing listed of it at all.
+      mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(131), head, { h: null });
+      await expect(handedOverState("https://node.example", { ...tx, at: made })).resolves.toEqual({ state: "used" });
+      // A node without the archive: it can't be told.
+      mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(131), head, { errors: [{ message: 'Unknown field "moonlightHistory" on type "Query".' }] });
+      await expect(handedOverState("https://node.example", { ...tx, at: made })).resolves.toEqual({ state: "unknown" });
+      // Its own, listed at that nonce before the lookup by its ID has it: it went.
+      mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(131), head, sent(OWN), nonces(131));
+      await expect(handedOverState("https://node.example", { ...tx, hash: OWN, at: made })).resolves.toEqual({ state: "in" });
+      // Not asked to prove it, as before the next send: used, nothing more looked for.
+      const fetchMock = mockFetchJson({ tx: null }, { mempoolTxs: [] }, status(131));
+      await expect(handedOverState("https://node.example", tx, { prove: false })).resolves.toEqual({ state: "used" });
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
     it("is unknown where the node can't be asked, or gives no nonce", async () => {
