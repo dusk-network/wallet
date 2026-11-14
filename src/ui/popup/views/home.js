@@ -16,7 +16,9 @@ import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
 import { whenAtText } from "./txRow.js";
-import { UNCLEAR_TEXT, reasonText } from "./sent.js";
+import { UNCLEAR_TEXT, appLeaveText, reasonText } from "./sent.js";
+import { isTauriRuntime } from "../../../platform/runtime.js";
+import { isPhone } from "../../lib/device.js";
 
 // In the wallet's words: what a node says of it is that node's to choose.
 const BALANCE_UNREAD = "Couldn't read your balance from this node. Try again in a moment.";
@@ -360,14 +362,17 @@ function waitingSection(ov, { state, actions } = {}) {
     });
 
   // One handed over without a clear answer may have gone out: it's looked up,
-  // and has no Cancel.
+  // and has no Cancel. In the app on a phone, one waiting goes out only while
+  // the app's open, which it says.
   const waitingNote = (send) =>
     send.unclear && send.checks
       ? "It may have gone out already. The wallet checks once the network answers."
       : send.unclear && send.waits
         ? UNCLEAR_TEXT
         : send.waits
-          ? "It goes out once the network answers."
+          ? isTauriRuntime() && isPhone()
+            ? `It goes out once the network answers. ${appLeaveText(ov)}`
+            : "It goes out once the network answers."
           : "It's being sent.";
   const waitingBox = (send) =>
     h("div", { class: "callout home-waiting", role: "status" }, [

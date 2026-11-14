@@ -163,6 +163,41 @@ describe("a payment from Send that couldn't reach the network before it went out
   });
 });
 
+// Chen's, in the Android app: a payment confirmed as the signal dropped went out only once he opened the app again.
+// What hasn't reached the node yet is what the app's notice says waits for it to be opened again.
+describe("the payments that haven't reached the node", () => {
+  it("are those on their first try or waiting, said as a first try begins, and not once handed over, sent or called off", async () => {
+    const ids = () => waiting.waitingForNetwork().map(({ sendId, walletId, nodeUrl }) => `${sendId} ${walletId === WALLET} ${nodeUrl === NODE}`);
+    host.changed = vi.fn();
+    // The first try, under way: it hasn't reached the node, and it's said.
+    const first = Promise.withResolvers();
+    const attempt = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce({ hash: "aa" });
+    const sent = waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt, host });
+    await vi.advanceTimersByTimeAsync(0);
+    expect([ids(), host.changed]).toEqual([["s1 true true"], expect.any(Function)]);
+    expect(host.changed).toHaveBeenCalledOnce();
+    // It couldn't reach the network: it waits, as one more behind it does.
+    first.reject(offline());
+    const other = waiting.sendWhenReachable({ sendId: "s2", record: record({ memo: "Hors ligne deux" }), attempt: vi.fn().mockRejectedValue(offline()), host });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ids()).toEqual(["s1 true true", "s2 true true"]);
+    // Called off, it's no longer one; sent, nor is the other.
+    await waiting.cancelWaitingSend("s2", host);
+    await expect(other).rejects.toMatchObject({ data: { cancelled: true } });
+    network.answers = true;
+    await askAgain();
+    await expect(sent).resolves.toEqual({ hash: "aa" });
+    expect(ids()).toEqual([]);
+  });
+
+  it("isn't one handed over without a clear answer: it may have gone out", async () => {
+    const attempt = vi.fn().mockRejectedValue(Object.assign(new TypeError("Failed to fetch"), { data: { sent: "unknown", hash: "ab".repeat(32) } }));
+    waiting.sendWhenReachable({ sendId: "s3", record: record(), attempt, host }).catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    expect(waiting.waitingForNetwork()).toEqual([]);
+  });
+});
+
 describe("Cancel on a waiting payment", () => {
   it("calls it off at once while it waits: nothing sent, nothing kept, and it's tried no more", async () => {
     const attempt = vi.fn().mockRejectedValue(offline());

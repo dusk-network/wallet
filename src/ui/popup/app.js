@@ -1799,6 +1799,7 @@ listenForLinks((url) => {
 // anything (DUSK_UI_TX_NOTICED), or for money that came in, the wallet's.
 async function openNoticed() {
   const noticed = isTauriRuntime() && isPhone() ? await openedFromNotice().catch(() => null) : null;
+  if (noticed?.waiting) return openWaiting();
   const hash = noticed?.hash ?? "";
   if (!hash || !noticed.token) return;
   if (noticed.account) return openIncoming(noticed);
@@ -1832,6 +1833,23 @@ async function openNoticed() {
   }
   state.needsRefresh = true;
   render({ forceRefresh: true }).catch(() => {});
+}
+
+// A notice of a payment waiting for the network (android/ArrivalJob.kt's
+// Waiting), tapped: the payment, on its Sent where that's the screen left
+// (or the one an unlock goes back to) and it's still on its way, else on
+// Home, which lists it, as waiting or not sent. After the unlock, where the
+// wallet's locked.
+function openWaiting() {
+  netMenu.close();
+  acctMenu.close();
+  const sentLeft = state.sent && !sentIsFinal(state.sent, state.overview) && (state.route === "sent" || state.returnTo?.route === "sent");
+  if (!sentLeft) {
+    state.returnTo = null;
+    state.route = "home";
+  }
+  state.needsRefresh = true;
+  return render({ forceRefresh: true });
 }
 
 // A notice of money that came in (android/ArrivalJob.kt's Incoming), tapped

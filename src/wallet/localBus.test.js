@@ -125,7 +125,7 @@ vi.mock("../shared/walletEngine.js", () => ({
 }));
 
 // The phone's notices, as the app's Kotlin would answer: allowed or not, and what was asked.
-const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [], watched: [], settled: [], forgotten: [] }));
+const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [], watched: [], settled: [], forgotten: [], waiting: [] }));
 vi.mock("../platform/notices.js", () => ({
   appNoticesAllowed: async () => phoneNotices.allowed(),
   askAppNotices: async () => {
@@ -148,6 +148,10 @@ vi.mock("../platform/notices.js", () => ({
   // A wallet's sends no longer looked for: "" for every wallet's.
   forgetAppArrivals: async (wallet = "") => {
     phoneNotices.forgotten.push(wallet);
+  },
+  // A payment waiting for the network while the app's away (android/ArrivalJob.kt's Waiting): null for none.
+  waitAppSend: async (setup) => {
+    phoneNotices.waiting.push(setup);
   },
 }));
 
@@ -1261,7 +1265,7 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
 // a test says, and records what it was asked.
 describe("arrival notices in the app on a phone", () => {
   const phone = ({ allowed }) => {
-    Object.assign(phoneNotices, { allowed, asked: [], watched: [], settled: [], forgotten: [], shown: null });
+    Object.assign(phoneNotices, { allowed, asked: [], watched: [], settled: [], forgotten: [], waiting: [], shown: null });
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     vi.stubGlobal("document", { visibilityState: "hidden" });
     return phoneNotices.asked;
@@ -1313,6 +1317,89 @@ describe("arrival notices in the app on a phone", () => {
     await patchTxMeta("d4".repeat(32), { status: "executed" });
     await patchTxMeta("d4".repeat(32), { status: "executed" });
     await vi.waitFor(() => expect(asked.filter((step) => step.startsWith("notify"))).toHaveLength(2));
+  });
+
+  // Chen's: a payment confirmed as the signal dropped didn't go out with the app in the background, the signal back
+  // for minutes, and nothing said so. The app sends only while it's open: Android's notice says so while it's away.
+  it("tells Android of a payment waiting for the network, with no amount or name, and that none waits once it's gone out", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    const { getSettings } = await import("../shared/settings.js");
+    const params = { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "10000000", memo: "cendol" };
+    const offline = () => Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+    statusChecks.nodeAnswers = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // Notices not asked for: Android's told nothing of it. Asked for while it waits (Tell me when it arrives,
+      // on its Sent): told then.
+      engine.sendTransaction.mockRejectedValue(offline());
+      const quiet = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0101", walletId: "account of wallet A", params });
+      await vi.waitFor(async () => expect((await localSend({ type: "DUSK_UI_OVERVIEW" })).waitingSends).toHaveLength(1));
+      expect(phoneNotices.waiting.filter(Boolean)).toEqual([]);
+      await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
+      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toMatchObject({ title: "A payment is waiting" }));
+      await localSend({ type: "DUSK_UI_CANCEL_SEND", sendId: "send-0101" });
+      await quiet;
+      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toBeNull());
+
+      // On its first try, as the app may be left before the try's through (the signal gone, it hangs): told then,
+      // with the node to ask and the notice's words.
+      const firstTry = Promise.withResolvers();
+      engine.sendTransaction.mockReset();
+      engine.sendTransaction.mockReturnValueOnce(firstTry.promise).mockResolvedValueOnce({ hash: "ef".repeat(32), nonce: 1n });
+      const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0102", walletId: "account of wallet A", params });
+      const { nodeUrl } = await getSettings();
+      await vi.waitFor(() =>
+        expect(phoneNotices.waiting.at(-1)).toEqual({
+          wallet: "account of wallet A",
+          nodeUrl,
+          title: "A payment is waiting",
+          away: "It goes out when you open Dusk Wallet again.",
+          back: "Open Dusk Wallet to send it.",
+        })
+      );
+      expect(JSON.stringify(phoneNotices.waiting)).not.toMatch(/0\.01|cendol|lucas|account-/);
+      firstTry.reject(offline());
+      await vi.waitFor(async () => expect((await localSend({ type: "DUSK_UI_OVERVIEW" })).waitingSends).toEqual([expect.objectContaining({ sendId: "send-0102", waits: true })]));
+      expect(phoneNotices.waiting.at(-1)).toMatchObject({ title: "A payment is waiting" });
+
+      // The network back, the app open: it goes out, and none waits.
+      statusChecks.nodeAnswers = true;
+      await vi.advanceTimersByTimeAsync(5_000);
+      await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "ef".repeat(32) } });
+      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toBeNull());
+
+      // One waiting as the wallet locks isn't sent: none waits for the app to open.
+      statusChecks.nodeAnswers = false;
+      engine.sendTransaction.mockRejectedValueOnce(offline());
+      const locked = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0103", walletId: "account of wallet A", params });
+      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toMatchObject({ title: "A payment is waiting" }));
+      await localSend({ type: "DUSK_UI_LOCK" });
+      await locked;
+      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toBeNull());
+    } finally {
+      vi.useRealTimers();
+      statusChecks.nodeAnswers = true;
+      engine.sendTransaction.mockReset();
+    }
+  });
+
+  // Astra's: Android ended the app with a payment waiting; started again, the payment was said not sent, but Android
+  // still had it as waiting, and leaving the app posted "A payment is waiting" and looked for the network again.
+  it("tells Android as the app starts that none waits, one that waited before being said not sent", async () => {
+    vi.resetModules();
+    phone({ allowed: () => true });
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    // Kept as Android ended the app with it waiting.
+    localStorage.setItem(
+      "dusk_waiting_sends_v1",
+      JSON.stringify({ "send-0109": { sendId: "send-0109", walletId: "account of wallet A", nodeUrl, profileIndex: 0, privacy: "public", to: ACCOUNT, lux: "10000000", feeLux: "2500000", memo: "cendol", at: 1 } })
+    );
+    const { localSend } = await import("./localBus.js");
+    await vi.waitFor(() => expect(phoneNotices.waiting).toEqual([null]));
+    expect((await localSend({ type: "DUSK_UI_OVERVIEW" })).waitingSends).toEqual([expect.objectContaining({ sendId: "send-0109", waiting: false, ended: "closed" })]);
+    // Read again: nothing more to tell.
+    expect(phoneNotices.waiting).toEqual([null]);
   });
 
   it("never asks again after a no, and shows arrivals once notices are allowed in the phone's settings", async () => {

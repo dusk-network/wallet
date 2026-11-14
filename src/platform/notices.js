@@ -1,9 +1,9 @@
 // Arrival notices in the app on Android (apps/tauri, android/NoticesPlugin.kt):
 // Android's question for leave to show them, a payment's notice, the sends
 // Android looks for once the app leaves the screen (android/ArrivalJob.kt),
-// the accounts it looks at for money coming in, and the transaction a
-// notice's tap opened the app on. Where there's no app, there are none, and
-// each answer says so.
+// the accounts it looks at for money coming in, a payment waiting for the
+// network while the app's away, and the transaction a notice's tap opened the
+// app on. Where there's no app, there are none, and each answer says so.
 
 import { isTauriRuntime } from "./runtime.js";
 
@@ -75,6 +75,17 @@ export const watchAppIncoming = async (setup) => {
 };
 
 /**
+ * A payment from Send waiting for the network, for Android's notice while the
+ * app's away (android/ArrivalJob.kt's Waiting): the app sends only while it's
+ * open. `title` and `away` as it leaves, `back` once its node answers again;
+ * none of them names the amount or whom it's to. Null for none: the notice goes.
+ * @param {{ wallet: string, nodeUrl: string, title: string, away: string, back: string } | null} setup
+ */
+export const waitAppSend = async (setup) => {
+  await ask("waiting", { setup: setup ? JSON.stringify(setup) : "" });
+};
+
+/**
  * A wallet removed: Android looks for none of its sends any more, and tells
  * none it was looking for. "" for every wallet's, on a reset or a restore.
  * Never fails.
@@ -100,11 +111,14 @@ export const settleAppArrival = async (hash) => {
  * of it is the notice's till the token is checked against its send's, or
  * the wallet's for money coming in (DUSK_UI_TX_NOTICED); `ours`, Android
  * checked it as one of the app's notices carried it. `hash` "" for none.
- * @returns {Promise<{ hash: string, token: string, status: "" | "executed" | "failed", blockHeight: string, account: string, ours: boolean }>}
+ * `waiting`: the notice of a payment waiting for the network was tapped, with
+ * the token Android gave it.
+ * @returns {Promise<{ hash: string, token: string, status: "" | "executed" | "failed", blockHeight: string, account: string, ours: boolean, waiting: boolean }>}
  */
 export const openedFromNotice = async () => {
-  const { hash, outcome, block, token, account, ours } = await ask("opened");
+  const { hash, outcome, block, token, account, ours, waiting } = await ask("opened");
   return {
+    waiting: waiting === true,
     hash: typeof hash === "string" && /^[0-9a-f]{64}$/.test(hash) ? hash : "",
     token: typeof token === "string" && /^[0-9a-f]{32}$/.test(token) ? token : "",
     status: outcome === "executed" || outcome === "failed" ? outcome : "",

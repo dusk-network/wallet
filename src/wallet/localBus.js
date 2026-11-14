@@ -31,14 +31,14 @@ import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.j
 import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
-import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
-import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, watchAppArrival } from "../platform/notices.js";
+import { WAITING_NOTICE, arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
+import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, waitAppSend, watchAppArrival } from "../platform/notices.js";
 import { incomingNoticeToken, isIncomingNoticeToken, noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import { formatDusk } from "../shared/amount.js";
 import { shortAddress } from "../ui/lib/strings.js";
-import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingForNetwork, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import {
@@ -160,6 +160,26 @@ async function watchArrival(hash, tx) {
   });
 }
 
+// A payment from Send waiting for the network, told to Android for the app's
+// time away (android/ArrivalJob.kt's Waiting): the app signs and sends only
+// while it's open, so the notice says it goes out once the app's opened
+// again, and once the network's back, to open it to send it. Told as one
+// starts or stops waiting, where a payment's notices may show; none for none.
+let waitingTold = Promise.resolve("");
+function tellWaitingForApp() {
+  if (!isPhone()) return waitingTold;
+  waitingTold = waitingTold
+    .then(async (said) => {
+      const [first] = waitingForNetwork();
+      const setup = first && (await mayNotify(appNoticesAllowed)) ? { wallet: first.walletId, nodeUrl: first.nodeUrl, ...WAITING_NOTICE } : null;
+      const key = JSON.stringify(setup);
+      if (key !== said) await waitAppSend(setup).catch(() => {});
+      return key;
+    })
+    .catch(() => "");
+  return waitingTold;
+}
+
 // How the payments from Send that wait for the network reach the wallet, as
 // the extension's background has them: the node asked whether it answers and
 // where one handed over stands, the engine to call one off or forget one that
@@ -184,7 +204,14 @@ const waitingHost = {
         .catch(() => {});
     }
   },
-  tell: (message) => tellPage(message),
+  tell: (message) => {
+    tellPage(message);
+    if (message?.type === "DUSK_UI_SEND_WAITING") tellWaitingForApp();
+  },
+  // A payment began its first try: Android's told, as the app may be left before it's through.
+  changed: () => {
+    tellWaitingForApp();
+  },
 };
 
 // A payment from Send is kept with its transaction's ID and nonce before the
@@ -196,10 +223,19 @@ setHandOverHook(async ({ sendId, hash, nonce }) => {
 });
 followHandedOver(waitingHost).catch(() => {});
 
+// As the app starts, nothing waits here: the payments waiting for the network
+// live in this page, and one that waited as Android ended the app, or as the
+// page went, is said not sent (waitingSends.js). What Android was told of it
+// goes, its notice and its looks for the network with it (Astra's: started
+// again, leaving the app said once more that a payment waits). Told again as
+// the wallet's read, should this first word not reach it.
+tellWaitingForApp();
+
 // The wallet locks: a payment waiting for the network goes out only while its wallet is open.
 async function lockWallet() {
   await stopWaitingSends("locked", waitingHost).catch(() => {});
   lock();
+  tellWaitingForApp();
 }
 
 // Auto-lock in the app, as the extension's background does it: the wallet
@@ -525,6 +561,7 @@ export async function localSend(message) {
 
     // UI asks for overview data (network + addresses + balance)
     if (message?.type === "DUSK_UI_OVERVIEW") {
+      tellWaitingForApp();
       const vault = await loadVault();
       const settings = await ensureEngineConfigured();
       const status = engineStatus();
@@ -665,6 +702,8 @@ export async function localSend(message) {
       // The send on Sent, on its way as the person asked: looked for once they leave.
       const meta = message.hash ? await getTxMeta(String(message.hash)).catch(() => null) : null;
       if (meta && !["executed", "failed", "removed"].includes(meta.status)) await watchArrival(String(message.hash), meta).catch(() => {});
+      // Or still waiting for the network: Android says so while the app's away.
+      tellWaitingForApp();
       return { ok: true, state };
     }
     if (message?.type === "DUSK_UI_NOTICES_SAID") {
@@ -833,6 +872,9 @@ export async function localSend(message) {
             host: waitingHost,
             // Sent again from Home's Send it now, in the place of the one Home said wasn't sent.
             replaces: typeof message.replaces === "string" && /^[\w-]{8,64}$/.test(message.replaces) ? message.replaces : "",
+            // Gone out, or ended without: Android's notice of it waiting goes.
+          }).finally(() => {
+            tellWaitingForApp();
           })
         : await attempt();
       const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });

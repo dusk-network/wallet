@@ -86,6 +86,18 @@ export const incomingNoticeTitle = ({ hidden = false } = {}) =>
 export const INCOMING_LOCKED_TITLE = "Payment received";
 
 /**
+ * The app's notice while it's away with a payment waiting for the network
+ * (android/ArrivalJob.kt's Waiting): it signs and sends only while it's open.
+ * `away` as it's left, `back` once the network answers again. No amount and
+ * no one's name, on a locked phone or not.
+ */
+export const WAITING_NOTICE = Object.freeze({
+  title: "A payment is waiting",
+  away: "It goes out when you open Dusk Wallet again.",
+  back: "Open Dusk Wallet to send it.",
+});
+
+/**
  * The person tapped Tell me when it arrives: the phone asks, the first time.
  * @param {() => Promise<unknown>} ask - the phone's question
  * @param {() => Promise<boolean>} [allowedNow] - the app's

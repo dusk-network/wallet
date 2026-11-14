@@ -1053,6 +1053,38 @@ describe("the app on a phone", () => {
     opened = { hash: "" };
   });
 
+  // Chen's: a payment confirmed as the signal dropped went out only once he opened the app again, and nothing said
+  // so while he was away. Android's notice of it (android/ArrivalJob.kt's Waiting) opens the wallet on that payment:
+  // its Sent where that's the screen left, else Home, which lists it; only a tap with the notice's token does.
+  it("opens a notice of a payment waiting on that payment, its Sent or Home, and only from the notice", async () => {
+    let opened = { hash: "" };
+    const bridge = tauriBridge({ notices: (args) => (args?.action === "opened" ? { allowed: true, ...opened } : { allowed: true }) });
+    const comeBack = async (t) => {
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+    const t = await popupOn("options", { addressBook: { loaded: true, items: [] } }, undefined, { tauri: bridge });
+    // Android didn't know the tap's token as its notice's: nothing opens.
+    opened = { hash: "", waiting: false };
+    await comeBack(t);
+    expect(t.state.route).toBe("options");
+    opened = { hash: "", waiting: true };
+    await comeBack(t);
+    await vi.waitFor(() => expect(t.state.route).toBe("home"));
+
+    // Left on that payment's Sent, still waiting for the network: there it stays.
+    opened = { hash: "" };
+    const waiting = { phase: "sending", sendId: "send-0001", waits: true, title: "Send", amountLux: "10000000", startedAt: Date.now() - 5_000 };
+    const s = await popupOn("sent", { addressBook: { loaded: true, items: [] }, sent: waiting }, undefined, { tauri: bridge });
+    opened = { hash: "", waiting: true };
+    await comeBack(s);
+    expect([s.state.route, s.state.sent?.sendId]).toEqual(["sent", "send-0001"]);
+    opened = { hash: "" };
+  });
+
   // Sofía's: no notice when a client paid her. Android's job tells money that came in (android/ArrivalJob.kt); its
   // tap opens that payment, in the profile it came to, once the wallet is open, and only with the wallet's token.
   it("opens a notice of money that came in on its payment, in the profile it came to, after the unlock where it's locked", async () => {

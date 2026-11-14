@@ -53,6 +53,16 @@ const waitingText = () =>
 /** What's said of a payment from Send handed to the network without a clear answer: it's looked up, and sent once if it didn't go. */
 export const UNCLEAR_TEXT = "It may have gone out already. If it didn't, it goes out once the network answers.";
 
+/**
+ * In the app on a phone, what leaving it does to a payment waiting for the
+ * network: the app signs and sends only while it's open, so it goes out once
+ * the app's opened again; with Lock when I leave the app on, the wallet
+ * locks as it's left, and the payment isn't sent (Home offers Send it now).
+ * @param {object} [ov] - the overview
+ */
+export const appLeaveText = (ov) =>
+  ov?.lockOnLeave === true ? "If you leave Dusk Wallet, it locks and this isn't sent." : "If you leave Dusk Wallet, it goes out when you open it again.";
+
 // "13:21 CET": when it was sent, with the time zone it shows in.
 function clock(ts) {
   return zonedClockText(Number(ts) || Date.now());
@@ -688,12 +698,19 @@ export function sentView(ov, { state, actions, sozu } = {}) {
       )
     : null;
 
-  // That it goes on: in Firefox on a phone with what's said of its notice (noticeOffer).
+  // That it goes on: in Firefox on a phone with what's said of its notice
+  // (noticeOffer). In the app on a phone, one waiting for the network goes
+  // out only while the app's open, which it says.
+  const waitsHere = phase === "sending" && (sent.waits || offline()) && !sent.handedOver;
   const note = final || (isPhone() && !isTauriRuntime())
     ? null
     : h("p", {
         class: "sent-note",
-        text: isExtensionRuntime() ? CLOSE_WALLET_TEXT : "You can leave this screen; this continues in the background.",
+        text: isExtensionRuntime()
+          ? CLOSE_WALLET_TEXT
+          : isPhone() && waitsHere
+            ? appLeaveText(ov)
+            : "You can leave this screen; this continues in the background.",
       });
 
   return [

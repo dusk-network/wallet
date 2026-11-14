@@ -324,6 +324,24 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(boxes(document)).toEqual([]);
   });
 
+  // Chen's, in the app on Android: a payment waiting for the network went out only once he opened the app again.
+  it("says in the app on a phone that a payment waiting goes out once the app's opened again", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2, 40));
+    const { document, window } = installFakeDom();
+    window.__TAURI_INTERNALS__ = {};
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
+    document.body.replaceChildren(...homeView(ov([send()]), { state, actions }));
+    expect(boxes(document)).toEqual([
+      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers. If you leave Dusk Wallet, it goes out when you open it again.Cancel",
+    ]);
+    // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
+    document.body.replaceChildren(...homeView(ov([send()], { lockOnLeave: true }), { state, actions }));
+    expect(boxes(document)[0]).toContain("It goes out once the network answers. If you leave Dusk Wallet, it locks and this isn't sent.");
+  });
+
   // Chen's: one handed over as the Wi-Fi died showed as sent in Activity, though the node never had it.
   it("says one handed over without a clear answer may have gone out, with no Cancel, until the node's asked", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });

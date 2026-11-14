@@ -94,7 +94,8 @@ export const REPLACED_TEXT = "Another transaction from this account took its pla
  * up by its ID (`unclear` while it isn't known to have gone); `check` asks
  * the node where one handed over stands; `release` tells the engine a payment
  * it handed over never went, so its nonce is free again; `underWay`, whether
- * the engine is handing one over still, as after the background started again.
+ * the engine is handing one over still, as after the background started again;
+ * `changed`, that a payment began its first try, which hasn't reached the node.
  * @typedef {{
  *   answers: () => Promise<boolean>,
  *   cancelInEngine: (sendId: string) => Promise<{ cancelled: boolean }>,
@@ -169,9 +170,10 @@ export function sendCancelled(text = SEND_CANCELLED_TEXT) {
 // handedOver, stopping, refused }. "unclear": handed over without a clear
 // answer, to be looked up on the node.
 const queue = [];
-// Payments being tried the first time, before any waited, by their ID: one
-// called off meanwhile (`cancelled`) never waits after its try; one handed
-// over (`handedOver`) isn't said to have nothing gone.
+// Payments being tried the first time, before any waited, by their ID, with
+// what's kept of them (`record`): one called off meanwhile (`cancelled`) never
+// waits after its try; one handed over (`handedOver`) isn't said to have
+// nothing gone.
 const firstTries = new Map();
 let looping = false;
 // Ends the pause between asks at once: a payment joined, or the browser's back online.
@@ -556,8 +558,9 @@ export async function sendWhenReachable({ sendId, record, attempt, host, replace
   }
   let unclear = false;
   if (!queue.length) {
-    const first = { cancelled: false, handedOver: false };
+    const first = { cancelled: false, handedOver: false, record: kept };
     firstTries.set(sendId, first);
+    host.changed?.();
     try {
       const result = await attempt({ waited: false });
       await forget(sendId).catch(() => {});
@@ -675,6 +678,22 @@ export async function stopWaitingSends(why, host, { engineGone = false } = {}) {
     })
   );
   wake();
+}
+
+/**
+ * The payments here that haven't been handed to the node: on their first
+ * try, waiting for the network, or being made to go out again. Each one's
+ * ID, wallet and node, the first tries first. In the app, which sends only
+ * while it's open, Android's notice says so while the app's away
+ * (wallet/localBus.js).
+ * @returns {{ sendId: string, walletId: string, nodeUrl: string }[]}
+ */
+export function waitingForNetwork() {
+  const of = (sendId, record) => ({ sendId, walletId: String(record?.walletId ?? ""), nodeUrl: String(record?.nodeUrl ?? "") });
+  return [
+    ...[...firstTries].filter(([, first]) => !first.handedOver && !first.cancelled).map(([sendId, first]) => of(sendId, first.record)),
+    ...queue.filter((item) => (item.state === "waiting" || item.state === "sending") && !item.handedOver).map((item) => of(item.sendId, item.record)),
+  ];
 }
 
 /**
