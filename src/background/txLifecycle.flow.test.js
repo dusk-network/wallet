@@ -103,6 +103,11 @@ vi.mock("../shared/vault.js", () => ({
   checkVaultPassword: vi.fn(async (password, id) => {
     if (password !== "the password" || id !== "wallet-key") throw new Error("Incorrect password");
   }),
+  // The open wallet's phrase, for the password that opens it: a public BIP39 test phrase.
+  vaultPhrase: vi.fn(async (password, id) => {
+    if (password !== "the password" || id !== "wallet-key") throw new Error("Incorrect password");
+    return "legal winner thank year wave sausage worth useful legal winner thank yellow";
+  }),
   // Three wallets in the vault: the two the password opened, and one another opens.
   countVaultWallets: vi.fn(async () => 3),
   createVault: vi.fn(async () => ({ ok: true })),
@@ -964,6 +969,44 @@ describe("background Phoenix tx lifecycle flow", () => {
       expect(Object.keys(await raw()).sort()).toEqual(["https://later.example", "https://stays.example"]);
       expect(mocks.alarmsCreate).toHaveBeenCalledWith("dusk_connection_end", { when: expect.any(Number) });
       expect(mocks.alarmsCreate.mock.lastCall[1].when).toBeGreaterThan(now + 86_000_000);
+    });
+  });
+
+  // Nandini's and Amélie's: a check of the recovery words that didn't match put the whole phrase on screen.
+  describe("the recovery words, from Settings", () => {
+    const PHRASE = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const fromPage = { url: "chrome-extension://wallet/popup.html" };
+    const fromSite = { url: "https://dapp.example/", tab: { id: 7 } };
+
+    beforeEach(async () => {
+      const { getEngineStatus } = await import("../background/engineHost.js");
+      getEngineStatus.mockImplementation(async () => ({ isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0, walletKey: "wallet-key" }));
+    });
+
+    afterEach(async () => {
+      const { getEngineStatus } = await import("../background/engineHost.js");
+      getEngineStatus.mockImplementation(async () => ({ isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 }));
+    });
+
+    it("says whether the words typed match, and never gives the phrase for a wrong answer", async () => {
+      const check = (words) => sendBackgroundMessage({ type: "DUSK_UI_CHECK_RECOVERY_WORDS", password: "the password", words }, fromPage);
+      await expect(check(undefined)).resolves.toEqual({ ok: true, count: 12 });
+      await expect(check([[1, "Legal"], [6, " sausage "], [12, "YELLOW"]])).resolves.toEqual({ ok: true, match: true });
+      for (const wrong of [[[1, "legal"], [6, "sausage"], [12, "yelow"]], [[1, "maison"], [2, "velo"], [3, "gateau"]]]) {
+        const answer = await check(wrong);
+        expect(answer).toEqual({ ok: true, match: false });
+        expect(JSON.stringify(answer)).not.toContain("winner");
+      }
+    });
+
+    it("shows the phrase again only for the password, asked for it on its own, and only to the wallet's pages", async () => {
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_RECOVERY_PHRASE", password: "not it" }, fromPage)).resolves.toMatchObject({ error: { message: "Incorrect password" } });
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_RECOVERY_PHRASE", password: "the password" }, fromPage)).resolves.toEqual({ ok: true, result: PHRASE });
+      for (const type of ["DUSK_UI_RECOVERY_PHRASE", "DUSK_UI_CHECK_RECOVERY_WORDS"]) {
+        const answer = await sendBackgroundMessage({ type, password: "the password", words: [[1, "zoo"]] }, fromSite);
+        expect(answer).toMatchObject({ error: { message: "Only the wallet can do that" } });
+        expect(JSON.stringify(answer)).not.toContain("winner");
+      }
     });
   });
 

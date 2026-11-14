@@ -4,7 +4,7 @@
 // This lets the same UI (popup/full) run without chrome.runtime messaging,
 // which is how we reuse it in Tauri desktop/mobile.
 
-import { checkResetPassword, clearVault, countVaultWallets, createVault, loadVault, unlockVault, vaultPhrase } from "../shared/vault.js";
+import { checkResetPassword, clearVault, countVaultWallets, createVault, loadVault, unlockVault } from "../shared/vault.js";
 import { getSettings, normalizeAutoLock, rememberNodeChain, setSettings } from "../shared/settings.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearAllPermissions } from "../shared/permissions.js";
@@ -378,15 +378,6 @@ export async function localSend(message) {
         // this wallet's record (background/index.js does the same).
         await moveLegacyContacts(engineContactsVault(localEngineCall)).catch(() => {});
         return { ok: true, accounts: getAccounts() };
-      });
-    }
-
-    // The open wallet's recovery phrase, shown again in Settings: only for
-    // the password that opens it, checked against the vault.
-    if (message?.type === "DUSK_UI_RECOVERY_PHRASE") {
-      return await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
-        if (!isUnlocked()) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
-        return { ok: true, result: await vaultPhrase(message.password, getWalletKey()) };
       });
     }
 

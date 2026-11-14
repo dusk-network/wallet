@@ -7,6 +7,23 @@ import { isTauriRuntime } from "../../platform/runtime.js";
 import { h } from "../lib/dom.js";
 import { isPhone } from "../lib/device.js";
 
+/** What a check that doesn't match says, and all it says. */
+export const WORDS_MISMATCH_TEXT = "That doesn't match your recovery words. Check the words you wrote down.";
+
+/**
+ * A check that didn't match: it says so, with Try again, and apart from it
+ * Show my recovery words, for rewriting the paper, which asks as showing them
+ * always does. A wrong answer shows no word, whatever was typed.
+ * @param {{ tryAgain: () => void, showWords: () => void }} opts
+ */
+export function wordsMismatch({ tryAgain, showWords }) {
+  return [
+    h("p", { class: "field-error", role: "alert", text: WORDS_MISMATCH_TEXT }),
+    h("button", { class: "btn-primary btn-full", type: "button", text: "Try again", onclick: () => tryAgain() }),
+    h("button", { class: "btn-outline btn-full", type: "button", text: "Show my recovery words", onclick: () => showWords() }),
+  ];
+}
+
 /**
  * @param {{ places: number[], masked?: boolean, passwordBoxes?: boolean, onDone?: () => void }} opts
  */

@@ -1210,8 +1210,9 @@ describe("security in the app on a phone", () => {
     expect(view.state.route).toBe("options");
   });
 
-  // Amélie's, the seventh time: a way to check the paper, typing the words and hearing they match.
-  it("checks three of the recovery words behind the password, in the extension too, and shows the words where they don't match", async () => {
+  // Amélie's, the seventh time: a way to check the paper, typing the words and hearing they match. Then
+  // Nandini's and Amélie's: one word wrong, or three made up, put the whole phrase on screen.
+  it("checks three of the recovery words behind the password, in the extension too, and says no more than that they don't match", async () => {
     const view = await settings();
     const security = view.section("Security");
     security.querySelectorAll("button").find((b) => b.textContent.includes("Check your recovery words")).click();
@@ -1226,7 +1227,7 @@ describe("security in the app on a phone", () => {
       if (m.password !== "the password") return { error: { message: "Incorrect password" } };
       if (!m.words) return { ok: true, count: 12 };
       const words = MNEMONIC.split(" ");
-      return m.words.every(([place, word]) => words[place - 1] === word) ? { ok: true, match: true } : { ok: true, match: false, phrase: MNEMONIC };
+      return { ok: true, match: m.words.every(([place, word]) => words[place - 1] === word) };
     });
     const { checkWordsView } = await import("./popup/views/wallets.js");
     const draw = () => dom.document.body.replaceChildren(...checkWordsView(view.ov, { state: view.state, actions: view.actions }));
@@ -1258,18 +1259,46 @@ describe("security in the app on a phone", () => {
     expect(body.querySelector(".srp-grid")).toBeNull();
     expect(asked).toEqual(["count", "count", places]);
 
-    // Again, a word wrong: said, and the words shown.
+    // Again: one word wrong, then three made up. Said, and nothing else: no word of the phrase.
     draw();
     typeInto(password(), "the password");
     press("Next");
     await settle();
+    const again = boxes().map((i) => Number(accessibleName(i).slice(5)));
+    const MISMATCH = "← BackCheck your recovery wordsThat doesn't match your recovery words. Check the words you wrote down.Try againShow my recovery words";
+    for (const typed of [again.map((p, i) => (i === 0 ? "zoo" : MNEMONIC.split(" ")[p - 1])), ["maison", "velo", "gateau"]]) {
+      boxes().forEach((input, i) => typeInto(input, typed[i]));
+      press("Check");
+      await settle();
+      expect(visibleText(body)).toBe(MISMATCH);
+      expect([body.querySelector(".srp-grid"), boxes()]).toEqual([null, []]);
+      // Try again: the same three, empty, the first to type in, with nothing asked of the wallet till Check.
+      const before = asked.length;
+      press("Try again");
+      expect(boxes().map((i) => Number(accessibleName(i).slice(5)))).toEqual(again);
+      expect(boxes().map((i) => i.value)).toEqual(["", "", ""]);
+      expect(dom.document.activeElement).toBe(boxes()[0]);
+      expect(asked).toHaveLength(before);
+    }
+
+    // Show my recovery words, apart: the recovery phrase, behind the password again.
     for (const input of boxes()) typeInto(input, "zoo");
     press("Check");
     await settle();
-    expect(visibleText(body)).toContain("Those words don't match. These are this wallet's words, in order:");
+    press("Show my recovery words");
+    await settle();
+    expect(view.state.route).toBe("recovery_phrase");
+    expect(view.actions.render).toHaveBeenCalled();
+    view.actions.send.mockImplementation(async (m) =>
+      m.type === "DUSK_UI_RECOVERY_PHRASE" ? (m.password === "the password" ? { ok: true, result: MNEMONIC } : { error: { message: "Incorrect password" } }) : {}
+    );
+    const { recoveryPhraseView } = await import("./popup/views/wallets.js");
+    body.replaceChildren(...recoveryPhraseView(view.ov, { state: view.state, actions: view.actions }));
+    expect(body.querySelector(".srp-grid")).toBeNull();
+    typeInto(password(), "the password");
+    press("Show recovery phrase");
+    await settle();
     expect(body.querySelectorAll(".srp-word-text").map((w) => w.textContent)).toEqual(MNEMONIC.split(" "));
-    press("Done");
-    expect(view.state.route).toBe("options");
   });
 
   it("shows no recovery phrase in Settings outside the app", async () => {

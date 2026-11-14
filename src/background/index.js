@@ -519,7 +519,7 @@ async function paysFor(params, accountIndex, status) {
 }
 
 // Only the wallet's own pages' to send, whatever a content script is made to.
-const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE", "DUSK_UI_CANCEL_SEND", "DUSK_UI_DROP_UNSENT", "DUSK_UI_LAST_SEND"]);
+const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_RECOVERY_PHRASE", "DUSK_UI_CHECK_RECOVERY_WORDS", "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE", "DUSK_UI_CANCEL_SEND", "DUSK_UI_DROP_UNSENT", "DUSK_UI_LAST_SEND"]);
 
 // For when a site last used its connection: anything but what any page can ask.
 const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId", "dusk_openPaymentLink"]);
