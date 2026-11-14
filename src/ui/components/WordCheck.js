@@ -3,24 +3,23 @@
 // keyboard learning, hidden on a phone till Show words. Enter goes on to the
 // next box, and on the last, to the check (`onDone`).
 
+import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW } from "@dusk-network/app-core/recovery-words";
 import { isTauriRuntime } from "../../platform/runtime.js";
 import { h } from "../lib/dom.js";
 import { isPhone } from "../lib/device.js";
 
-/** What a check that doesn't match says, and all it says. */
-export const WORDS_MISMATCH_TEXT = "That doesn't match your recovery words. Check the words you wrote down.";
-
 /**
  * A check that didn't match: it says so, with Try again, and apart from it
  * Show my recovery words, for rewriting the paper, which asks as showing them
- * always does. A wrong answer shows no word, whatever was typed.
+ * always does; both in both wallets' words (app-core). A wrong answer shows
+ * no word, whatever was typed.
  * @param {{ tryAgain: () => void, showWords: () => void }} opts
  */
 export function wordsMismatch({ tryAgain, showWords }) {
   return [
-    h("p", { class: "field-error", role: "alert", text: WORDS_MISMATCH_TEXT }),
+    h("p", { class: "field-error", role: "alert", text: RECOVERY_WORDS_MISMATCH }),
     h("button", { class: "btn-primary btn-full", type: "button", text: "Try again", onclick: () => tryAgain() }),
-    h("button", { class: "btn-outline btn-full", type: "button", text: "Show my recovery words", onclick: () => showWords() }),
+    h("button", { class: "btn-outline btn-full", type: "button", text: RECOVERY_WORDS_SHOW, onclick: () => showWords() }),
   ];
 }
 

@@ -1238,6 +1238,8 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     await expect(check({ words: [[1, "zoo"]] })).resolves.toEqual({ ok: true, match: false });
     await expect(check({ words: [[1, "maison"], [2, "velo"], [3, "gateau"]] })).resolves.toEqual({ ok: true, match: false });
     await expect(check({ words: [[words.length + 1, "zoo"]] })).resolves.toEqual({ ok: true, match: false });
+    // Compared as the web wallet compares them (app-core): one place asked twice is no check of three.
+    await expect(check({ words: [[1, words[0]], [1, words[0]], [2, words[1]]] })).resolves.toEqual({ ok: true, match: false });
     await ok({ type: "DUSK_UI_LOCK" });
     await expect(check()).resolves.toMatchObject({ error: { message: "Wallet locked" } });
   });

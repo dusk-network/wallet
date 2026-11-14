@@ -6,7 +6,8 @@ import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
 import { checkboxInput, fieldError, groupLabel, newPasswordField, passwordForm, stepActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
 import { createWordCheck, wordsMismatch } from "../../components/WordCheck.js";
-import { wordPlaces, wordsMatch } from "../../../shared/recoveryWords.js";
+import { wordPlaces } from "../../../shared/recoveryWords.js";
+import { recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
@@ -478,7 +479,7 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
         return;
       }
       // Compared here, and then forgotten. A mismatch shows no word.
-      const match = wordsMatch(expected, words.typed());
+      const match = recoveryWordsMatch(expected, words.typed());
       words.clear();
       if (!match) {
         form.replaceChildren(

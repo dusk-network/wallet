@@ -992,6 +992,8 @@ describe("background Phoenix tx lifecycle flow", () => {
       const check = (words) => sendBackgroundMessage({ type: "DUSK_UI_CHECK_RECOVERY_WORDS", password: "the password", words }, fromPage);
       await expect(check(undefined)).resolves.toEqual({ ok: true, count: 12 });
       await expect(check([[1, "Legal"], [6, " sausage "], [12, "YELLOW"]])).resolves.toEqual({ ok: true, match: true });
+      // As the web wallet compares them (app-core): one place asked twice is no check of three.
+      await expect(check([[1, "legal"], [1, "legal"], [12, "yellow"]])).resolves.toEqual({ ok: true, match: false });
       for (const wrong of [[[1, "legal"], [6, "sausage"], [12, "yelow"]], [[1, "maison"], [2, "velo"], [3, "gateau"]]]) {
         const answer = await check(wrong);
         expect(answer).toEqual({ ok: true, match: false });

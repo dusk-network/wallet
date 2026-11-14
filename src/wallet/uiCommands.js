@@ -6,7 +6,7 @@ import { nativeRewardRate, stakingFigures } from "../shared/rewardRate.js";
 import { contactsStore, forgetWalletContacts } from "../shared/contactsStore.js";
 import { askedOf, proveSendPassword, sendPasswordLimit, setSendPasswordLimit } from "../shared/sendPassword.js";
 import { checkVaultPassword, vaultPhrase } from "../shared/vault.js";
-import { wordsMatch } from "../shared/recoveryWords.js";
+import { recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
 import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import {
   getWatchedAssets,
@@ -170,7 +170,7 @@ export async function handleUiCommand(
       if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
       const phrase = String(await vaultPhrase(message.password, status.walletKey));
       if (!Array.isArray(message.words)) return { ok: true, count: phrase.trim().split(/\s+/).length };
-      return { ok: true, match: wordsMatch(phrase, message.words) };
+      return { ok: true, match: recoveryWordsMatch(phrase, message.words) };
     });
   }
 
