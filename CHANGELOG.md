@@ -80,6 +80,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Left a currency value out of a test network's export, saying where the choice would be that test DUSK has no value.
 - Counted Sozu's deposit fees in what grew while held too, at the same average cost as what unstaking took out, so one is part of the other and a loss shows in both.
 - Took Send it now on a payment Home says wasn't sent straight to Review, to send from there, kept the notice until the payment is handed over, and called Drop Don't send, as the web wallet does.
 - Kept a payment from Send on the device the moment it's confirmed, so one the Android app is ended on before it goes out comes back on Home as not sent, rather than vanishing.
