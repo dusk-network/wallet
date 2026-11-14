@@ -44,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Gave each request its own Share in the Android app, beside its Copy, in Request payment and in the list, with Share by the address for the address alone, and brought Request payment into view at its Amount as it's opened.
 - Copied or shared a request paid already as its own link, saying it was paid, rather than making a second one with the same invoice.
 - Said the fee charged on Completed once a node that went silent answers again, rather than the most it could be.
 - Read Rewards by year again after a stake or an unstake with Sozu, till the history lists it and it's counted.

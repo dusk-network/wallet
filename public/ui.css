@@ -555,6 +555,11 @@ code {
   }
 }
 
+/* A request's Copy and its Share, side by side, the same width. */
+.receive-request__actions > button {
+  flex: 1 1 0;
+}
+
 /* Button rows that should align as a neat 2-column grid (e.g. Receive actions) */
 .btnrow--grid {
   display: grid;

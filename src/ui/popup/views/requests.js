@@ -163,7 +163,7 @@ function refundsOf(requests, matches, rows) {
   );
 }
 
-function requestRow(request, match, { ov, hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, refunds, linkOf, earlier = false }) {
+function requestRow(request, match, { ov, hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, refunds, linkOf, share = null, earlier = false }) {
   // The payments with all a request asks, after the one that paid it: paid twice, or more.
   const again = match?.state === "paid" ? (match.more ?? []).filter((payment) => payment.matched === "amount-memo") : [];
   // A request of any amount says what came in, plainly: a lux is no green Paid.
@@ -268,6 +268,16 @@ function requestRow(request, match, { ov, hidden, address, state, actions, walle
             onFail: actions?.showToast,
           })
         : null,
+      // In the app, its own Share beside it: its words, its link and its QR code, as it was asked.
+      share && linkOf(request)
+        ? h("button", {
+            class: "text-btn",
+            type: "button",
+            text: "Share",
+            "aria-label": `Share the request for ${request.lux === null ? "any amount" : hidden ? "a hidden amount" : `${formatDuskExact(request.lux)} DUSK`}${request.memo ? `, ${request.memo}` : ""}`,
+            onclick: () => share(request),
+          })
+        : null,
       h("button", { class: "text-btn", type: "button", text: "Remove", "aria-label": `Remove the request${request.memo ? ` "${request.memo}"` : ""}`, onclick: remove }),
     ].filter(Boolean)),
   ]);
@@ -277,7 +287,7 @@ function requestRow(request, match, { ov, hidden, address, state, actions, walle
  * The profile's requests on this network, or null for none.
  * @returns {HTMLElement | null}
  */
-export function requestsSection(ov, { state, actions } = {}) {
+export function requestsSection(ov, { state, actions, share = null } = {}) {
   const kept = keptRequests(ov, { state, actions });
   const { account, profileIndex } = selected(ov);
   const address = String(ov?.addresses?.[profileIndex] ?? "");
@@ -327,7 +337,7 @@ export function requestsSection(ov, { state, actions } = {}) {
       "ul",
       { class: "group request-list" },
       shown.map((request) =>
-        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { ov, hidden, address, state, actions, walletId: kept.walletId, rows, rowOf, rowBack, context: activityKey(ov), refunds, linkOf, earlier: earlier(request) })
+        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { ov, hidden, address, state, actions, walletId: kept.walletId, rows, rowOf, rowBack, context: activityKey(ov), refunds, linkOf, share, earlier: earlier(request) })
       )
     ),
   ]);
