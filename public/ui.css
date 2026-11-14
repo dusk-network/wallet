@@ -4595,6 +4595,38 @@ button.tx-open:focus-visible::after {
   unicode-bidi: isolate;
 }
 
+/* A stranger's memo: their words, muted and in quotes, never bold, under who
+   it's from. */
+.tx-memo.tx-memo--theirs {
+  display: flex;
+  flex-direction: column;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.tx-memo--theirs .tx-memo__text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.tx-memo__from,
+.memo-theirs__from {
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+.memo-theirs {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.memo-theirs__text {
+  color: var(--text-muted);
+  font-weight: 400;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+
 /* An icon button with a name: Copy beside an address */
 button.copy-ico {
   position: relative;

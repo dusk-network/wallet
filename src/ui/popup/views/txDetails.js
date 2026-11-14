@@ -22,7 +22,7 @@ import { copyButton as copyWordsButton } from "../../components/CopyButton.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { stDuskLines, txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
-import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, txIconSvg } from "./txRow.js";
+import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, theirMemo, txIconSvg } from "./txRow.js";
 import { reasonText } from "./sent.js";
 import { activityKey, activityRows, loadActivityDetail, sozuFactOf } from "../activity.js";
 import { migrationFactOf } from "../migrationFacts.js";
@@ -289,7 +289,10 @@ export function txDetailsView(ov, { state, actions } = {}) {
   }
 
   const hidden = balancesHidden(ov);
-  const desc = describeTx(tx, { contactName: contactNames(state, actions, ov), nodeUrl });
+  const contactName = contactNames(state, actions, ov);
+  const desc = describeTx(tx, { contactName, nodeUrl });
+  // A stranger's memo, said as theirs (theirMemo).
+  const theirs = tx?.memo ? theirMemo(tx, contactName) : null;
   const { kind } = tx;
   const showToast = actions?.showToast;
 
@@ -418,7 +421,11 @@ export function txDetailsView(ov, { state, actions } = {}) {
     // A memo that is the recipient on another chain shows as that.
     migratedRow,
     // Anyone can send a memo: neutralized, so it can't read as something it isn't.
-    tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient ? kv("Memo", safeTextEl(tx.memo), { className: "kv--wrap" }) : null,
+    tx?.memo && !migrated && String(tx.memo).trim() !== desc.recipient
+      ? theirs
+        ? kv("Memo", [h("span", { class: "memo-theirs" }, [h("span", { class: "memo-theirs__text" }, ["“", safeTextEl(tx.memo), "”"]), h("span", { class: "memo-theirs__from", text: theirs.from })])], { className: "kv--wrap" })
+        : kv("Memo", safeTextEl(tx.memo), { className: "kv--wrap" })
+      : null,
     ledger ? null : feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,

@@ -23,6 +23,7 @@ import { ownProfileName } from "../../components/ProfileName.js";
 import { contactAlikeOf, contactNameText } from "../../lib/contactNames.js";
 import { MONTHS, clockText, dateText } from "../../lib/time.js";
 import { txStatusTone, txStatusWord } from "./txDisplay.js";
+import { sendersMemo } from "@dusk-network/app-core/activity";
 
 export const MINUS = "−";
 
@@ -479,7 +480,32 @@ export function contactNames(state, actions, ov) {
       });
   }
   const named = (address) => byAddress.get(String(address ?? "").trim().toLowerCase()) ?? ownProfileName(ov, address);
-  return Object.assign(named, { alike: (address) => (byAddress.has(String(address ?? "").trim().toLowerCase()) ? alike(address) : "") });
+  // The wallet's profiles, every wallet's here, and its contacts, as a stranger's memo is told from theirs (sendersMemo).
+  const among = {
+    profiles: [
+      ...(Array.isArray(ov?.accounts) ? ov.accounts : []).map((account, i) => ({ account, address: ov?.addresses?.[i] })),
+      ...(Array.isArray(ov?.wallets) ? ov.wallets : []).flatMap((wallet) => (Array.isArray(wallet?.accounts) ? wallet.accounts.map((account) => ({ account })) : [])),
+    ],
+    contacts: ab?.loaded && Array.isArray(ab.items) ? ab.items.map((entry) => ({ address: entry?.address })) : [],
+  };
+  return Object.assign(named, { alike: (address) => (byAddress.has(String(address ?? "").trim().toLowerCase()) ? alike(address) : ""), among });
+}
+
+/**
+ * A payment's memo where it's the sender's own words, not the wallet's: one
+ * that came in from an address that isn't one of the wallet's profiles or
+ * contacts, said as theirs, under who it's from (app-core's sendersMemo,
+ * as the web wallet says it): "From an address not in your contacts", or
+ * "From " and their .dusk name. Null for any other memo.
+ * @param {object} tx - an Activity row
+ * @param {{ among?: object }} [contactName] - contactNames', with the profiles and contacts
+ * @returns {{ memo: string, from: string } | null}
+ */
+export function theirMemo(tx, contactName) {
+  if (tx?.route || tx?.bridge || tx?.sozu || tx?.entry?.memoBinary === true) return null;
+  const received = tx?.direction === "in" && tx?.kind === TX_KIND.TRANSFER;
+  const row = { category: received ? "received" : "sent", memo: String(tx?.memo ?? ""), counterparty: tx?.counterparty, counterpartyName: tx?.counterpartyName || null };
+  return sendersMemo(row, contactName?.among ?? {});
 }
 
 /**
@@ -516,9 +542,11 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
   const hash = String(tx?.hash ?? "");
   const sub = subText(desc, when(tx), { hidden, spoken: true });
   const memo = rowMemo(tx);
+  // A stranger's memo is theirs, said so: in quotes, under who it's from.
+  const theirs = memo ? theirMemo(tx, contactName) : null;
   // What the row says, for the button that opens it.
   const spoken = !desc.amount ? "" : hidden && !desc.amount.text ? "amount hidden" : amountText(desc.amount, false);
-  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, desc.alike, sub, spoken, desc.unsent ? "" : desc.statusWord, memo ? `memo ${memo}` : ""].filter(Boolean).join(", ");
+  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, desc.alike, sub, spoken, desc.unsent ? "" : desc.statusWord, memo ? (theirs ? `memo “${memo}”, ${theirs.from}` : `memo ${memo}`) : ""].filter(Boolean).join(", ");
 
   const open = () => {
     if (!state || !hash) return;
@@ -559,7 +587,11 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
       // The button's name says these already.
       sub ? subEl(desc, when(tx), hidden) : null,
       desc.alike ? h("div", { class: "row-sub tx-alike", "aria-hidden": "true", text: desc.alike }) : null,
-      memo ? h("div", { class: "row-sub tx-memo", "aria-hidden": "true", text: memo }) : null,
+      memo && theirs
+        ? h("div", { class: "row-sub tx-memo tx-memo--theirs", "aria-hidden": "true" }, [h("span", { class: "tx-memo__text", text: `“${memo}”` }), h("span", { class: "tx-memo__from", text: theirs.from })])
+        : memo
+          ? h("div", { class: "row-sub tx-memo", "aria-hidden": "true", text: memo })
+          : null,
     ].filter(Boolean)),
     h("div", { class: "tx-right", "aria-hidden": "true" }, [
       amountEl(desc.amount, hidden),
