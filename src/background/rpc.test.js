@@ -913,6 +913,53 @@ describe("background rpc handler", () => {
     }
   });
 
+  // Marek's, on Firefox for Android: JSON.parse('[{"__proto__":{"account":…}}]') still got the connected profile's
+  // balance, where every other shape it doesn't take is refused: the object came with the account on its prototype.
+  it("dusk_getPublicBalance reads only what a request holds itself, and refuses one with anything on a prototype", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+    const ask = (params) => handleRpc("https://dapp.example", { method: "dusk_getPublicBalance", params });
+    const onProto = (fields) => Object.create(fields);
+    for (const params of [
+      [onProto({ account: "acct0" })],
+      [onProto({ account: "acct1" })],
+      onProto({ account: "acct0" }),
+      onProto({ profileId: "account:0:acct0" }),
+      JSON.parse('[{"__proto__":{"account":"acct0"}}]'),
+      JSON.parse('{"__proto__":{"account":"acct1"}}'),
+      Object.setPrototypeOf(["acct0"], Object.create(Array.prototype)),
+      [Object.assign(onProto({ account: "acct1" }), { profileId: "account:0:acct0" })],
+    ]) {
+      engineCall.mockClear();
+      await expect(ask(params)).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+      expect(engineCall).not.toHaveBeenCalledWith("dusk_getPublicBalance", expect.anything());
+    }
+    // Its own, as ever.
+    await expect(ask([{ account: "acct0" }])).resolves.toMatchObject({ __params: { profileIndex: 0 } });
+    await expect(ask(Object.assign(Object.create(null), { account: "acct0" }))).resolves.toMatchObject({ __params: { profileIndex: 0 } });
+  });
+
+  // Whatever the method: nothing in a site's request is read from a prototype.
+  it("refuses a request whose parameters hold anything on a prototype, before anything is asked or shown", async () => {
+    vi.resetModules();
+    const { handleRpc } = await import("./rpc.js");
+
+    perms["https://dapp.example"] = { accountIndex: 0, connectedAt: 1 };
+    engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"] };
+    for (const [method, params] of [
+      ["dusk_sendTransaction", Object.create({ kind: "transfer", privacy: "public", to: "acct1", amount: "1" })],
+      ["dusk_sendTransaction", { kind: "transfer", privacy: "public", to: "acct1", amount: "1", gas: Object.create({ limit: "1", price: "1" }) }],
+      ["dusk_requestProfiles", [JSON.parse('{"__proto__": {"x": 1}}')]],
+    ]) {
+      engineCall.mockClear();
+      await expect(handleRpc("https://dapp.example", { method, params })).rejects.toMatchObject({ code: ERROR_CODES.INVALID_PARAMS });
+      expect(engineCall).not.toHaveBeenCalled();
+    }
+  });
+
   it("does not read a replacement wallet balance after context capture", async () => {
     vi.resetModules();
     const [{ handleRpc }, { WALLET_LIFECYCLE_LOCK, withStorageLock }] = await Promise.all([
