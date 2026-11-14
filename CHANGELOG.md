@@ -44,6 +44,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Took a recovery phrase pasted into its boxes off the clipboard in Firefox for Android, writing a space over it, and one a phone's keyboard puts in whole from its clipboard too.
 - Took an l, 1, ! or | for an i, as in Davld or Dav!d beside David, and a .dusk name in small capitals, circled letters or after a fullwidth point, as the look-alikes they are, in contact and profile names.
 - Refused a link with any space in its amount, a tab too.
 - Read a shared request pasted into Send's To by its link, as the web wallet does, with its line break or without, saying why where it has two links or words after its link.

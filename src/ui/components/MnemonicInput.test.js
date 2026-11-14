@@ -138,8 +138,10 @@ describe("the recovery phrase's word boxes", () => {
     await Promise.resolve();
     expect(said()).toBe("");
 
-    // A browser that won't let the page write to the clipboard: the phrase is still there, and that's said.
-    dom.clipboard.writeText.mockRejectedValueOnce(new DOMException("Clipboard write was blocked", "NotAllowedError"));
+    // A browser that won't let the page write to the clipboard, nothing or a space: the phrase is still there, and
+    // that's said.
+    const blocked = new DOMException("Clipboard write was blocked", "NotAllowedError");
+    dom.clipboard.writeText.mockRejectedValueOnce(blocked).mockRejectedValueOnce(blocked);
     paste(box(1), TWELVE);
     await vi.waitFor(() => expect(said()).toBe("Your recovery phrase is still on the clipboard. Copy something else over it."));
     expect(words()).toEqual(TWELVE.split(" "));
@@ -149,6 +151,40 @@ describe("the recovery phrase's word boxes", () => {
     vi.stubGlobal("navigator", { language: "en-GB" });
     paste(bare.box(1), OTHER);
     await vi.waitFor(() => expect(bare.input.el.querySelector(".srp-clipboard").hidden).toBe(false));
+  });
+
+  // Marek's, in Firefox for Android with the clipboardWrite permission: the phrase stayed on the clipboard all the
+  // same, and his page read it back. Firefox there writes no empty text ("Clipboard write is not allowed"), but
+  // writes a space; and Gboard's clipboard chip puts the phrase in as typing, with no paste.
+  it("writes a space over the phrase where the browser writes no empty text, and takes it off when a keyboard puts it in whole", async () => {
+    const { box, input, words } = mount();
+    const said = () => {
+      const note = input.el.querySelector(".srp-clipboard");
+      return note && isShown(note) ? note.textContent : "";
+    };
+    // Firefox for Android: "" refused, " " written.
+    dom.clipboard.writeText.mockImplementation(async (text) => {
+      if (text === "") throw new DOMException("Clipboard write is not allowed.", "NotAllowedError");
+    });
+    paste(box(1), TWELVE);
+    await vi.waitFor(() => expect(dom.clipboard.writeText.mock.calls).toEqual([[""], [" "]]));
+    await Promise.resolve();
+    expect([words(), said()]).toEqual([TWELVE.split(" "), ""]);
+
+    // The whole phrase from Gboard's clipboard chip: one input, no paste.
+    dom.clipboard.writeText.mockClear();
+    const fresh = mount();
+    fresh.box(1).value = TWELVE;
+    fresh.box(1).dispatchEvent(fakeEvent("input", { inputType: "insertText" }));
+    expect(fresh.words()).toEqual(TWELVE.split(" "));
+    await vi.waitFor(() => expect(dom.clipboard.writeText.mock.calls).toEqual([[""], [" "]]));
+    // Typed a word at a time, nothing's written.
+    dom.clipboard.writeText.mockClear();
+    const typed = mount();
+    typed.box(1).value = "legal ";
+    typed.box(1).dispatchEvent(fakeEvent("input", { inputType: "insertText" }));
+    await Promise.resolve();
+    expect(dom.clipboard.writeText).not.toHaveBeenCalled();
   });
 
   it("puts a few words where they're pasted, as before", () => {

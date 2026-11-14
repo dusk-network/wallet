@@ -67,7 +67,8 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  * - A word that isn't a recovery word is marked once a paste puts it in or
  *   its box is left, never while it's typed; it clears once it's a word.
  * - Words pasted in are taken off the clipboard, which any app or page can
- *   read, in the paste's own tap; where the browser won't, it's said once.
+ *   read, in the paste's own tap, and a whole phrase a phone's keyboard puts
+ *   in from its clipboard too; where the browser won't, it's said once.
  * - `onCheck` hears what's wrong with the words, in one plain sentence ("" for
  *   nothing), after a paste and when the focus leaves the boxes, and "" again
  *   as soon as something's typed. `problem()` says the same on asking.
@@ -228,19 +229,23 @@ export function createMnemonicInput({
   }
 
   // Words pasted in leave the clipboard, where any app or page could read
-  // them: emptied in the paste's own tap, where the browser lets it be; where
-  // it doesn't, said once, under the boxes.
+  // them: emptied in the paste's own tap, where the browser lets it be, else
+  // written over with a space, as Firefox for Android writes no empty text;
+  // where neither can be, said once, under the boxes.
   const clipNote = h("p", { class: "srp-clipboard", role: "status", hidden: true, text: CLIPBOARD_KEPT_TEXT });
-  function emptyClipboard() {
-    let emptied = null;
+  const writeClipboard = (text) => {
     try {
-      emptied = globalThis.navigator?.clipboard?.writeText?.("") ?? null;
-    } catch {
-      emptied = null;
+      return Promise.resolve(globalThis.navigator?.clipboard?.writeText?.(text) ?? Promise.reject(new Error("No clipboard to write to")));
+    } catch (e) {
+      return Promise.reject(e);
     }
-    Promise.resolve(emptied ?? Promise.reject(new Error("No clipboard to write to"))).catch(() => {
-      clipNote.hidden = false;
-    });
+  };
+  function emptyClipboard() {
+    writeClipboard("")
+      .catch(() => writeClipboard(" "))
+      .catch(() => {
+        clipNote.hidden = false;
+      });
   }
 
   function onPaste(i, e) {
@@ -275,6 +280,9 @@ export function createMnemonicInput({
     }
     const words = parseWords(raw);
     if (words.length >= 12) {
+      // A whole phrase at once, as a phone's keyboard puts its clipboard in,
+      // with no paste: off the clipboard too.
+      emptyClipboard();
       placeWords(i, words);
       return;
     }
