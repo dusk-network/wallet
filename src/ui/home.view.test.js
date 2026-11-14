@@ -202,6 +202,31 @@ describe("home balance", () => {
     );
   });
 
+  // Chen's and Lena's, on phones: "Shielded · Sync failed 0 DUSK" opened with no signal, and "Shielded · Not synced
+  // 0 DUSK" after an import and every cold start, read like something broke, and like nothing was there.
+  it("shows the shielded balance as not read yet, never 0, till a sync has gone through, and that it can't be read offline", () => {
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const draw = (over, online = true) => {
+      vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: online });
+      const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs: [], balance: { value: "620800000" }, shieldedBalance: { value: "0", spendable: "0" }, ...over };
+      document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
+      const item = document.body.querySelectorAll(".balance-split-item").find((el) => visibleText(el).startsWith("Shielded"));
+      return [visibleText(item.querySelector(".balance-split-label")), visibleText(item.querySelector(".balance-split-value")), document.body.querySelector(".balance-label__text").textContent];
+    };
+    // After an import, or a cold start, the sync not run yet.
+    expect(draw({ shieldedSync: { state: "idle", notes: 0 } })).toEqual(["Shielded · reading…", "—", "Public balance"]);
+    // Its first sync under way.
+    expect(draw({ shieldedSync: { state: "syncing", progress: 0.4, notes: 0 } })).toEqual(["Shielded · Syncing 40%", "—", "Public balance"]);
+    // Opened with no signal: it can't be read now, and nothing failed.
+    expect(draw({ shieldedSync: { state: "error", lastError: "Failed to fetch" }, balanceStale: true }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
+    expect(draw({ shieldedSync: { state: "idle", notes: 0 } }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
+    // What was read before, kept: shown, as it can't be read now.
+    expect(draw({ shieldedSync: { state: "error" }, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true }, false)).toEqual(["Shielded · can't be read now", "0.05 DUSK", "Public and shielded"]);
+    // Read: 0 is 0.
+    expect(draw({ shieldedSync: { state: "done", progress: 1, notes: 0 } })).toEqual(["Shielded", "0 DUSK", "Public and shielded"]);
+  });
+
   it("says plainly when a balance can't be read, with nothing of what the node said", () => {
     const { document } = installFakeDom();
     const state = { route: "home", addressBook: { loaded: true, items: [] } };

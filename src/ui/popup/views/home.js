@@ -39,7 +39,14 @@ export function homeView(ov, { state, actions } = {}) {
   // and surface progress in the subtitle.
   const shieldedSync = ov?.shieldedSync || null;
   const shieldedError = ov?.shieldedError ? String(ov.shieldedError) : "";
-  const shieldLux = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
+  const shieldRaw = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
+  // Chen's and Lena's: "Shielded · Not synced 0 DUSK" after an import and each
+  // cold start, "Shielded · Sync failed 0 DUSK" opened with no signal. Till a
+  // sync has gone through, or while one fails, a 0 is no reading: a dash shows,
+  // and what it is; what notes were kept from before still show.
+  const syncState = shieldedSync?.state ?? null;
+  const shieldUnread = (syncState === "idle" || syncState === "syncing" || syncState === "error") && safeBigInt(shieldRaw ?? 0, 0n) <= 0n && !ov?.shieldedStale;
+  const shieldLux = shieldUnread ? null : shieldRaw;
   const hasShieldValue = shieldLux !== undefined && shieldLux !== null;
   // Always show the shielded row for Dusk. If values aren't available yet,
   // we show placeholders + sync state.
@@ -75,9 +82,11 @@ export function homeView(ov, { state, actions } = {}) {
   // We only show a suffix when *not* fully healthy, to avoid "Shielded • Shielded".
   let shieldStatus = null;
   let shieldStatusTitle = shieldedError || shieldedSync?.lastError ? SHIELDED_UNREAD : undefined;
+  // No network, or a node that doesn't answer: it can't be read now, which isn't a failure.
+  const offlineNow = globalThis.navigator?.onLine === false || ov?.networkStatus?.nodeStatus === "offline";
   if (shieldedSync?.state === "idle") {
     const n = Number(shieldedSync?.notes ?? 0);
-    if (n <= 0) shieldStatus = "Not synced";
+    if (n <= 0) shieldStatus = offlineNow ? "can't be read now" : "reading…";
   } else if (shieldedSync?.state === "syncing") {
     const p = Number(shieldedSync.progress ?? 0);
     const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
@@ -85,12 +94,13 @@ export function homeView(ov, { state, actions } = {}) {
     // If progress is >0 but rounds to 0, display "<1%" instead.
     shieldStatus = pct === 0 && p > 0 ? "Syncing <1%" : `Syncing ${pct}%`;
   } else if (shieldedSync?.state === "error") {
-    shieldStatus = "Sync failed";
+    shieldStatus = offlineNow ? "can't be read now" : "Sync failed";
+    if (offlineNow) shieldStatusTitle = undefined;
   }
 
   // One read before stays, under the balance's own line: it isn't unavailable.
   if (shieldedError && shieldedSync?.state !== "syncing" && !ov?.shieldedStale) {
-    shieldStatus = "Unavailable";
+    shieldStatus = offlineNow ? "can't be read now" : "Unavailable";
   }
 
   // If everything is synced and error-free but we have locally reserved notes,
