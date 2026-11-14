@@ -42,6 +42,7 @@ import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { activityKey, activityRows, keptRatesOf, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
+import { whenAtText } from "./txRow.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
 // rate and the deposit fee are read; null until then.
@@ -381,6 +382,23 @@ function maybeAutoWatchStDusk({ state, actions, st, status, profileIndex }) {
 const accountOf = (ov, idx) => String(ov?.accounts?.[idx] ?? "");
 
 /**
+ * Staking's figures were read from the node, as Home's balance was: with no
+ * network, or a node that stopped answering, they're said to be maybe out of
+ * date, as Home says it, with when they were read where that's known. Null
+ * while they're as read.
+ * @param {object} ov - the overview
+ * @returns {HTMLElement | null}
+ */
+export function stakeStaleNote(ov) {
+  const at = Number(ov?.balanceReadAt);
+  const read = Number.isFinite(at) && at > 0 ? ` Last read ${whenAtText(at)}.` : "";
+  const note = (text) => h("div", { class: "muted balance-stale stake-stale", role: "status", text });
+  if (globalThis.navigator?.onLine === false) return note(`Your stake may be out of date until you're back online.${read}`);
+  if (ov?.balanceStale || ov?.stakeStale || ov?.networkStatus?.nodeStatus === "offline") return note(`Your stake may be out of date.${read}`);
+  return null;
+}
+
+/**
  * What the profile did with Sozu, for its position: read from its whole history
  * once a status is read, as long as that takes; what's on its way is counted when
  * it's through, with the status read again. `reading` until then, and `rows`
@@ -420,19 +438,27 @@ export const FACTS_AGAIN_MS = 20_000;
 
 /**
  * A stake's or an unstake's facts come from the archive a little after its
- * block: while rewards by year wait on some (app-core's `reading`), they're
- * read again 20 seconds on, one read at a time, and the screen drawn again
- * after each read, what came or not (`factsRead`): rewards by year are worked
- * out again, and while some are still read, read again 20 seconds on.
+ * block, and only once its history lists it there, with its block: one just
+ * made is the wallet's own record of it till then, whose facts nothing reads.
+ * While rewards by year wait on some (app-core's `reading`), the whole history
+ * is read again 20 seconds on, as the web wallet reads it, and its facts with
+ * it, one read at a time, and the screen drawn again after each read, what
+ * came or not (`factsRead`): rewards by year are worked out again, and while
+ * some are still read, read again 20 seconds on.
  */
 export function readSozuFactsAgain(ov, { state, actions }) {
   const st = sozuState(state);
   const history = st.history;
   if (!history || history.reading || history.againTimer) return;
   history.againTimer = setTimeout(() => {
-    sozuFactsOf(ov, history.rows)
-      .then((facts) => {
-        if (st.history === history && facts) history.facts = facts;
+    wholeActivity(ov, { state, publicOnly: true })
+      .then((whole) => activityRows(ov, state, whole))
+      .catch(() => history.rows)
+      .then(async (rows) => {
+        const facts = await sozuFactsOf(ov, rows);
+        if (st.history !== history) return;
+        history.rows = rows;
+        if (facts) history.facts = facts;
       })
       .catch(() => {})
       .finally(() => {
@@ -952,6 +978,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     cfg && liveStatus?.reason ? h("div", { class: "muted", text: liveStatus.reason }) : null,
     syncing ? syncWarning() : null,
     positionGroup,
+    positionGroup ? stakeStaleNote(ov) : null,
     assetError,
     actionTabs,
     stakeOff

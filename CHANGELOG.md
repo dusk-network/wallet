@@ -44,6 +44,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said the fee charged on Completed once a node that went silent answers again, rather than the most it could be.
+- Read Rewards by year again after a stake or an unstake with Sozu, till the history lists it and it's counted.
+- Said Staking's figures may be out of date while the node doesn't answer or the network's gone, as Home says its balance may be.
 - Said under Import wallet's Mainnet and Testnet which holds real DUSK and which test DUSK with no value.
 - Took a recovery phrase pasted into its boxes off the clipboard in Firefox for Android, writing a space over it, and one a phone's keyboard puts in whole from its clipboard too.
 - Took an l, 1, ! or | for an i, as in Davld or Dav!d beside David, and a .dusk name in small capitals, circled letters or after a fullwidth point, as the look-alikes they are, in contact and profile names.

@@ -1076,6 +1076,29 @@ describe("a stake with Sozu in figures", () => {
   const held = { position: { poolBalanceLux: dusk(120), stDuskBalanceLux: dusk(39) } };
   const rows = () => body.querySelectorAll(".sozu-position .kv").map(visibleText);
 
+  // Lena's, the third round: with the node silent, Home said its balance may be out of date after a while, and the
+  // Stake page's figures, Sozu's and the native stake's, said nothing of the kind.
+  it("says Staking's figures may be out of date, as Home does, with when they were read", async () => {
+    const at = Date.UTC(2026, 10, 14, 10, 40);
+    const notes = () => body.querySelectorAll(".stake-stale").filter(isShown).map(visibleText);
+    const state = { route: "stake", staking: staking(owner()), sozu: sozu(held) };
+    popup(state, ov());
+    expect(notes()).toEqual([]);
+    // The node stopped answering: said under the figures, with the time of the last read.
+    popup(state, ov({ networkStatus: { nodeStatus: "offline" }, balanceReadAt: at }));
+    expect(notes()).toEqual([expect.stringMatching(/^Your stake may be out of date\. Last read .+\.$/)]);
+    // No network at all.
+    const online = globalThis.navigator;
+    vi.stubGlobal("navigator", { ...online, onLine: false });
+    popup(state, ov({ stakeStale: true }));
+    expect(notes()).toEqual(["Your stake may be out of date until you're back online."]);
+    vi.stubGlobal("navigator", online);
+    // On Liquid staking too, under what's held.
+    state.staking.screen = "liquid";
+    popup(state, ov({ networkStatus: { nodeStatus: "offline" } }));
+    expect(notes()).toEqual(["Your stake may be out of date."]);
+  });
+
   // Lena's wish: staking rewards per tax year.
   it("says the rewards of each calendar year on Staking, newest first: native rewards claimed, from the whole history", async () => {
     const overview = ov();
@@ -1222,6 +1245,33 @@ describe("a stake with Sozu in figures", () => {
       // The archive has the unstake's events now: read again 20 s on, it's there.
       events[4800006] = [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }];
       archive.query = archiveWith(events);
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.waitFor(() => expect(years()[0]).toContain("Sozu, taken out by unstaking: 0.2248 DUSK"));
+      vi.useRealTimers();
+    });
+
+    // Lena's, the third round: right after her own unstake, Rewards by year kept the "taken out" from before it for as
+    // long as she looked. Just made, the unstake is the wallet's own record, whose facts nothing reads, till the
+    // archive lists it with its block: the whole history is read again, as the web wallet reads it.
+    it("reads the whole history again after an unstake just made, till the archive lists it with its facts", async () => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.setSystemTime(Date.UTC(2026, 5, 1, 12, 0, 10));
+      const [staked, unstaked] = ["6e".repeat(32), "6f".repeat(32)];
+      const events = {
+        4800005: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }],
+      };
+      archive.query = archiveWith(events);
+      const history = [move(staked, "sozu_stake", "100000000000", 4_800_005, Date.UTC(2026, 2, 1, 12))];
+      // The unstake as the wallet keeps it the moment it's in its block: the archive doesn't list it yet.
+      const own = { hash: unstaked, kind: "contract_call", contractId: PILOT, fnName: "sozu_unstake", amount: "0", status: "executed", profileIndex: 0, submittedAt: Date.UTC(2026, 5, 1, 12), executedAt: Date.UTC(2026, 5, 1, 12, 0, 5), nodeUrl: "https://testnet.nodes.dusk.network", origin: "Wallet", asset: { kind: "sozu", action: "sozu_unstake", pool: PILOT } };
+      const overview = ov({ txs: [own] });
+      popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
+      await vi.waitFor(() => expect(years()).toHaveLength(1));
+      expect(years()[0].join(" ")).not.toContain("taken out by unstaking");
+
+      // The archive lists it now, with its block and its events: read again 20 s on, it's counted.
+      history.push(move(unstaked, "sozu_unstake", "30300000000", 4_800_006, Date.UTC(2026, 5, 1, 12)));
+      events[4800006] = [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }];
       await vi.advanceTimersByTimeAsync(20_000);
       await vi.waitFor(() => expect(years()[0]).toContain("Sozu, taken out by unstaking: 0.2248 DUSK"));
       vi.useRealTimers();

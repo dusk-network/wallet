@@ -817,6 +817,52 @@ describe("coming back to the wallet during a payment", () => {
     expect(fee).toBe("1856956");
   });
 
+  // Lena's, the third round: the node went silent at Confirm and answered again 26 s later, and Completed kept
+  // "Network fee Up to 0,0025 DUSK" 42 s after that: a read under way when it went silent never ended, and the
+  // look-ups waited on it.
+  it("goes on looking a completed payment's fee up though a read under way never ends, and says the fee it hears", async () => {
+    const HASH = "9a".repeat(32);
+    let silent = false;
+    let looks = 0;
+    const t = await popupOn(
+      "sent",
+      { addressBook: { loaded: true, items: [] }, sent: { phase: "sent", status: "executed", hash: HASH, title: "Send", amountLux: "10000000", feeCapLux: "2500000", blockHeight: "4854743", sentAt: Date.now(), startedAt: Date.now() } },
+      async (message, t) => {
+        // A read the silent node holds, for good.
+        if (silent && message.type === "DUSK_UI_OVERVIEW") return new Promise(() => {});
+        if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+          looks += 1;
+          // The node answers again from the second look on (the read it held stays held): the wallet tells the page
+          // the block and fee it writes.
+          if (looks > 1) {
+            silent = false;
+            t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "executed", ok: true, feePaid: "1857579", blockHeight: "4854743" });
+          }
+          return { ok: true, result: { status: "executed" } };
+        }
+        return undefined;
+      }
+    );
+    t.open = { ...t.open, txs: [{ hash: HASH, status: "executed", submittedAt: Date.now(), blockHeight: "4854743" }] };
+    await t.render({ forceRefresh: true });
+    expect(t.app.textContent).toContain("Up to 0.0025");
+    silent = true;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      // Looked up as the connection comes back, then every 10 s, however the reads in between went.
+      t.dom.window.dispatchEvent(fakeEvent("online"));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(looks).toBe(1);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(looks).toBe(2);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(t.app.textContent).toContain("0.001857579");
+      expect(t.app.textContent).not.toContain("Up to 0.0025");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
     const HASH = "9f".repeat(32);
     const t = await popupOn(

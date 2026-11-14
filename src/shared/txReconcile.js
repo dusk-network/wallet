@@ -179,6 +179,9 @@ export async function recheckTx(hash) {
       status: reconciled.status || meta?.status || "unknown",
       ok: reconciled.status === "executed" ? true : reconciled.status === "failed" ? false : undefined,
       error: reconciled.error,
+      // Its block and fee, as the node has them now: Sent says the fee charged, not the most it could be.
+      ...(reconciled.feePaid ? { feePaid: reconciled.feePaid } : {}),
+      ...(reconciled.blockHeight ? { blockHeight: reconciled.blockHeight } : {}),
     },
   };
 }

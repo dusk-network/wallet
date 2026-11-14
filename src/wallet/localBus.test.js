@@ -228,7 +228,8 @@ describe("local sends", () => {
     vi.stubGlobal("window", { dispatchEvent: told });
     await expect(localSend({ type: "DUSK_UI_RECHECK_TX", hash: "f1".repeat(32) })).resolves.toMatchObject({ ok: true, result: { status: "executed" } });
     await expect(getTxMeta("f1".repeat(32))).resolves.toMatchObject({ status: "executed", feePaid: "2135802", blockHeight: "4802949" });
-    expect(told.mock.calls.map(([event]) => event.detail)).toEqual([{ type: "DUSK_UI_TX_STATUS", hash: "f1".repeat(32), status: "executed", ok: true, error: "" }]);
+    // Lena's: Completed kept "Network fee Up to 0,0025 DUSK" after the block: the page hears the fee charged with it.
+    expect(told.mock.calls.map(([event]) => event.detail)).toEqual([{ type: "DUSK_UI_TX_STATUS", hash: "f1".repeat(32), status: "executed", ok: true, error: "", feePaid: "2135802", blockHeight: "4802949" }]);
   });
 
   // Chen's, in the app: a tap on "Your payment arrived" showed "Not confirmed", and the

@@ -881,7 +881,8 @@ function installTxStatusListener() {
         const forSent = noteTxStatus(state.sent, { ...msg, hash, status });
         if (forSent && state.route === "sent") {
           toaster.announce(sentAnnouncement(state.sent, state.overview));
-          render().catch(() => {});
+          // At once, from what's read: its news needs no read, which may wait on a network coming back.
+          render({ cached: true }).catch(() => {});
         } else if (news && ["executed", "failed", "removed", "mempool", "unknown"].includes(status)) {
           showToast(txStatusToastFor(hash, status));
         }
@@ -1076,7 +1077,9 @@ async function lookUpSends() {
   const own = at >= 0 ? answers[at] : undefined;
   if (state.sent && (at < 0 || (own && !own.error && !own.result?.error))) state.sent.lookingUp = false;
   state.needsRefresh = true;
-  await renderForConnection({ forceRefresh: true }).catch(() => {});
+  // Drawn again; the next look-up never waits on that read, which a node that
+  // went silent can hold for good (Lena's: Completed kept "Up to" its fee).
+  renderForConnection({ forceRefresh: true }).catch(() => {});
   if (Date.now() < resumeUntil && document.visibilityState !== "hidden" && sendsOnTheirWay().length) {
     resumeTimer = setTimeout(lookUpSends, RESUME_EVERY_MS);
   }
