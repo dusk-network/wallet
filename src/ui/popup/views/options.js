@@ -38,6 +38,12 @@ import { resetKeptText } from "./wallets.js";
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
 
+// The fingerprint row Settings shows, kept through Settings' own redraws while
+// it shows, as one comes once typing stops: the password being typed to turn
+// it on, and the switch with it, would go with a row drawn anew. Gone once
+// Settings is left: a row not on the screen any more is drawn anew.
+let shownFingerRow = null;
+
 // Settings' Unlock with fingerprint: the switch, and while it's being turned
 // on, the password, checked against the vault, then the fingerprint.
 function fingerprintRow({ actions }) {
@@ -546,8 +552,10 @@ export function optionsView(ov, { state, actions } = {}) {
   // fingerprint; off at once. Shown once the phone says it can, and on one
   // that could with a fingerprint, off, with what to do first; the password's
   // field is there only while it's being turned on.
-  const fingerRow = inApp && ov?.isUnlocked ? fingerprintRow({ actions }) : null;
-  if (fingerRow) {
+  const shown = inApp && ov?.isUnlocked && shownFingerRow?.isConnected ? shownFingerRow : null;
+  const fingerRow = shown ?? (inApp && ov?.isUnlocked ? fingerprintRow({ actions }) : null);
+  shownFingerRow = fingerRow;
+  if (fingerRow && !shown) {
     fingerprintStatus().then(({ available, enroll, on }) => {
       if (!available && !on && !enroll) return;
       const fingerSwitch = fingerRow.querySelector("#fingerprint-unlock");

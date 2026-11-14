@@ -1068,6 +1068,31 @@ describe("security in the app on a phone", () => {
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["disable", undefined]));
   });
 
+  // Chen's, 3 of 3: the box for the password closed, and the switch went off, at the first letter typed: Settings
+  // is drawn again once the typing stops, and drew the row anew.
+  it("keeps the password being typed to turn it on, and the switch, through Settings' redraws", async () => {
+    const { asked } = onPhone();
+    const view = await settings({}, { app: true });
+    await vi.waitFor(() => expect(isShown(finger())).toBe(true));
+    finger().checked = true;
+    finger().dispatchEvent(fakeEvent("change"));
+    typeInto(dom.document.body.querySelector("#fingerprint-password"), "r");
+    view.draw();
+    await settle();
+    const pwd = dom.document.body.querySelector("#fingerprint-password");
+    expect([finger().checked, pwd && isShown(pwd), pwd?.value]).toEqual([true, true, "r"]);
+    typeInto(pwd, "right one");
+    view.draw();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Turn on").click();
+    await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "right one"]));
+
+    // Left and opened again: drawn anew, no password kept.
+    dom.document.body.replaceChildren();
+    view.draw();
+    await settle();
+    expect(dom.document.body.querySelector("#fingerprint-password")).toBeNull();
+  });
+
   // Astra's: Turn on pressed, the switch off and on while the password was checked, and Turn on again:
   // two turnings on, each making the Keystore key anew, could leave neither working.
   it("starts one turning on at a time, whatever's switched or pressed while one is under way", async () => {
