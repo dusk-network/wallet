@@ -164,9 +164,10 @@ describe("field labels", () => {
     const group = body.querySelector(".mnemonic-input");
     expect([group.getAttribute("role"), accessibleName(group)]).toEqual(["group", "Recovery phrase"]);
 
-    body = await show(onboardingCreateConfirmView({ state: { onboard }, actions: actions() }));
-    expect(fieldNames(body)).toEqual(words);
-    expect(accessibleName(body.querySelector(".mnemonic-input"))).toBe("Recovery phrase");
+    // Check your recovery words: the three asked, by their places, as one group.
+    body = await show(onboardingCreateConfirmView({ state: { onboard: { ...onboard, checkPlaces: [2, 7, 12] } }, actions: actions() }));
+    expect(fieldNames(body)).toEqual(["Word 2", "Word 7", "Word 12"]);
+    expect(accessibleName(body.querySelector(".mnemonic-input"))).toBe("Check your recovery words");
 
     body = await show(lockedView({ state: {}, actions: actions() }));
     expect(fieldNames(body)).toEqual(["Password"]);

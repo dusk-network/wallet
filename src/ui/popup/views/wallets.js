@@ -6,8 +6,10 @@ import { formatLuxForInput, parseDuskToLux, amountForInput } from "../../../shar
 import { walletLabel } from "../../../shared/wallets.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress } from "../../lib/strings.js";
-import { decimalInput, fieldError, fieldLabel, newPasswordField, passwordForm, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
+import { decimalInput, fieldError, fieldLabel, groupLabel, newPasswordField, passwordForm, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { srpGridEl } from "./onboarding.js";
+import { createWordCheck } from "../../components/WordCheck.js";
+import { wordPlaces } from "../../../shared/recoveryWords.js";
 import { subnav } from "../../components/Subnav.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { platform } from "../../../platform/index.js";
@@ -312,6 +314,140 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
     ].filter(Boolean)
   );
   return Object.assign([subnav({ title: "Recovery phrase", onBack: () => backToSettings(state, actions) }), page], { busy: () => busy && state.context === asked });
+}
+
+/**
+ * Check your recovery words, from Settings: the password first, or a
+ * fingerprint where it's on, as for the recovery phrase; then three of the
+ * open wallet's words, chosen at random, compared by the wallet. They match,
+ * or don't, and then its words are shown, to put the paper right. Nothing
+ * typed is kept.
+ */
+export function checkWordsView(ov, { state, actions } = {}) {
+  const pwd = unlockPasswordField({ onEnter: () => btn.click() });
+  const err = formError();
+  const page = h("div", { class: "row onboard-form" });
+  const done = h("button", { class: "btn-primary btn-full", type: "button", text: "Done", onclick: () => backToSettings(state, actions) });
+  let busy = false;
+  let asked = null;
+
+  // The three words, with the password they were asked with.
+  const check = (password, count) => {
+    let checkBtn;
+    const words = createWordCheck({ places: wordPlaces(count), onDone: () => checkBtn.click() });
+    const wordsError = fieldError(words.el, { markInvalid: false });
+    checkBtn = h("button", {
+      class: "btn-primary btn-full",
+      type: "button",
+      text: "Check",
+      onclick: async () => {
+        if (busy) return;
+        wordsError.show("");
+        if (!words.filled()) return wordsError.show("Enter the three words.");
+        busy = true;
+        checkBtn.disabled = true;
+        words.setDisabled(true);
+        const typed = words.typed();
+        words.clear();
+        try {
+          const res = await actions?.send?.({ type: "DUSK_UI_CHECK_RECOVERY_WORDS", password, words: typed });
+          if (res?.error) throw new Error(res.error.message ?? "Couldn't check the words");
+          if (!page.isConnected || state.context !== asked) return;
+          page.replaceChildren(
+            ...(res?.match
+              ? [h("p", { class: "auth-lead", text: "Your recovery words match." }), done]
+              : [
+                  h("p", { class: "field-error", role: "alert", text: "Those words don't match. These are this wallet's words, in order:" }),
+                  h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
+                  srpGridEl(String(res?.phrase ?? "")),
+                  done,
+                ])
+          );
+        } catch (e) {
+          wordsError.show(e?.message ?? String(e));
+          checkBtn.disabled = false;
+          words.setDisabled(false);
+        } finally {
+          busy = false;
+        }
+      },
+    });
+    page.replaceChildren(
+      h("p", { class: "auth-lead", text: "Enter these words from your recovery phrase." }),
+      groupLabel(words.el, "Check your recovery words"),
+      words.el,
+      wordsError.el,
+      checkBtn
+    );
+    words.focus();
+  };
+
+  const start = async (password) => {
+    if (busy) return;
+    busy = true;
+    asked = state.context;
+    btn.disabled = true;
+    fingerBtn.disabled = true;
+    pwd.input.disabled = true;
+    btn.textContent = "Checking…";
+    try {
+      const res = await actions?.send?.({ type: "DUSK_UI_CHECK_RECOVERY_WORDS", password });
+      pwd.input.value = "";
+      if (res?.error) throw new Error(res.error.message ?? "Couldn't read the recovery phrase");
+      busy = false;
+      if (!page.isConnected || state.context !== asked) return;
+      check(password, Number(res?.count) || 12);
+    } catch (e) {
+      const message = e?.message ?? String(e);
+      if (passwordRefusal(message)) pwd.error.show(message);
+      else err.show(message);
+      busy = false;
+      btn.disabled = false;
+      fingerBtn.disabled = false;
+      pwd.input.disabled = false;
+      btn.textContent = "Next";
+    }
+  };
+
+  const btn = h("button", {
+    class: "btn-primary btn-full",
+    type: "button",
+    text: "Next",
+    onclick: () => {
+      err.show("");
+      pwd.error.show("");
+      if (!pwd.input.value) {
+        pwd.error.show("Enter your password.");
+        pwd.input.focus();
+        return;
+      }
+      start(pwd.input.value);
+    },
+  });
+  const fingerBtn = h("button", {
+    class: "btn-outline btn-full",
+    type: "button",
+    text: "Use fingerprint",
+    hidden: true,
+    onclick: async () => {
+      if (busy) return;
+      err.show("");
+      const answer = await fingerprintPassword({ title: "Check your recovery words" });
+      if (!pwd.input.isConnected) return;
+      if (answer.ok && answer.secret) return start(answer.secret);
+      if (answer.reason === "invalidated" || answer.reason === "off") fingerBtn.hidden = true;
+      pwd.input.focus();
+      showKeyboard().catch(() => {});
+    },
+  });
+  fingerprintStatus()
+    .then(({ on }) => {
+      if (on && pwd.input.isConnected) fingerBtn.hidden = false;
+    })
+    .catch(() => {});
+
+  page.replaceChildren(h("p", { class: "auth-lead", text: "Your password, to check this wallet's recovery words." }), ...pwd.els, err.el, btn, fingerBtn);
+  return Object.assign([subnav({ title: "Check your recovery words", onBack: () => backToSettings(state, actions) }), page], { busy: () => busy && state.context === asked });
 }
 
 /** A new password for every wallet here: the current one, then the new one twice. */

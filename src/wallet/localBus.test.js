@@ -1221,6 +1221,21 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     await expect(send({ type: "DUSK_UI_RECOVERY_PHRASE", password: "password123" })).resolves.toMatchObject({ error: { message: "Wallet locked" } });
   });
 
+  // Amélie's: Check your recovery words, in Settings. The wallet compares them; the phrase leaves it only where they don't match.
+  it("checks words of the open wallet's phrase for the password that opens it, giving the phrase only where they don't match", async () => {
+    await twoWallets();
+    const check = (over) => send({ type: "DUSK_UI_CHECK_RECOVERY_WORDS", password: "password123", ...over });
+    await expect(check({ password: "not it" })).resolves.toMatchObject({ error: { message: "Incorrect password" } });
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    const words = engine.wallet.split(" ");
+    await expect(check()).resolves.toEqual({ ok: true, count: words.length });
+    await expect(check({ words: words.map((word, i) => [i + 1, ` ${word.toUpperCase()} `]) })).resolves.toEqual({ ok: true, match: true });
+    await expect(check({ words: [[1, "zoo"]] })).resolves.toEqual({ ok: true, match: false, phrase: engine.wallet });
+    await expect(check({ words: [[words.length + 1, "zoo"]] })).resolves.toMatchObject({ match: false });
+    await ok({ type: "DUSK_UI_LOCK" });
+    await expect(check()).resolves.toMatchObject({ error: { message: "Wallet locked" } });
+  });
+
   it("removes every wallet on Reset, and on a restore after a forgotten password", async () => {
     await twoWallets();
     await ok({ type: "DUSK_UI_LOCK" });

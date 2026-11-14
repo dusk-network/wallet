@@ -61,7 +61,7 @@ import {
   restoreWalletView,
 } from "./views/onboarding.js";
 import { lockedView } from "./views/locked.js";
-import { changePasswordView, recoveryPhraseView, removeWalletView, resetWalletView, sendPasswordView } from "./views/wallets.js";
+import { changePasswordView, recoveryPhraseView, checkWordsView, removeWalletView, resetWalletView, sendPasswordView } from "./views/wallets.js";
 import { cancelSendPassword } from "../components/SendPasswordDialog.js";
 import { getRuntimeKind, isExtensionRuntime, isTauriRuntime } from "../../platform/runtime.js";
 import {
@@ -101,7 +101,7 @@ function isWalletLockedResponse(value) {
 }
 
 // The screens of a wallet being added, removed, or a new password: unlocked only.
-const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password", "recovery_phrase"]);
+const WALLET_ROUTES = new Set(["wallet_add", "wallet_add_phrase", "wallet_add_confirm", "wallet_add_import", "wallet_remove", "change_password", "send_password", "recovery_phrase", "check_words"]);
 
 // The screen Settings or Add wallet opens from, for its Back to return to:
 // home from Settings' own pages and a setup.
@@ -1688,6 +1688,10 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   }
   if (state.route === "recovery_phrase") {
     setApp(keepForm(() => recoveryPhraseView(ov, { state, actions })));
+    return;
+  }
+  if (state.route === "check_words") {
+    setApp(keepForm(() => checkWordsView(ov, { state, actions })));
     return;
   }
   // After Confirm: the transaction's steps. Without one (a new popup), home.

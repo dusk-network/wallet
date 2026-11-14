@@ -18,6 +18,12 @@ import { lockedView } from "./popup/views/locked.js";
 vi.mock("../wallet/bus.js", () => ({ send: vi.fn() }));
 
 const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+// Check your recovery words: each box asked filled with the phrase's word at its place.
+const wordBoxes = (body) => body.querySelectorAll("input").filter((input) => /^Word \d+$/.test(input.getAttribute("aria-label") ?? ""));
+const fillChecked = (body, phrase) => {
+  const words = phrase.split(" ");
+  for (const input of wordBoxes(body)) typeInto(input, words[Number(input.getAttribute("aria-label").slice(5)) - 1]);
+};
 
 let dom;
 
@@ -189,19 +195,62 @@ describe("setting up and unlocking", () => {
     expect(body.querySelectorAll("[role=alert]").filter((el) => !el.hidden).map((el) => el.textContent)).toEqual([]);
   });
 
-  it("asks for the words written down, and says when they don't match", async () => {
-    const state = { route: "onboard_create_confirm", onboard: onboard() };
+  // Amélie's, the seventh time: no way to check the words were written down right.
+  it("asks for three of the words written down, chosen at random, and shows the words again when they don't match", async () => {
+    const state = { route: "onboard_create_phrase", onboard: onboard() };
+    const acts = actions();
+    // I wrote it down: three places, chosen then, the same through redraws.
+    button(show(onboardingCreatePhraseView({ state, actions: acts })), "I wrote it down").click();
+    expect(state.route).toBe("onboard_create_confirm");
+    const places = state.onboard.checkPlaces;
+    expect(places).toHaveLength(3);
+    expect(new Set(places).size).toBe(3);
+    expect(places.every((p) => p >= 1 && p <= 12)).toBe(true);
+    let body = show(onboardingCreateConfirmView({ state, actions: acts }));
+    expect(body.querySelector(".subnav-title").textContent).toBe("Check your recovery words");
+    expect(body.querySelector(".auth-lead").textContent).toBe("Enter these words from your recovery phrase.");
+    const names = () => wordBoxes(body).map((i) => i.getAttribute("aria-label"));
+    expect(names()).toEqual(places.map((p) => `Word ${p}`));
+    // As Import's boxes: no password manager, no keyboard learning.
+    for (const input of wordBoxes(body)) {
+      expect([input.getAttribute("autocomplete"), input.getAttribute("autocorrect"), input.getAttribute("spellcheck"), input.getAttribute("autocapitalize")]).toEqual(["off", "off", "false", "none"]);
+    }
+    body = show(onboardingCreateConfirmView({ state, actions: acts }));
+    expect(names()).toEqual(places.map((p) => `Word ${p}`));
+    expect(body.querySelectorAll("button").filter(isShown).map((b) => b.textContent)).toEqual(["← Back", "Check", "Skip for now"]);
+
+    button(body, "Check").click();
+    await settle();
+    expect(errorOf(body.querySelector("[role=group]"))).toBe("Enter the three words.");
+    // A word wrong: the words again, shown, saying so; nothing made.
+    for (const input of wordBoxes(body)) typeInto(input, "zoo");
+    button(body, "Check").click();
+    await settle();
+    expect([state.route, state.onboard.reveal, state.onboard.checkPlaces, acts.send.mock.calls]).toEqual(["onboard_create_phrase", true, null, []]);
+    const phrase = show(onboardingCreatePhraseView({ state, actions: acts }));
+    expect(phrase.querySelector("[role=alert]").textContent).toBe("Those words don't match. Check them against the words below.");
+    expect(phrase.querySelector(".srp-grid").classList.contains("is-blurred")).toBe(false);
+
+    // Checked again, right: the wallet made, and said so.
+    button(phrase, "I wrote it down").click();
+    body = show(onboardingCreateConfirmView({ state, actions: acts }));
+    fillChecked(body, MNEMONIC);
+    button(body, "Check").click();
+    await settle();
+    expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC }));
+    expect(acts.showToast).toHaveBeenCalledWith("Your recovery words match.");
+    expect(state.route).toBe("home");
+  });
+
+  it("makes the wallet with Skip for now, without the words, and without saying they match", async () => {
+    const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] } };
     const acts = actions();
     const body = show(onboardingCreateConfirmView({ state, actions: acts }));
-    expect(body.querySelector(".auth-lead").textContent).toBe("Enter the words you wrote down.");
-    button(body, "Create wallet").click();
+    button(body, "Skip for now").click();
     await settle();
-    expect(errorOf(body.querySelector("[role=group]"))).toBe("Enter your recovery phrase.");
-    typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
-    button(body, "Create wallet").click();
-    await settle();
-    expect(errorOf(body.querySelector("[role=group]"))).toBe("The words don't match your recovery phrase.");
-    expect(acts.send).not.toHaveBeenCalled();
+    expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC, fresh: true }));
+    expect(acts.showToast).not.toHaveBeenCalledWith("Your recovery words match.");
+    expect([state.route, state.onboard.mnemonic]).toEqual(["home", null]);
   });
 
   it("unlocks under a heading, and says unlocking can take a moment, with Unlocking… on the button only", () => {
@@ -343,8 +392,8 @@ describe("a new recovery phrase", () => {
     // Done with: gone from memory, as the wallet is made.
     state.route = "onboard_create_confirm";
     const confirm = show(onboardingCreateConfirmView({ state, actions: acts }));
-    typeInto(field(confirm, "Word 1"), first);
-    button(confirm, "Create wallet").click();
+    fillChecked(confirm, first);
+    button(confirm, "Check").click();
     await settle();
     expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: first }));
     expect(state.onboard.mnemonic).toBeNull();
@@ -387,9 +436,9 @@ describe("a new recovery phrase", () => {
     const second = state.onboard.mnemonic;
     state.route = "wallet_add_confirm";
     const confirm = show(onboardingCreateConfirmView({ state, actions: acts, adding: true }));
-    typeInto(field(confirm, "Word 1"), second);
+    fillChecked(confirm, second);
     typeInto(field(confirm, SHARED_PASSWORD), "password123");
-    button(confirm, "Add wallet").click();
+    button(confirm, "Check").click();
     await settle();
     expect(state.route).toBe("home");
     expect(JSON.stringify(state)).not.toContain(second);
@@ -432,14 +481,15 @@ describe("adding a wallet beside the ones here", () => {
     const pwd = field(body, SHARED_PASSWORD);
     expectSharedPassword(pwd);
 
-    typeInto(field(body, "Word 1"), MNEMONIC);
-    button(body, "Add wallet").click();
+    fillChecked(body, MNEMONIC);
+    button(body, "Check").click();
     await settle();
     expect(errorOf(pwd)).toBe("Enter your password.");
     expect(acts.send).not.toHaveBeenCalled();
 
     typeInto(pwd, "password123");
-    button(body, "Add wallet").click();
+    fillChecked(body, MNEMONIC);
+    button(body, "Check").click();
     await settle();
     // A phrase made here: the wallet sets its shielded checkpoint as it adds it.
     expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123", fresh: true });
@@ -449,7 +499,8 @@ describe("adding a wallet beside the ones here", () => {
 
     reply = { ok: true };
     typeInto(pwd, "password123");
-    button(body, "Add wallet").click();
+    fillChecked(body, MNEMONIC);
+    button(body, "Check").click();
     await settle();
     expect([state.route, state.onboard.mnemonic]).toEqual(["home", null]);
     expect(acts.showToast).toHaveBeenCalledWith("Wallet added.");
@@ -755,8 +806,7 @@ describe("fingerprint unlock", () => {
     // The words written down, then the wallet made with the password.
     Object.assign(state.onboard, { mnemonic: MNEMONIC, password: "long enough" });
     body = show(onboardingCreateConfirmView({ state, actions: acts }));
-    typeInto(field(body, "Word 1"), MNEMONIC);
-    button(body, "Create wallet").click();
+    button(body, "Skip for now").click();
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "long enough"]));
     expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", password: "long enough" }));
   });

@@ -508,6 +508,26 @@ export function optionsView(ov, { state, actions } = {}) {
         })
       : null;
 
+  // Check your recovery words: three of them, behind the password, in the extension and the app.
+  const checkWordsRow = ov?.isUnlocked
+    ? h(
+        "button",
+        {
+          class: "list-row settings-row",
+          type: "button",
+          onclick: async () => {
+            state.route = "check_words";
+            await actions?.render?.();
+          },
+        },
+        [
+          h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg("check") }),
+          h("span", { class: "row-main" }, [h("span", { class: "row-title", text: "Check your recovery words" })]),
+          h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
+        ]
+      )
+    : null;
+
   // The open wallet's recovery phrase again, behind the password, in the app.
   const phraseRow =
     ov?.isUnlocked && platform.isTauri
@@ -1130,7 +1150,7 @@ export function optionsView(ov, { state, actions } = {}) {
       fingerRow,
       changePasswordBtn,
       changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
-      sendPasswordRow || phraseRow ? h("div", { class: "group" }, [phraseRow, sendPasswordRow].filter(Boolean)) : null,
+      sendPasswordRow || phraseRow || checkWordsRow ? h("div", { class: "group" }, [phraseRow, checkWordsRow, sendPasswordRow].filter(Boolean)) : null,
     ]),
     inApp && ov?.isUnlocked ? section("Notices", [incomingRow(ov, { actions })]) : null,
     sitesSection ? section("Connected sites", sitesSection) : null,

@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Check your recovery words: right after a wallet's words are shown, three of them asked for at random, with Check and Skip for now, showing the words again where they don't match; and in Settings, behind the password, in the extension and the Android app.
 - Notices in the Android app for money that comes in while it's in the background or closed, saying how much and from whom and opening that payment, with Tell me when money comes in in Settings to turn them off; they can take up to about 15 minutes.
 - Opened the testnet web wallet's request links in the Android app where it's installed, as Android App Links, once the web wallet serves the file that names the app.
 - Said what a request asks comes to in your currency on mainnet, with the price's time, as it's made and in Receive's list, and what an amount comes to on Send and Review; the link stays in DUSK.

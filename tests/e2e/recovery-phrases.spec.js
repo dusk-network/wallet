@@ -58,8 +58,12 @@ test("makes a wallet from new words, unlocks it, and restores the same one from 
     window.shownWords = [...document.querySelectorAll(".srp-word-text")].map((n) => n.textContent);
   });
   await page.getByRole("button", { name: "I wrote it down" }).click();
-  await pasteWords(page);
-  await page.getByRole("button", { name: "Create wallet" }).click();
+  // Check your recovery words: the three asked, from what was shown.
+  for (const box of await page.getByRole("textbox", { name: /^Word \d+$/ }).all()) {
+    const place = Number((await box.getAttribute("aria-label")).slice(5));
+    await box.fill(await page.evaluate((i) => window.shownWords[i], place - 1));
+  }
+  await page.getByRole("button", { name: "Check", exact: true }).click();
   await home(page);
   const made = await account(page);
 

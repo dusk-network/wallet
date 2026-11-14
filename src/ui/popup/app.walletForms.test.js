@@ -83,7 +83,7 @@ const FORMS = [
   ["Remove wallet", "wallet_remove", { walletRemove: "w2" }, [SHARED_PASSWORD]],
   ["Password on big sends", "send_password", {}, ["Above this amount, in DUSK"]],
   ["Add wallet's import", "wallet_add_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
-  ["Add wallet's new phrase, confirmed", "wallet_add_confirm", { onboard: { mode: "create", mnemonic: WORDS.join(" "), password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
+  ["Add wallet's new phrase, checked", "wallet_add_confirm", { onboard: { mode: "create", mnemonic: WORDS.join(" "), password: "", reveal: false, adding: true, checkPlaces: [1, 2, 7] } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
 ];
 
 describe("a wallet form being filled in", () => {

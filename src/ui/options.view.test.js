@@ -1210,6 +1210,68 @@ describe("security in the app on a phone", () => {
     expect(view.state.route).toBe("options");
   });
 
+  // Amélie's, the seventh time: a way to check the paper, typing the words and hearing they match.
+  it("checks three of the recovery words behind the password, in the extension too, and shows the words where they don't match", async () => {
+    const view = await settings();
+    const security = view.section("Security");
+    security.querySelectorAll("button").find((b) => b.textContent.includes("Check your recovery words")).click();
+    await settle();
+    expect(view.state.route).toBe("check_words");
+
+    const MNEMONIC = "legal winner thank year wave sausage worth useful legal winner thank yellow";
+    const asked = [];
+    view.actions.send.mockImplementation(async (m) => {
+      if (m.type !== "DUSK_UI_CHECK_RECOVERY_WORDS") return {};
+      asked.push(m.words ? m.words.map(([place]) => place) : "count");
+      if (m.password !== "the password") return { error: { message: "Incorrect password" } };
+      if (!m.words) return { ok: true, count: 12 };
+      const words = MNEMONIC.split(" ");
+      return m.words.every(([place, word]) => words[place - 1] === word) ? { ok: true, match: true } : { ok: true, match: false, phrase: MNEMONIC };
+    });
+    const { checkWordsView } = await import("./popup/views/wallets.js");
+    const draw = () => dom.document.body.replaceChildren(...checkWordsView(view.ov, { state: view.state, actions: view.actions }));
+    draw();
+    const body = dom.document.body;
+    const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with");
+    const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
+    const boxes = () => body.querySelectorAll("input").filter((i) => /^Word \d+$/.test(accessibleName(i)));
+    typeInto(password(), "not it");
+    press("Next");
+    await settle();
+    expect(visibleText(body)).toContain("Incorrect password");
+    expect(boxes()).toEqual([]);
+    typeInto(password(), "the password");
+    press("Next");
+    await settle();
+    // Three of its twelve words, by their places, as Import's boxes are.
+    expect(boxes()).toHaveLength(3);
+    const places = boxes().map((i) => Number(accessibleName(i).slice(5)));
+    expect(places.every((p) => p >= 1 && p <= 12)).toBe(true);
+    for (const input of boxes()) expect([input.getAttribute("autocomplete"), input.getAttribute("spellcheck")]).toEqual(["off", "false"]);
+    press("Check");
+    await settle();
+    expect(visibleText(body)).toContain("Enter the three words.");
+    for (const input of boxes()) typeInto(input, MNEMONIC.split(" ")[Number(accessibleName(input).slice(5)) - 1]);
+    press("Check");
+    await settle();
+    expect(visibleText(body)).toContain("Your recovery words match.");
+    expect(body.querySelector(".srp-grid")).toBeNull();
+    expect(asked).toEqual(["count", "count", places]);
+
+    // Again, a word wrong: said, and the words shown.
+    draw();
+    typeInto(password(), "the password");
+    press("Next");
+    await settle();
+    for (const input of boxes()) typeInto(input, "zoo");
+    press("Check");
+    await settle();
+    expect(visibleText(body)).toContain("Those words don't match. These are this wallet's words, in order:");
+    expect(body.querySelectorAll(".srp-word-text").map((w) => w.textContent)).toEqual(MNEMONIC.split(" "));
+    press("Done");
+    expect(view.state.route).toBe("options");
+  });
+
   it("shows no recovery phrase in Settings outside the app", async () => {
     const view = await settings();
     expect(view.shownButtons(view.section("Security")).some((b) => b.includes("Recovery phrase"))).toBe(false);

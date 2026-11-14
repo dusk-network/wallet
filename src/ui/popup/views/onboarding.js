@@ -5,6 +5,8 @@ import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
 import { checkboxInput, fieldError, groupLabel, newPasswordField, passwordForm, stepActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
+import { createWordCheck } from "../../components/WordCheck.js";
+import { wordPlaces, wordsMatch } from "../../../shared/recoveryWords.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
@@ -330,11 +332,14 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
     attrs: { disabled: !state.onboard.reveal, title: state.onboard.reveal ? undefined : "Reveal the phrase first" },
   });
 
+  // On to Check your recovery words: three of them, chosen now, kept for that screen.
   const next = h("button", {
     class: "btn-primary btn-full",
     type: "button",
     text: "I wrote it down",
     onclick: () => {
+      state.onboard.checkPlaces = wordPlaces(normalizeMnemonic(mnemonic).split(" ").filter(Boolean).length);
+      state.onboard.checkFailed = false;
       state.route = adding ? "wallet_add_confirm" : "onboard_create_confirm";
       actions?.render?.().catch(() => {});
     },
@@ -351,6 +356,8 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
     h("div", { class: "row onboard-form" }, [
       adding ? walletLanding(ov).el : null,
       h("p", { class: "auth-lead", text: "Write down these 12 words in order and keep them somewhere safe." }),
+      // Back from a check that didn't match: the words again, to put the paper right.
+      state.onboard.checkFailed ? h("p", { class: "field-error", role: "alert", text: "Those words don't match. Check them against the words below." }) : null,
       h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
       srpGridEl(mnemonic, { blurred: !state.onboard.reveal }),
       h("div", { class: "phrase-tools" }, [toggle, copyBtn]),
@@ -360,31 +367,33 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
   ];
 }
 
+/**
+ * Check your recovery words, once they're written down: three of them,
+ * chosen at random, compared here, with Check and Skip for now; either makes
+ * the wallet, and a mismatch shows the words again first. In Add wallet, the
+ * password the wallets here share too.
+ */
 export function onboardingCreateConfirmView({ state, actions, adding = false } = {}) {
   const mnemonic = state.onboard.mnemonic;
   if (!mnemonic) {
     state.route = adding ? "wallet_add" : "onboard_welcome";
     return onboardingWelcomeView({ state, actions, adding });
   }
-
-  const expectedWordCount = normalizeMnemonic(mnemonic).split(" ").filter(Boolean).length || 12;
-  let createBtn;
-  const confirmInput = createMnemonicInput({
-    wordCount: expectedWordCount,
-    allowWordCountToggle: false,
-    onComplete: () => createBtn?.click(),
-  });
-  const phraseError = fieldError(confirmInput.el, { markInvalid: false });
+  const expected = normalizeMnemonic(mnemonic);
+  // Chosen as the words were left; the same through redraws.
+  state.onboard.checkPlaces ??= wordPlaces(expected.split(" ").filter(Boolean).length);
+  let checkBtn;
+  const words = createWordCheck({ places: state.onboard.checkPlaces, onDone: () => checkBtn?.click() });
+  const wordsError = fieldError(words.el, { markInvalid: false });
   const err = formError();
   // Beside other wallets, the password they share, in place of a new one.
-  const current = adding ? currentPasswordField({ onDone: () => createBtn?.click() }) : null;
-  const verb = adding ? "Add wallet" : "Create wallet";
+  const current = adding ? currentPasswordField({ onDone: () => checkBtn?.click() }) : null;
 
   // While the wallet is made: one line that says what happens.
   const busyBody = h("p", { class: "auth-note", style: "display:none", text: "Encrypting your wallet. Keep this window open." });
 
   const nav = subnav({
-    title: "Confirm",
+    title: "Check your recovery words",
     onBack: () => {
       // Back is disabled while the vault is being created,
       // as vault creation continues in the background.
@@ -395,92 +404,109 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   const backBtn = nav.querySelector("button");
 
   let busy = false;
+  let skipBtn;
   const setBusy = (isBusy, msg) => {
     busy = Boolean(isBusy);
     if (msg) busyBody.textContent = String(msg);
 
     // Disable interactions to prevent multiple Stronghold writes.
     // These are very system heavy.
-    confirmInput.setDisabled(busy);
+    words.setDisabled(busy);
     if (current) current.pwd.disabled = busy;
     if (backBtn) backBtn.disabled = busy;
-    if (createBtn) {
-      createBtn.disabled = busy;
-      createBtn.textContent = busy ? (adding ? "Adding…" : "Creating…") : verb;
-    }
+    for (const b of [checkBtn, skipBtn]) if (b) b.disabled = busy;
     busyBody.style.display = busy ? "block" : "none";
   };
 
-  createBtn = h("button", {
+  // The wallet made, checked or not.
+  const create = async ({ checked }) => {
+    try {
+      if (busy) return;
+      err.show("");
+      wordsError.show("");
+      const password = adding ? current.read() : state.onboard.password;
+      if (adding && password == null) return;
+      if (!password) throw new Error("Go back and set your password again.");
+
+      setBusy(true, "Encrypting your wallet. Keep this window open.");
+      // A phrase made here (`fresh`): the wallet sets its shielded
+      // checkpoint to now as it makes it, so it syncs no notes from genesis.
+      const res = await actions?.send?.({
+        type: adding ? "DUSK_UI_ADD_WALLET" : "DUSK_UI_CREATE_WALLET",
+        mnemonic: expected,
+        password,
+        fresh: true,
+      });
+      if (adding) current.pwd.value = "";
+      if (res?.error) throw new Error(res.error.message ?? "Failed to create wallet");
+      words.clear();
+
+      if (adding) {
+        await addedWallet(state, actions);
+        if (checked) actions?.showToast?.("Your recovery words match.");
+        return;
+      }
+      const finger = state.onboard?.fingerprint === true;
+      state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
+      state.route = "home";
+      state.needsRefresh = true;
+      await actions?.render?.({ forceRefresh: true });
+      if (checked) actions?.showToast?.("Your recovery words match.");
+      if (finger) fingerOnWith(password, actions);
+    } catch (e) {
+      const message = e?.message ?? String(e);
+      if (adding) {
+        if (passwordRefusal(message)) current.show(message);
+        else if (phraseRefusal(message)) wordsError.show(message);
+        else err.show(message);
+        setBusy(false);
+        return;
+      }
+      if (await showPersistedVault(state, actions)) return;
+      err.show(message);
+      setBusy(false);
+    }
+  };
+
+  checkBtn = h("button", {
     class: "btn-primary btn-full",
     type: "button",
-    text: verb,
-    onclick: async () => {
-      try {
-        if (busy) return;
-        err.show("");
-        phraseError.show("");
-
-        const typed = confirmInput.getMnemonic();
-        const expected = normalizeMnemonic(mnemonic);
-        if (typed !== expected) {
-          phraseError.show(typed ? "The words don't match your recovery phrase." : "Enter your recovery phrase.");
-          return;
-        }
-
-        const password = adding ? current.read() : state.onboard.password;
-        if (adding && password == null) return;
-        if (!password) throw new Error("Go back and set your password again.");
-
-        setBusy(true, "Encrypting your wallet. Keep this window open.");
-        // A phrase made here (`fresh`): the wallet sets its shielded
-        // checkpoint to now as it makes it, so it syncs no notes from genesis.
-        const res = await actions?.send?.({
-          type: adding ? "DUSK_UI_ADD_WALLET" : "DUSK_UI_CREATE_WALLET",
-          mnemonic: expected,
-          password,
-          fresh: true,
-        });
-        if (adding) current.pwd.value = "";
-        if (res?.error) throw new Error(res.error.message ?? "Failed to create wallet");
-
-        if (adding) {
-          await addedWallet(state, actions);
-          return;
-        }
-        const finger = state.onboard?.fingerprint === true;
-        state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-        state.route = "home";
-        state.needsRefresh = true;
-        await actions?.render?.({ forceRefresh: true });
-        if (finger) fingerOnWith(password, actions);
-      } catch (e) {
-        const message = e?.message ?? String(e);
-        if (adding) {
-          if (passwordRefusal(message)) current.show(message);
-          else if (phraseRefusal(message)) phraseError.show(message);
-          else err.show(message);
-          setBusy(false);
-          return;
-        }
-        if (await showPersistedVault(state, actions)) return;
-        err.show(message);
-        setBusy(false);
+    text: "Check",
+    onclick: () => {
+      if (busy) return;
+      wordsError.show("");
+      if (!words.filled()) {
+        wordsError.show("Enter the three words.");
+        return;
       }
+      // Compared here, and then forgotten: a mismatch shows the words again, to put the paper right.
+      const match = wordsMatch(expected, words.typed());
+      words.clear();
+      if (!match) {
+        state.onboard.checkFailed = true;
+        state.onboard.checkPlaces = null;
+        state.onboard.reveal = true;
+        state.route = adding ? "wallet_add_phrase" : "onboard_create_phrase";
+        actions?.render?.().catch(() => {});
+        return;
+      }
+      create({ checked: true });
     },
   });
+  skipBtn = h("button", { class: "btn-outline btn-full", type: "button", text: "Skip for now", onclick: () => create({ checked: false }) });
 
   // `busy`: the wallet being made, which the popup keeps the form through.
   return Object.assign([
     nav,
     h("div", { class: "row onboard-form" }, [
-      h("p", { class: "auth-lead", text: "Enter the words you wrote down." }),
-      groupLabel(confirmInput.el, "Recovery phrase"),
-      confirmInput.el,
-      phraseError.el,
+      h("p", { class: "auth-lead", text: "Enter these words from your recovery phrase." }),
+      groupLabel(words.el, "Check your recovery words"),
+      words.el,
+      wordsError.el,
       ...(current ? current.els : []),
       err.el,
-      createBtn,
+      checkBtn,
+      skipBtn,
       busyBody,
     ]),
   ], { busy: () => busy });
