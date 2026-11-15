@@ -122,6 +122,36 @@ describe("a field typed in on a phone", () => {
     expect(page.button.getBoundingClientRect().top).toBeGreaterThanOrEqual(82);
   });
 
+  // Hein's: a recovery-word box's suggestions under it, above the keyboard on a phone, and what's said of the box
+  // ("Not a recovery word") with it, rather than the page going on to Import wallet.
+  it("puts what a box shows under it as it's typed in above the keyboard with it: its suggestions and what's said of it", async () => {
+    const page = importScreen();
+    const doc = page.dom.document;
+    const under = (id, top, height, attrs = {}) => {
+      const el = Object.assign(doc.createElement("div"), { id });
+      for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
+      el.getBoundingClientRect = () => ({ top: top - page.scroller.scrollTop, bottom: top + height - page.scroller.scrollTop });
+      page.word.parentNode.insertBefore(el, page.password);
+      return el;
+    };
+    // Two rows of chips under the box, low in the top half the keyboard leaves.
+    const chips = under("chips", 352, 100, { role: "listbox" });
+    page.word.setAttribute("aria-controls", "chips");
+    await page.focus(page.word);
+    expect(chips.getBoundingClientRect().bottom).toBeLessThanOrEqual(395);
+    expect(page.word.getBoundingClientRect().top).toBeGreaterThanOrEqual(82);
+
+    // What's said of the box under it, an alert: the box and it stay where they show, the button far below.
+    const again = importScreen();
+    const said = Object.assign(again.dom.document.createElement("p"), { id: "said", textContent: "Not a recovery word" });
+    said.setAttribute("role", "alert");
+    said.getBoundingClientRect = () => ({ top: 352 - again.scroller.scrollTop, bottom: 372 - again.scroller.scrollTop });
+    again.word.parentNode.insertBefore(said, again.password);
+    again.word.setAttribute("aria-errormessage", "said");
+    await again.focus(again.word);
+    expect([again.scroller.scrollTop, again.word.getBoundingClientRect().top]).toEqual([0, 300]);
+  });
+
   it("goes into the top half with the button after it, where Firefox says nothing of the keyboard", async () => {
     const page = importScreen();
     await page.focus(page.confirm);

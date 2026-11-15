@@ -234,7 +234,7 @@ describe("the recovery phrase's word boxes", () => {
     }
   });
 
-  it("marks a typed word as its box is left, not while it's typed, and clears the mark once it's a word", () => {
+  it("marks a word not finished as its box is left, not while it's typed, and clears the mark once it's a word", () => {
     const { box, cell, onCheck } = mount();
     typeInto(box(1), "aban");
     expect(cell(1).classList.contains("is-invalid")).toBe(false);
@@ -394,3 +394,221 @@ describe("the recovery phrase's word boxes", () => {
     expect(rule(".srp-word")).toContain("border: 1px solid transparent;");
   });
 });
+
+// Hein's: the boxes suggest words as they're typed in, as the web wallet's did, from the wallet's own list,
+// never the phone's keyboard. Made-up words only: list words in no wallet's order.
+describe("words suggested as a box is typed in", () => {
+  const listOf = (input) => input.el.querySelector("[role=listbox]");
+  const chips = (input) => {
+    const list = listOf(input);
+    return list && isShown(list) ? list.querySelectorAll("[role=option]").map((o) => o.textContent) : [];
+  };
+  const marked = (input) => (chips(input).length ? listOf(input).querySelector('[role=option][aria-selected="true"]')?.textContent : "");
+  const note = (input) => {
+    const line = input.el.querySelector(".srp-word-note");
+    return line && isShown(line) ? line.textContent : "";
+  };
+  const keydown = (field, key, props = {}) => {
+    const e = fakeEvent("keydown", { key, ...props });
+    field.dispatchEvent(e);
+    return e;
+  };
+
+  it("shows, from two letters, up to four words of the list they start, under the box's row, the first marked, a listbox to screen readers", () => {
+    const { input, box, cell } = mount();
+    const grid = input.el.querySelector(".srp-grid");
+    box(3).focus();
+    typeInto(box(3), "a");
+    expect(chips(input)).toEqual([]);
+    typeInto(box(3), "ab");
+    expect([chips(input), marked(input)]).toEqual([["abandon", "ability", "able", "about"], "abandon"]);
+    // A row of its own under boxes 3 and 4, across both.
+    const list = listOf(input);
+    expect(grid.children.indexOf(list)).toBe(grid.children.indexOf(cell(4)) + 1);
+    // The box names the list and its marked word, as a combobox's are named.
+    const first = list.querySelector("[role=option]");
+    expect(list.getAttribute("aria-label")).toBe("Suggested words");
+    expect(["role", "aria-autocomplete", "aria-expanded", "aria-controls", "aria-activedescendant"].map((name) => box(3).getAttribute(name))).toEqual(["combobox", "list", "true", list.id, first.id]);
+    // The box on the right of a row: under the same row; the next row's: under that one.
+    typeInto(box(4), "zo");
+    expect([chips(input), grid.children.indexOf(listOf(input))]).toEqual([["zone", "zoo"], grid.children.indexOf(cell(4)) + 1]);
+    typeInto(box(5), "ki");
+    expect([chips(input), grid.children.indexOf(listOf(input))]).toEqual([["kick", "kid", "kidney", "kind"], grid.children.indexOf(cell(6)) + 1]);
+    // The box before it shows none now: only the box typed in has them.
+    expect([box(3), box(4)].map((b) => [b.getAttribute("aria-expanded"), b.getAttribute("aria-activedescendant")])).toEqual([["false", null], ["false", null]]);
+  });
+
+  it("takes the marked word with Enter, the arrows moving the mark, a tapped one, or the marked one with Tab, and moves on", () => {
+    const { input, box, words } = mount();
+    box(1).focus();
+    typeInto(box(1), "ab");
+    keydown(box(1), "ArrowDown");
+    keydown(box(1), "ArrowRight");
+    expect(marked(input)).toBe("able");
+    keydown(box(1), "ArrowUp");
+    expect(marked(input)).toBe("ability");
+    // Round from the first to the last.
+    keydown(box(1), "ArrowLeft");
+    expect(marked(input)).toBe("abandon");
+    keydown(box(1), "ArrowLeft");
+    expect([marked(input), box(1).getAttribute("aria-activedescendant")]).toEqual(["about", listOf(input).querySelectorAll("[role=option]")[3].id]);
+    const enter = keydown(box(1), "Enter");
+    expect([words()[0], dom.document.activeElement === box(2), chips(input), enter.defaultPrevented]).toEqual(["about", true, [], true]);
+
+    // A tap: pressed, the row keeps the focus in the box (and a phone its keyboard); the word goes in, on to the next.
+    typeInto(box(2), "zo");
+    const zoo = listOf(input).querySelectorAll("[role=option]")[1];
+    const press = fakeEvent("mousedown");
+    zoo.dispatchEvent(press);
+    expect(press.defaultPrevented).toBe(true);
+    zoo.click();
+    expect([words()[1], dom.document.activeElement === box(3), chips(input)]).toEqual(["zoo", true, []]);
+
+    // Tab takes the marked one, and goes on as Tab goes; Shift+Tab takes nothing.
+    typeInto(box(3), "wor");
+    expect(keydown(box(3), "Tab", { shiftKey: true }).defaultPrevented).toBe(false);
+    expect([words()[2], chips(input)]).toEqual(["wor", ["word", "work", "world", "worry"]]);
+    const tab = keydown(box(3), "Tab");
+    expect([words()[2], tab.defaultPrevented, chips(input)]).toEqual(["word", false, []]);
+
+    // Escape puts them away till the next letter; Enter then goes on with what's typed, as before.
+    box(4).focus();
+    typeInto(box(4), "sa");
+    expect(keydown(box(4), "Escape").defaultPrevented).toBe(true);
+    expect(chips(input)).toEqual([]);
+    typeInto(box(4), "sad");
+    expect(chips(input)).toEqual(["sad", "saddle", "sadness"]);
+    keydown(box(4), "Escape");
+    keydown(box(4), "Enter");
+    expect([words()[3], dom.document.activeElement === box(5)]).toEqual(["sad", true]);
+  });
+
+  it("needs no chip for the one word typed whole, but offers the words a whole word starts, and the list's spelling", () => {
+    const { input, box, words } = mount();
+    box(1).focus();
+    typeInto(box(1), "zoo");
+    expect(chips(input)).toEqual([]);
+    typeInto(box(1), "act");
+    expect([chips(input), marked(input)]).toEqual([["act", "action", "actor", "actress"], "act"]);
+    keydown(box(1), "Enter");
+    expect(words()[0]).toBe("act");
+    // Typed with an accent, or with capitals: the list's word, taken as it spells it.
+    typeInto(box(2), "Zóo");
+    expect(chips(input)).toEqual(["zoo"]);
+    keydown(box(2), "Enter");
+    expect(words()[1]).toBe("zoo");
+  });
+
+  it("marks letters that start no word at once, Not a recovery word under the box, and a word not finished once it's left", () => {
+    const { input, box, cell } = mount();
+    const grid = input.el.querySelector(".srp-grid");
+    const markOf = (n) => [cell(n).classList.contains("is-invalid"), box(n).getAttribute("aria-invalid")];
+    box(5).focus();
+    typeInto(box(5), "x");
+    expect([note(input), markOf(5)]).toEqual(["", [false, null]]);
+    typeInto(box(5), "xq");
+    expect([note(input), chips(input), markOf(5)]).toEqual(["Not a recovery word", [], [true, "true"]]);
+    // Said to screen readers as it shows, as the box's own error, under the row of boxes 5 and 6 (after its
+    // chips' row, hidden).
+    const line = input.el.querySelector(".srp-word-note");
+    const at = grid.children.indexOf(cell(6));
+    expect([line.getAttribute("role"), box(5).getAttribute("aria-errormessage"), grid.children[at + 1] === listOf(input), grid.children[at + 2] === line]).toEqual(["alert", line.id, true, true]);
+    // Of a box on the right, at the row's end, under it.
+    expect(line.classList.contains("is-end")).toBe(false);
+    typeInto(box(6), "qx");
+    expect([note(input), line.classList.contains("is-end"), markOf(6)]).toEqual(["Not a recovery word", true, [true, "true"]]);
+    typeInto(box(6), "");
+    box(5).focus();
+    // Letters that start a word again: the mark goes as they're typed.
+    typeInto(box(5), "ab");
+    expect([note(input), markOf(5), box(5).getAttribute("aria-errormessage")]).toEqual(["", [false, null], null]);
+    // A word not finished: marked once its box is left, as before; its words again as it's back in it.
+    typeInto(box(5), "aban");
+    expect(markOf(5)).toEqual([false, null]);
+    leave(box(5), box(9));
+    expect([markOf(5), chips(input)]).toEqual([[true, "true"], []]);
+    box(5).focus();
+    box(5).dispatchEvent(fakeEvent("focus"));
+    expect([chips(input), markOf(5)]).toEqual([["abandon"], [true, "true"]]);
+    listOf(input).querySelector("[role=option]").click();
+    expect([box(5).value, markOf(5), dom.document.activeElement === box(6)]).toEqual(["abandon", [false, null], true]);
+  });
+
+  it("shows them for the box with the focus only, and they go as it's left; a word typed whole shows none as it's back", () => {
+    const { input, box } = mount();
+    box(2).focus();
+    typeInto(box(2), "le");
+    expect(chips(input)).toEqual(["leader", "leaf", "learn", "leave"]);
+    leave(box(2), box(7));
+    expect(chips(input)).toEqual([]);
+    box(7).dispatchEvent(fakeEvent("focus"));
+    expect(chips(input)).toEqual([]);
+    typeInto(box(2), "act");
+    leave(box(2), box(7));
+    box(2).dispatchEvent(fakeEvent("focus"));
+    expect(chips(input)).toEqual([]);
+  });
+
+  it("still spreads a pasted phrase over the boxes and moves on at a space, with nothing left suggested", () => {
+    const { input, box, words, onCheck } = mount();
+    box(1).focus();
+    typeInto(box(1), "ap");
+    expect(chips(input)).toEqual(["apart", "apology", "appear", "apple"]);
+    paste(box(1), OTHER);
+    expect([words(), chips(input), onCheck.mock.lastCall]).toEqual([OTHER.split(" "), [], [""]]);
+    box(3).focus();
+    typeInto(box(3), "");
+    typeKeys("ca", { as: "text" });
+    expect(chips(input)).toEqual(["cabbage", "cabin", "cable", "cactus"]);
+    typeKeys(" ", { as: "text" });
+    expect([words()[2], dom.document.activeElement === box(4), chips(input)]).toEqual(["ca", true, []]);
+    // A word pasted over letters suggested for, no box left empty: what was suggested for them goes with them.
+    box(12).focus();
+    typeInto(box(12), "ab");
+    expect(chips(input)).toEqual(["abandon", "ability", "able", "about"]);
+    paste(box(12), "zebra");
+    expect([words()[11], chips(input)]).toEqual(["zebra", []]);
+    keydown(box(12), "Enter");
+    expect(words()[11]).toBe("zebra");
+  });
+
+  // The Android app's boxes are password boxes, its keyboard's one way to learn nothing: they stay so.
+  it("suggests in the Android app's password boxes too, which keep their own role", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64 Build/AE3A.240806.036; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.7390.122 Mobile Safari/537.36",
+    });
+    dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+    const { input, box, words } = mount();
+    box(1).focus();
+    typeKeys("ve", { as: "text" });
+    expect(chips(input)).toEqual(["vehicle", "velvet", "vendor", "venture"]);
+    expect(["type", "autocomplete", "role", "aria-activedescendant"].map((name) => box(1).getAttribute(name))).toEqual([
+      "password",
+      "one-time-code",
+      null,
+      listOf(input).querySelector("[role=option]").id,
+    ]);
+    listOf(input).querySelectorAll("[role=option]")[2].click();
+    expect([words()[0], dom.document.activeElement === box(2)]).toEqual(["vendor", true]);
+  });
+
+  it("asks nothing of the network and logs nothing as words are typed", () => {
+    const fetch = vi.fn();
+    vi.stubGlobal("fetch", fetch);
+    const logged = ["log", "info", "warn", "error", "debug"].map((name) => vi.spyOn(console, name));
+    const { input, box } = mount();
+    box(1).focus();
+    for (const typed of ["w", "wa", "wal", "walk"]) typeInto(box(1), typed);
+    keydown(box(1), "Enter");
+    typeInto(box(2), "xq");
+    expect([fetch.mock.calls.length, ...logged.map((spy) => spy.mock.calls.length), note(input)]).toEqual([0, 0, 0, 0, 0, 0, "Not a recovery word"]);
+    for (const spy of logged) spy.mockRestore();
+  });
+
+  it("hands on a word typed with an accent or in capitals as the list spells it", () => {
+    const { input, box } = mount();
+    paste(box(1), OTHER.replace("legal", "LÉGAL").replace("worth", "wörth"));
+    expect([input.problem(), input.getMnemonic()]).toEqual(["", OTHER]);
+  });
+});
+

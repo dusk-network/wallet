@@ -9,7 +9,9 @@
 // goes into the top half of the page, which a phone's keyboard leaves free.
 // Either way the page gets room under its end (#app's padding, ui.css) to
 // scroll that far; where nothing's said, the room stays until the next screen,
-// so nothing moves under a finger as the keyboard closes.
+// so nothing moves under a finger as the keyboard closes. What a field shows
+// under it as it's typed in, as a recovery-word box's suggestions and Not a
+// recovery word, goes above the keyboard with it.
 //
 // Turned sideways, the keyboard leaves a strip at the top a box high: the
 // field goes there, and the test network's band and the popup's top bar give
@@ -107,19 +109,32 @@ function nextButton(field, doc) {
   return all.slice(all.indexOf(field) + 1).find((el) => el.matches?.("button.btn-primary, button[data-next]")) ?? null;
 }
 
+// Shown: neither it nor what's around it hidden.
+const isShown = (el) => Boolean(el) && !el.hidden && !el.closest?.("[hidden]");
+
+// What a field shows under it as it's typed in, its own: the words it
+// suggests (`aria-controls`, a recovery-word box's chips) and what's said
+// of it (`aria-errormessage`, "Not a recovery word"), where shown.
+function ownedBy(field, doc) {
+  const ids = ["aria-controls", "aria-errormessage"].flatMap((name) => String(field.getAttribute?.(name) ?? "").split(/\s+/).filter(Boolean));
+  return ids.map((id) => doc.getElementById?.(id)).filter(isShown);
+}
+
 // What the screen says between a field and its button as it's typed in: a
 // warning ("The same payment is waiting to go out…") or a note ("Your
-// recovery phrase is still on the clipboard…"), shown.
+// recovery phrase is still on the clipboard…"), shown; not what the field
+// shows under it itself, which goes with it.
 function saidBetween(field, button, doc) {
   const scope = field.closest?.(".qrscan-overlay") ?? doc.getElementById?.("app") ?? doc.body;
   const all = Array.from(scope?.querySelectorAll?.("*") ?? []);
   const from = all.indexOf(field);
   const to = all.indexOf(button);
   if (from < 0 || to < 0) return null;
+  const own = ownedBy(field, doc);
   return (
     all
       .slice(from + 1, to)
-      .find((el) => el.matches?.('[role="alert"], [role="status"], .callout') && !el.hidden && !el.closest?.("[hidden]") && String(el.textContent ?? "").trim()) ?? null
+      .find((el) => el.matches?.('[role="alert"], [role="status"], .callout') && isShown(el) && !own.includes(el) && String(el.textContent ?? "").trim()) ?? null
   );
 }
 
@@ -191,7 +206,14 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
     const page = scroller === doc.scrollingElement || scroller === doc.documentElement;
     const from = Math.max(MARGIN, page ? 0 : scroller.getBoundingClientRect().top + MARGIN);
     const to = top - MARGIN;
-    const f = field.getBoundingClientRect();
+    // The field, with what it shows under it as it's typed in.
+    const f = ownedBy(field, doc).reduce(
+      (box, el) => {
+        const r = el.getBoundingClientRect();
+        return { top: Math.min(box.top, r.top), bottom: Math.max(box.bottom, r.bottom) };
+      },
+      field.getBoundingClientRect()
+    );
     const next = nextButton(field, doc);
     const b = next?.getBoundingClientRect();
     // A warning or a note said between them as it's typed in: it and the

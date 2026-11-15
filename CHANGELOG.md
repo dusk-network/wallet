@@ -9,6 +9,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Added
 
+- Suggested the recovery words that start with what's typed, from the wallet's own list, under the box being typed in on Import, Restore, Add wallet and Check your recovery words, a tap, Enter or Tab taking one, and marked letters that start no word at once with Not a recovery word.
 - Check your recovery words: right after a wallet's words are shown, three of them asked for at random, with Check and Skip for now, and in Settings, behind the password, in the extension and the Android app; a wrong answer shows no word, saying only that they don't match, with Try again and Show my recovery words.
 - Notices in the Android app for money that comes in while it's in the background or closed, saying how much and from whom and opening that payment, with Tell me when money comes in in Settings to turn them off; they can take up to about 15 minutes.
 - Opened the testnet web wallet's request links in the Android app where it's installed, as Android App Links, once the web wallet serves the file that names the app.
