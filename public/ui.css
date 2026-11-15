@@ -3151,6 +3151,59 @@ body.page--popup .brand-mark {
   background: color-mix(in oklab, var(--destructive) 12%, transparent);
 }
 
+/* The words a box's letters start, as chips in a row of their own under the
+   box's (WordSuggestions.js); the one Enter takes marked as a chosen filter
+   is. Not a recovery word goes in the same place. */
+.srp-suggest {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.srp-suggest__word {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.srp-suggest__word:hover {
+  background: var(--surface-3);
+}
+
+.srp-suggest__word[aria-selected="true"] {
+  background: var(--pill);
+  color: var(--on-pill);
+}
+
+.srp-word-note {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+/* Said of a box on the right: at the row's end, under it. */
+.srp-word-note.is-end {
+  justify-content: flex-end;
+}
+
+/* A finger's size where there's no pointer to hover with. */
+@media (hover: none) {
+  .srp-suggest__word {
+    height: 40px;
+    padding: 0 16px;
+    font-size: 15px;
+  }
+}
+
 .callout {
   border-radius: var(--radius-md);
   padding: 12px 14px;

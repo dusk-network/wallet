@@ -179,6 +179,11 @@ describe("setting up and unlocking", () => {
     // Sofia's: word 7 misspelled, both passwords in, Import at the bottom.
     typeInto(field(body, "Word 1"), MNEMONIC);
     typeInto(field(body, "Word 7"), "abandn");
+    // Said under its box as it's typed (Hein's), and over the words once it's left for the password.
+    const alerts = () => body.querySelectorAll("[role=alert]").filter(isShown).map((el) => el.textContent);
+    expect(alerts()).toEqual(["Not a recovery word"]);
+    field(body, "Word 7").dispatchEvent(fakeEvent("focusout", { relatedTarget: field(body, "Password") }));
+    expect(alerts()).toEqual(["Word 7 isn't a recovery word. Check its spelling."]);
     typeInto(field(body, "Password"), "long enough");
     typeInto(field(body, "Confirm password"), "long enough");
     const importBtn = button(body, "Import wallet");
@@ -259,6 +264,48 @@ describe("setting up and unlocking", () => {
     expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC }));
     expect(acts.showToast).toHaveBeenCalledWith("Your recovery words match.");
     expect(state.route).toBe("home");
+  });
+
+  // Hein's: Check your recovery words suggests as Import does, from the wallet's list, never from the phrase.
+  it("suggests words in Check your recovery words as Import does, and Enter on the last box takes one and checks", async () => {
+    const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] } };
+    const acts = actions();
+    const body = show(onboardingCreateConfirmView({ state, actions: acts }));
+    const [third, sixth, ninth] = wordBoxes(body);
+    const chips = () => {
+      const list = body.querySelector("[role=listbox]");
+      return list && isShown(list) ? list.querySelectorAll("[role=option]").map((o) => o.textContent) : [];
+    };
+    const alerts = () => body.querySelectorAll("[role=alert]").filter(isShown).map((el) => el.textContent);
+    // Each box a combobox, its suggestions the listbox it controls.
+    expect(wordBoxes(body).map((input) => [input.getAttribute("role"), input.getAttribute("aria-autocomplete")])).toEqual([["combobox", "list"], ["combobox", "list"], ["combobox", "list"]]);
+    third.focus();
+    typeInto(third, "ab");
+    expect(chips()).toEqual(["abandon", "ability", "able", "about"]);
+    expect(third.getAttribute("aria-controls")).toBe(body.querySelector("[role=listbox]").id);
+    third.dispatchEvent(fakeEvent("keydown", { key: "ArrowDown" }));
+    third.dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+    expect([third.value, dom.document.activeElement === sixth, chips()]).toEqual(["ability", true, []]);
+    // Letters that start no word: marked at once, said under the box.
+    typeInto(sixth, "xq");
+    expect([alerts(), sixth.getAttribute("aria-invalid"), chips()]).toEqual([["Not a recovery word"], "true", []]);
+    // A tap takes one, and on to the next box.
+    typeInto(sixth, "aba");
+    expect([alerts(), sixth.getAttribute("aria-invalid"), chips()]).toEqual([[], null, ["abandon"]]);
+    body.querySelector("[role=option]").click();
+    expect([sixth.value, dom.document.activeElement === ninth]).toEqual(["abandon", true]);
+    // A word not finished, marked as its box is left.
+    typeInto(third, "abil");
+    third.dispatchEvent(fakeEvent("blur"));
+    expect(third.getAttribute("aria-invalid")).toBe("true");
+    typeInto(third, "abandon");
+    expect(third.getAttribute("aria-invalid")).toBeNull();
+    // On the last box, Enter takes the marked word and checks, as Enter did.
+    typeInto(ninth, "aban");
+    ninth.dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+    await settle();
+    expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC }));
+    expect(acts.showToast).toHaveBeenCalledWith("Your recovery words match.");
   });
 
   it("makes the wallet with Skip for now, without the words, and without saying they match", async () => {

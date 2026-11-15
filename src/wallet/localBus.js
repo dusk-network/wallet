@@ -164,14 +164,18 @@ async function watchArrival(hash, tx) {
 // time away (android/ArrivalJob.kt's Waiting): the app signs and sends only
 // while it's open, so the notice says it goes out once the app's opened
 // again, and once the network's back, to open it to send it. Told as one
-// starts or stops waiting, where a payment's notices may show; none for none.
+// starts or stops waiting, wherever Android lets the app show notices, as
+// for money coming in, whether or not the person asked to hear of arrivals
+// (Tell me when it arrives): a payment that hasn't gone out is said so
+// either way (Chen's, filmed: never asked, the app put away, no notice
+// came). None for none.
 let waitingTold = Promise.resolve("");
 function tellWaitingForApp() {
   if (!isPhone()) return waitingTold;
   waitingTold = waitingTold
     .then(async (said) => {
       const [first] = waitingForNetwork();
-      const setup = first && (await mayNotify(appNoticesAllowed)) ? { wallet: first.walletId, nodeUrl: first.nodeUrl, ...WAITING_NOTICE } : null;
+      const setup = first && (await appNoticesAllowed().catch(() => false)) ? { wallet: first.walletId, nodeUrl: first.nodeUrl, ...WAITING_NOTICE } : null;
       const key = JSON.stringify(setup);
       if (key !== said) await waitAppSend(setup).catch(() => {});
       return key;

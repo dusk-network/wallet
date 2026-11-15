@@ -1,19 +1,19 @@
+import { isRecoveryWord, wordSuggestions } from "@dusk-network/app-core/recovery-words";
 import { validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import { isTauriRuntime } from "../../platform/runtime.js";
 import { h } from "../lib/dom.js";
 import { isPhone } from "../lib/device.js";
 import { normalizeMnemonic } from "../lib/strings.js";
-
-// We generate + validate mnemonics against the BIP39 English wordlist.
-const WORDSET = new Set(wordlist);
+import { createWordSuggestions, underBox } from "./WordSuggestions.js";
 
 let hintIds = 0;
 
-function isValidWord(word) {
-  if (!word) return true;
-  return WORDSET.has(String(word).toLowerCase());
-}
+// Words are generated and read against the BIP39 English list, by app-core's
+// one rule, as each box's mark is (WordSuggestions.js): in any case, accents
+// aside. A word that's one is handed on as the list spells it.
+const isWord = (word) => isRecoveryWord(word, wordlist);
+const listWord = (word) => (isWord(word) ? (wordSuggestions(word, wordlist, 1)[0] ?? word) : word);
 
 function firstEmptyIndex(inputs, count) {
   for (let i = 0; i < count; i++) {
@@ -40,7 +40,7 @@ function phraseProblem(words, { pasted = 0 } = {}) {
   while (last >= 0 && !words[last]) last--;
   if (last < 0) return "";
   const typed = words.slice(0, last + 1);
-  const unknown = typed.flatMap((w, i) => (w && !WORDSET.has(w) ? [i + 1] : []));
+  const unknown = typed.flatMap((w, i) => (w && !isWord(w) ? [i + 1] : []));
   if (unknown.length > 3) return `${unknown.length} words aren't recovery words. Check the marked ones.`;
   if (unknown.length === 1) return `${wordsNamed(unknown)} isn't a recovery word. Check its spelling.`;
   if (unknown.length) return `${wordsNamed(unknown)} aren't recovery words. Check their spelling.`;
@@ -49,7 +49,7 @@ function phraseProblem(words, { pasted = 0 } = {}) {
   if (missing.length) return `${wordsNamed(missing)} ${missing.length === 1 ? "is" : "are"} missing.`;
   const n = pasted > typed.length ? pasted : typed.length;
   if (n !== 12 && n !== 24) return `That's ${n} ${n === 1 ? "word" : "words"}. A recovery phrase has 12 or 24.`;
-  if (!validateMnemonic(typed.join(" "), wordlist)) return "That isn't a valid recovery phrase. Check each word.";
+  if (!validateMnemonic(typed.map(listWord).join(" "), wordlist)) return "That isn't a valid recovery phrase. Check each word.";
   return "";
 }
 
@@ -64,8 +64,11 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  *   Enter does, however the keyboard sends it: as a key, or as text, as a
  *   phone's keyboard commits it, with no space key at all. A word the keyboard
  *   is composing is taken once it's done.
- * - A word that isn't a recovery word is marked once a paste puts it in or
- *   its box is left, never while it's typed; it clears once it's a word.
+ * - From two letters typed, the words of the list they start, as chips under
+ *   the box typed in, which a tap, Enter or Tab takes (WordSuggestions.js).
+ * - Letters that start no recovery word are marked as they're typed, Not a
+ *   recovery word under their box; a word not finished, once a paste puts
+ *   it in or its box is left. The mark clears once it's a word.
  * - Words pasted in are taken off the clipboard, which any app or page can
  *   read, in the paste's own tap, and a whole phrase a phone's keyboard puts
  *   in from its clipboard too; where the browser won't, it's said once.
@@ -110,6 +113,23 @@ export function createMnemonicInput({
   /** @type {HTMLDivElement[]} */
   const cells = [];
 
+  // The words suggested under the box typed in: one taken fills it, and a
+  // tap or Enter moves on to the next box (Tab as the browser does).
+  const suggest = createWordSuggestions({
+    take: (input, word, by) => {
+      const i = inputs.indexOf(input);
+      if (i < 0) return;
+      input.value = word;
+      overflow = 0;
+      markIndex(i, false);
+      onCheck?.("");
+      if (by === "enter") moveOn(i);
+      else if (by === "tap" && i < count - 1) focusIndex(i + 1);
+    },
+  });
+  // What box `i` has under it now: as it's typed in (`typing`), or focused.
+  const suggestFor = (i, { typing = false } = {}) => suggest.show(inputs[i], { ...underBox(cells, i, count), typing });
+
   // Toggle buttons (optional)
   const btn12 = allowWordCountToggle
     ? h("button", { class: "tab", type: "button", text: label12 })
@@ -145,14 +165,18 @@ export function createMnemonicInput({
     updateToggle();
   }
 
-  // Marks the word in box `i` when it isn't a recovery word, for screen
-  // readers too; an empty box or a word clears the mark.
+  // Box `i` marked as holding no recovery word (`on`), for screen readers too.
+  function markIndex(i, on) {
+    cells[i].classList.toggle("is-invalid", on);
+    if (on) inputs[i].setAttribute("aria-invalid", "true");
+    else inputs[i].removeAttribute("aria-invalid");
+  }
+
+  // Marks the word in box `i` when it isn't a recovery word; an empty box or
+  // a word clears the mark.
   function validateIndex(i) {
     const v = String(inputs[i]?.value ?? "").trim().toLowerCase();
-    const invalid = Boolean(v) && !isValidWord(v);
-    cells[i].classList.toggle("is-invalid", invalid);
-    if (invalid) inputs[i].setAttribute("aria-invalid", "true");
-    else inputs[i].removeAttribute("aria-invalid");
+    markIndex(i, Boolean(v) && !isWord(v));
   }
 
   function validateAll() {
@@ -161,6 +185,7 @@ export function createMnemonicInput({
 
   function focusIndex(i) {
     if (i < 0 || i >= count) return;
+    suggest.hide();
     inputs[i].focus();
     inputs[i].select?.();
   }
@@ -202,12 +227,15 @@ export function createMnemonicInput({
     for (let j = 0; j < words.length && j < MAX; j++) inputs[j].value = String(words[j]).toLowerCase();
     validateAll();
     overflow = words.length > MAX ? words.length : 0;
+    suggest.hide();
     inputs[Math.min(words.length, count) - 1].focus();
   }
 
   // Words that came at once, by a paste or typed with spaces, into box `i`.
-  // `focus`, for a few: on to the first box left empty.
+  // `focus`, for a few: on to the first box left empty. What was suggested
+  // for the letters they replace goes.
   function placeWords(i, words, { focus = true } = {}) {
+    suggest.hide();
     if (words.length >= 12) {
       applyPhrase(words);
       onCheck?.(problem());
@@ -216,7 +244,7 @@ export function createMnemonicInput({
     overflow = 0;
     applyWords(i, words, { focus });
     // A few words: only words that aren't recovery words, said now.
-    const unknown = shownWords().some((w) => w && !WORDSET.has(w));
+    const unknown = shownWords().some((w) => w && !isWord(w));
     onCheck?.(unknown ? problem() : "");
   }
 
@@ -258,12 +286,12 @@ export function createMnemonicInput({
     placeWords(i, words);
   }
 
-  // Something typed in box `i`: what was said of the words goes, and the
-  // word's mark, if it has one, once it's a word; a new one waits for the box
-  // to be left.
+  // Something typed in box `i`: what was said of the words goes, the words
+  // its letters start show under it, and it's marked at once where they start
+  // none; a word not finished is marked once the box is left.
   function noteTyping(i) {
     overflow = 0;
-    if (cells[i].classList.contains("is-invalid")) validateIndex(i);
+    markIndex(i, suggestFor(i, { typing: true }).none);
     onCheck?.("");
   }
 
@@ -289,6 +317,8 @@ export function createMnemonicInput({
     const [first = "", ...rest] = words;
     const ended = Boolean(first) && /\s$/.test(raw);
     inputs[i].value = first;
+    // Its word ended: nothing more to suggest for it.
+    suggest.hide();
     validateIndex(i);
     overflow = 0;
     if (rest.length) placeWords(i + 1, rest, { focus: !ended });
@@ -322,6 +352,8 @@ export function createMnemonicInput({
     // each key, or one it composes with, isn't the page's: its text comes as
     // input.
     if (!e || e.isComposing || e.keyCode === 229) return;
+    // The words suggested take Enter, Tab and the arrows while they show.
+    if (suggest.key(e, inputs[i])) return;
     if (e.key === "Enter" || e.key === " ") {
       if (String(inputs[i].value ?? "").trim()) {
         e.preventDefault();
@@ -375,7 +407,9 @@ export function createMnemonicInput({
       });
       input.addEventListener("focus", () => {
         if (shown) setShown(false);
+        suggestFor(i);
       });
+      suggest.attach(input);
 
       const cell = h("div", { class: "srp-word" }, [
         h("div", { class: "srp-word-index", text: String(i + 1) }),
@@ -401,6 +435,7 @@ export function createMnemonicInput({
   root.addEventListener("focusout", (e) => {
     const i = inputs.indexOf(e?.target);
     if (i < 0) return;
+    suggest.hide();
     validateIndex(i);
     if (root.contains(e.relatedTarget ?? null)) return;
     onCheck?.(problem());
@@ -428,12 +463,13 @@ export function createMnemonicInput({
         .slice(0, count)
         .map((i) => String(i.value ?? "").trim())
         .filter(Boolean);
-      return normalizeMnemonic(words.join(" "));
+      return normalizeMnemonic(words.map(listWord).join(" "));
     },
     /** What's wrong with the words, as `onCheck` hears it; "" for nothing, or nothing typed. */
     problem,
     /** Set and normalize the mnemonic, auto-expanding to 24 words if needed. */
     setMnemonic(mnemonic) {
+      suggest.hide();
       const words = parseWords(mnemonic);
       setCount(words.length > 12 ? 24 : 12);
       for (let i = 0; i < MAX; i++) inputs[i].value = "";
@@ -443,6 +479,7 @@ export function createMnemonicInput({
     },
     setDisabled(disabled) {
       const d = Boolean(disabled);
+      if (d) suggest.hide();
       inputs.forEach((i) => (i.disabled = d));
       if (btn12) btn12.disabled = d;
       if (btn24) btn24.disabled = d;

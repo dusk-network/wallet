@@ -170,6 +170,35 @@ test("moves on to the next word's box at a space, sent as text, as a key or with
   expect(words).toEqual(["kiwi", "lemon", "apple", "pear", "grape", "mango", ""]);
 });
 
+// Hein's: the boxes suggest words from the wallet's own list as they're typed in, under the box, above the
+// keyboard on a phone; a tap takes one and goes on to the next box, the keyboard kept up.
+test("suggests the words a box's letters start under its row, a finger's size, above the keyboard, and a tap takes one", async ({ page }) => {
+  await popupOn(page, "onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, { hasVault: false, isUnlocked: false });
+  const box = (n) => page.getByLabel(`Word ${n}`, { exact: true });
+  await box(11).tap();
+  await page.keyboard.insertText("w");
+  await page.keyboard.insertText("a");
+  const list = page.getByRole("listbox", { name: "Suggested words" });
+  const chips = list.getByRole("option");
+  await expect(chips).toHaveText(["wage", "wagon", "wait", "walk"]);
+  await expect(chips.first()).toHaveAttribute("aria-selected", "true");
+  const rect = (el) => el.evaluate((node) => node.getBoundingClientRect().toJSON());
+  const top = await clearOfKeyboard(page);
+  await expect.poll(async () => (await rect(list)).bottom).toBeLessThanOrEqual(top);
+  expect((await rect(list)).top).toBeGreaterThan((await rect(box(12))).bottom);
+  expect((await rect(box(11))).top).toBeGreaterThanOrEqual(0);
+  expect((await rect(chips.first())).height).toBeGreaterThanOrEqual(40);
+  await chips.nth(3).tap();
+  await expect(box(12)).toBeFocused();
+  expect(await box(11).inputValue()).toBe("walk");
+  await expect(list).toBeHidden();
+  // Letters that start no word: said at once, under the box.
+  await page.keyboard.insertText("x");
+  await page.keyboard.insertText("q");
+  await expect(page.getByRole("alert")).toHaveText("Not a recovery word");
+  await expect(box(12)).toHaveAttribute("aria-invalid", "true");
+});
+
 test("keeps a contact's address at the field's whole width, its chip on a line above it, as Sofía's squeezed into six letters wasn't", async ({ page }) => {
   await popupOn(page, "send", {
     draft: { to: TO, privacy: "public", amountDusk: "", memo: "" },
