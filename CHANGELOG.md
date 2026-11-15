@@ -101,6 +101,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Showed the Android app's notice that a payment is waiting for the network wherever the phone allows the app's notices, rather than only after Tell me when it arrives.
 - Sent a payment kept by the previous version again with Send it now, rather than saying the wallet, profile or network changed.
 - Kept notices for money coming in off in the Android app when the setting is turned on and off quickly.
 - Said a payment the wallet stopped on as it went out wasn't sent only once the account's transaction at its nonce is seen to be another, never on the nonce alone.
