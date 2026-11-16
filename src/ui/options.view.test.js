@@ -1263,10 +1263,19 @@ describe("security in the app on a phone", () => {
     const places = boxes().map((i) => Number(accessibleName(i).slice(5)));
     expect(places.every((p) => p >= 1 && p <= 12)).toBe(true);
     for (const input of boxes()) expect([input.getAttribute("autocomplete"), input.getAttribute("spellcheck")]).toEqual(["off", "false"]);
+    // Lena's: a whole word in the first box and Enter checked at once, two boxes empty, saying they don't match.
+    // Enter goes on to the next box, and Check waits till every box holds a word.
+    const check = body.querySelectorAll("button").find((b) => b.textContent === "Check");
+    boxes()[0].focus();
+    typeInto(boxes()[0], MNEMONIC.split(" ")[places[0] - 1]);
+    boxes()[0].dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+    await settle();
+    expect([dom.document.activeElement === boxes()[1], check.disabled, asked]).toEqual([true, true, ["count", "count"]]);
     press("Check");
     await settle();
-    expect(visibleText(body)).toContain("Enter the three words.");
+    expect(visibleText(body)).not.toContain("doesn't match");
     for (const input of boxes()) typeInto(input, MNEMONIC.split(" ")[Number(accessibleName(input).slice(5)) - 1]);
+    expect(check.disabled).toBe(false);
     press("Check");
     await settle();
     expect(visibleText(body)).toContain("Your recovery words match.");
@@ -1280,11 +1289,18 @@ describe("security in the app on a phone", () => {
     await settle();
     const again = boxes().map((i) => Number(accessibleName(i).slice(5)));
     const MISMATCH = "← BackCheck your recovery wordsThat doesn't match your recovery words. Check the words you wrote down.Try againShow my recovery words";
-    for (const typed of [again.map((p, i) => (i === 0 ? "zoo" : MNEMONIC.split(" ")[p - 1])), ["maison", "velo", "gateau"]]) {
+    for (const typed of [again.map((p, i) => (i === 0 ? "zoo" : MNEMONIC.split(" ")[p - 1])), ["kiwi", "lemon", "cabin"]]) {
       boxes().forEach((input, i) => typeInto(input, typed[i]));
       press("Check");
       await settle();
       expect(visibleText(body)).toBe(MISMATCH);
+      // Amélie's: Try again the one button; Show my recovery words below it, apart and small.
+      const shownButtons = body.querySelectorAll("button").filter(isShown);
+      expect(shownButtons.map((b) => [b.textContent, b.className])).toEqual([
+        ["← Back", expect.any(String)],
+        ["Try again", "btn-primary btn-full"],
+        ["Show my recovery words", "text-btn words-show"],
+      ]);
       expect([body.querySelector(".srp-grid"), boxes()]).toEqual([null, []]);
       // Try again: the same three, empty, the first to type in, with nothing asked of the wallet till Check.
       const before = asked.length;

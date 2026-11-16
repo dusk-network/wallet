@@ -5853,6 +5853,15 @@ button.text-btn.srp-show {
   margin-top: 2px;
 }
 
+/* Show my recovery words, after a check that didn't match: small, and apart
+   below Try again, the one button there. */
+button.text-btn.words-show {
+  align-self: center;
+  min-height: 44px;
+  margin-top: 20px;
+  color: var(--text-muted);
+}
+
 /* -------------------------------------------------------
    The chain's blue: a text link that leads somewhere (See all, View in Dusk
    explorer, Run a node, sozu.fi) and a link to a chain object (a

@@ -382,7 +382,15 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   // Chosen as the words were left; the same through redraws.
   state.onboard.checkPlaces ??= wordPlaces(expected.split(" ").filter(Boolean).length);
   let checkBtn;
-  const words = createWordCheck({ places: state.onboard.checkPlaces, onDone: () => checkBtn?.click() });
+  // Check waits till every box holds a word, and the wallet isn't being made.
+  let busy = false;
+  const words = createWordCheck({
+    places: state.onboard.checkPlaces,
+    onDone: () => checkBtn?.click(),
+    onReady: (ready) => {
+      if (checkBtn) checkBtn.disabled = busy || !ready;
+    },
+  });
   const wordsError = fieldError(words.el, { markInvalid: false });
   const err = formError();
   // Beside other wallets, the password they share, in place of a new one.
@@ -402,7 +410,6 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   });
   const backBtn = nav.querySelector("button");
 
-  let busy = false;
   let skipBtn;
   const setBusy = (isBusy, msg) => {
     busy = Boolean(isBusy);
@@ -413,7 +420,8 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
     words.setDisabled(busy);
     if (current) current.pwd.disabled = busy;
     if (backBtn) backBtn.disabled = busy;
-    for (const b of [checkBtn, skipBtn]) if (b) b.disabled = busy;
+    if (checkBtn) checkBtn.disabled = busy || !words.ready();
+    if (skipBtn) skipBtn.disabled = busy;
     busyBody.style.display = busy ? "block" : "none";
   };
 
@@ -471,13 +479,11 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
     class: "btn-primary btn-full",
     type: "button",
     text: "Check",
+    disabled: !words.ready(),
     onclick: () => {
-      if (busy) return;
+      // Never with a box that holds no word: that's no answer to say doesn't match.
+      if (busy || !words.ready()) return;
       wordsError.show("");
-      if (!words.filled()) {
-        wordsError.show("Enter the three words.");
-        return;
-      }
       // Compared here, and then forgotten. A mismatch shows no word.
       const match = recoveryWordsMatch(expected, words.typed());
       words.clear();
