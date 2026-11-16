@@ -7,7 +7,7 @@ import { activityRows } from "../activity.js";
 import { networkForNode } from "../../../shared/nodeNetwork.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
-import { balance, balancesHidden } from "../../components/Balance.js";
+import { balance, balancesHidden, shieldedLuxOf } from "../../components/Balance.js";
 import { keptSendDraft } from "../../lib/sendDraft.js";
 import { shortAddress } from "../../lib/strings.js";
 import { contactNameText } from "../../lib/contactNames.js";
@@ -39,15 +39,12 @@ export function homeView(ov, { state, actions } = {}) {
   // and surface progress in the subtitle.
   const shieldedSync = ov?.shieldedSync || null;
   const shieldedError = ov?.shieldedError ? String(ov.shieldedError) : "";
-  const shieldRaw = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
   // Chen's and Lena's: "Shielded · Not synced 0 DUSK" after an import and each
-  // cold start, "Shielded · Sync failed 0 DUSK" opened with no signal. Till a
-  // sync has gone through, or while one fails, a 0 is no reading: a dash shows,
-  // and what it is; what notes were kept from before still show.
-  const syncState = shieldedSync?.state ?? null;
-  const shieldUnread = (syncState === "idle" || syncState === "syncing" || syncState === "error") && safeBigInt(shieldRaw ?? 0, 0n) <= 0n && !ov?.shieldedStale;
-  const shieldLux = shieldUnread ? null : shieldRaw;
-  const hasShieldValue = shieldLux !== undefined && shieldLux !== null;
+  // cold start, "Shielded · Sync failed 0 DUSK" and "Shielded · can't be read
+  // now 0 DUSK" opened with no signal. A 0 that's no reading now is a dash,
+  // with what it is, and no total; what notes were kept from before still show.
+  const shieldLux = shieldedLuxOf(ov);
+  const hasShieldValue = shieldLux !== null;
   // Always show the shielded row for Dusk. If values aren't available yet,
   // we show placeholders + sync state.
   const showShielded = true;
@@ -102,6 +99,8 @@ export function homeView(ov, { state, actions } = {}) {
   if (shieldedError && shieldedSync?.state !== "syncing" && !ov?.shieldedStale) {
     shieldStatus = offlineNow ? "can't be read now" : "Unavailable";
   }
+  // A dash says why there's no amount.
+  if (!hasShieldValue && !shieldStatus) shieldStatus = offlineNow ? "can't be read now" : shieldedError ? "Unavailable" : "reading…";
 
   // If everything is synced and error-free but we have locally reserved notes,
   // show a small hint.

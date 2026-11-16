@@ -223,6 +223,11 @@ describe("home balance", () => {
     expect(draw({ shieldedSync: { state: "idle", notes: 0 } }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
     // What was read before, kept: shown, as it can't be read now.
     expect(draw({ shieldedSync: { state: "error" }, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true }, false)).toEqual(["Shielded · can't be read now", "0.05 DUSK", "Public and shielded"]);
+    // Lena's and Chen's, opened offline after a cold start: "Shielded · can't be read now 0 DUSK", with "Public and
+    // shielded" counting it. A 0 kept from before is no reading now: a dash, and no total.
+    for (const sync of [{ state: "done", progress: 1, notes: 3 }, { state: "idle", notes: 3 }]) {
+      expect(draw({ shieldedSync: sync, shieldedError: "Failed to fetch", shieldedStale: true, balanceStale: true }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
+    }
     // Read: 0 is 0.
     expect(draw({ shieldedSync: { state: "done", progress: 1, notes: 0 } })).toEqual(["Shielded", "0 DUSK", "Public and shielded"]);
   });
@@ -271,10 +276,13 @@ describe("home balance", () => {
       };
     };
     // Opened offline: the figures read last, never a dash, and when they were read.
-    const offline = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedStale: true, stakeStale: true }, false);
-    expect(offline.total).toBe("1.105 DUSK");
+    const offline = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true, stakeStale: true }, false);
+    expect(offline.total).toBe("1.155 DUSK");
     expect(offline.label).toBe("Total balance");
     expect(offline.note).toMatch(/^Your balance may be out of date until you're back online\. Last read (at|yesterday at|on .+ at) /);
+    // Lena's and Chen's: a shielded 0 kept from before is no reading now, so no total counts it (Q11).
+    const noShielded = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedStale: true, stakeStale: true }, false);
+    expect([noShielded.total, noShielded.label]).toEqual(["0.8575 DUSK", "Public balance"]);
     // Online, the node silent: the same, without the connection.
     expect(draw({ balanceError: "timed out", balanceStale: true, balanceReadAt: readAt }).note).toMatch(/^Your balance may be out of date\. Last read /);
     // What the node couldn't give now, by name: the stake; the stake and the shielded balance.

@@ -19,7 +19,7 @@ import { guarded } from "../../lib/clickGuard.js";
 import { joinedAddress } from "../../lib/recipient.js";
 import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
-import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
+import { HIDDEN_BALANCE, balance, balancesHidden, shieldedLuxOf } from "../../components/Balance.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
@@ -189,11 +189,9 @@ export function sendFormView(ov, { state, actions } = {}) {
   // Balances from overview.
   const hidden = balancesHidden(ov);
   const pubBalLux = safeBigInt(ov?.balance?.value, 0n);
-  const shValueLux = safeBigInt(ov?.shieldedBalance?.value, 0n);
-  const shSpendLux =
-    ov?.shieldedBalance?.spendable != null
-      ? safeBigInt(ov.shieldedBalance.spendable, 0n)
-      : null;
+  const shValueLux = shieldedLuxOf(ov) ?? 0n;
+  // Unknown where it can't be read: Available and Max show nothing, never 0.
+  const shSpendLux = shieldedLuxOf(ov, "spendable");
 
   // Whether the spendable shielded balance covers the smallest transfer (1 Lux)
   // plus the shielded fee cap; a .dusk name's shielded address needs it.

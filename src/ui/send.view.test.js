@@ -278,6 +278,16 @@ describe("send to a .dusk name with both addresses", () => {
     expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
   });
 
+  // Lena's and Chen's: opened with no signal, the shielded balance said 0 where it couldn't be read.
+  it("says no Available for a shielded address while the shielded balance can't be read now, never 0", () => {
+    const form = mount(newState(), overview({ shieldedBalance: { value: "0", spendable: "0" }, shieldedStale: true, shieldedError: "Failed to fetch" }));
+    typeInto(form.to, ALICE.address);
+    expect(form.pill()).toBe("Shielded");
+    expect(isShown(dom.document.body.querySelector(".amount-avail"))).toBe(false);
+    typeInto(form.to, ALICE.account);
+    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+  });
+
   it("shows the pill for a pasted account or address, where it is the only sign of the transfer type", () => {
     const form = mount(newState());
     typeInto(form.to, ALICE.account);
