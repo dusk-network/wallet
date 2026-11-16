@@ -107,7 +107,7 @@ const noticeTokenOf = (hash, walletId) => noticeTokenFor(hash, String(walletId ?
 // What a payment's notice says of it, as Activity does: how much, but not
 // while balances are hidden, and to whom: the contact's name, a profile's of
 // this wallet, the .dusk name it was sent to, else its short address.
-async function paymentOf({ kind, to, amount, toName, walletId }) {
+async function paymentOf({ kind, to, amount, toName, walletId, memo }) {
   if (String(kind ?? "") !== TX_KIND.TRANSFER || !to) return {};
   const hidden = (await getSettings().catch(() => null))?.hideBalances === true;
   const address = String(to);
@@ -117,7 +117,7 @@ async function paymentOf({ kind, to, amount, toName, walletId }) {
   const own = isUnlocked() ? [getAccounts(), getAddresses()].map((list) => (Array.isArray(list) ? list.indexOf(address) : -1)).find((i) => i >= 0) : undefined;
   const label = own === undefined ? "" : String((await getAccountNames(String(walletId ?? getAccounts()[0] ?? "")).catch(() => ({})))?.[String(own)] ?? "").trim() || `Profile ${own + 1}`;
   const name = contacts.find((contact) => contact?.address === address)?.name || label || typedRecipientName(toName) || shortAddress(address);
-  return { amount: hidden || !amount ? "" : formatDusk(String(amount)), to: name };
+  return { amount: hidden || !amount ? "" : formatDusk(String(amount)), to: name, memo: String(memo ?? "") };
 }
 
 // A payment's arrival as a notice, in the app on a phone: once the person

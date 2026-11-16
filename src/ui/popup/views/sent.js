@@ -57,12 +57,17 @@ export const UNCLEAR_TEXT = "It may have gone out already. If it didn't, it goes
 /**
  * In the app on a phone, what leaving it does to a payment waiting for the
  * network: the app signs and sends only while it's open, so it goes out once
- * the app's opened again; with Lock when I leave the app on, the wallet
- * locks as it's left, and the payment isn't sent (Home offers Send it now).
+ * the app's opened again, unless Android closes the app first, when it's
+ * asked to be sent (Sofía's: it said it would go, and after Android closed
+ * the app, Home said Not sent, with Send it now); with Lock when I leave the
+ * app on, the wallet locks as it's left, and the payment isn't sent (Home
+ * offers Send it now).
  * @param {object} [ov] - the overview
  */
 export const appLeaveText = (ov) =>
-  ov?.lockOnLeave === true ? "If you leave Dusk Wallet, it locks and this isn't sent." : "If you leave Dusk Wallet, it goes out when you open it again.";
+  ov?.lockOnLeave === true
+    ? "If you leave Dusk Wallet, it locks and this isn't sent."
+    : "If you leave Dusk Wallet, it goes out when you open it again. If Android closes the app first, you'll be asked to send it.";
 
 // "13:21 CET": when it was sent, with the time zone it shows in.
 function clock(ts) {

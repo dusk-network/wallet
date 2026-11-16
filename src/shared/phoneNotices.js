@@ -22,6 +22,7 @@
 import { getSettings, setSettings } from "./settings.js";
 import { networkTextOf } from "./nodeNetwork.js";
 import { TX_KIND } from "./constants.js";
+import { displayText } from "@dusk-network/app-core/text";
 
 const STATES = new Set(["asked", "on", "off", "off-said"]);
 
@@ -57,20 +58,34 @@ export async function noticesState(allowedNow) {
   return forSent(await kept(), allowedNow);
 }
 
+// At most this many characters of a memo in a notice, the rest "…", as
+// Android's job says one that came in (android/ArrivalJob.kt's MEMO_SHOWN).
+const MEMO_SHOWN = 100;
+
+// A payment's memo as a notice says it: its words in quotes; nothing for one
+// with a character a notice can't show, which its details show as its code.
+function noticeMemo(memo) {
+  const text = String(memo ?? "").trim();
+  if (!text || displayText(text).flags.length) return "";
+  const chars = Array.from(text);
+  return `“${chars.length <= MEMO_SHOWN ? text : `${chars.slice(0, MEMO_SHOWN).join("").trimEnd()}…`}”`;
+}
+
 /**
  * A send's notice on a phone: what came of it, and for a payment how much and
- * to whom, as Activity names them (`amount` "" while balances are hidden), and
- * its network: `body`. A locked phone that hides what notices say shows what
- * came of it and the `network` alone.
- * @param {{ kind?: string, ok: boolean, nodeUrl?: string, amount?: string, to?: string }} sent
+ * to whom, as Activity names them (`amount` "" while balances are hidden),
+ * its memo (Sofía's: the invoice it was for, which says which job it was),
+ * and its network: `body`. A locked phone that hides what notices say shows
+ * what came of it and the `network` alone.
+ * @param {{ kind?: string, ok: boolean, nodeUrl?: string, amount?: string, to?: string, memo?: string }} sent
  * @returns {{ title: string, network: string, body: string }}
  */
-export function arrivalNotice({ kind, ok, nodeUrl, amount = "", to = "" }) {
+export function arrivalNotice({ kind, ok, nodeUrl, amount = "", to = "", memo = "" }) {
   const what = String(kind ?? "") === TX_KIND.TRANSFER ? "payment" : "transaction";
   const title = ok ? (what === "payment" ? "Your payment arrived" : "Your transaction went through") : `Your ${what} didn't go through`;
   const network = nodeUrl ? networkTextOf(String(nodeUrl)) : "";
   const payment = what === "payment" && to ? (amount ? `${amount} DUSK to ${to}` : `To ${to}`) : "";
-  return { title, network, body: [payment, network].filter(Boolean).join(" · ") };
+  return { title, network, body: [payment, payment ? noticeMemo(memo) : "", network].filter(Boolean).join(" · ") };
 }
 
 /**
@@ -102,7 +117,9 @@ export const incomingMemoBody = (network) => [`“{memo}”`, network].filter(Bo
  */
 export const WAITING_NOTICE = Object.freeze({
   title: "A payment is waiting",
-  away: "It goes out when you open Dusk Wallet again.",
+  // Sofía's: it said the payment goes out once the app's opened again, and
+  // after Android had closed the app, it said Not sent, with Send it now.
+  away: "It goes out when you open Dusk Wallet again. If Android closes the app first, you'll be asked to send it.",
   back: "Open Dusk Wallet to send it.",
 });
 

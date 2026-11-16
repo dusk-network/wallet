@@ -1414,10 +1414,10 @@ describe("arrival notices in the app on a phone", () => {
     vi.stubGlobal("document", { visibilityState: "hidden" });
     return phoneNotices.asked;
   };
-  const sendAndSettle = async (localSend, hash, { to = ACCOUNT, amount = "1", toName } = {}) => {
+  const sendAndSettle = async (localSend, hash, { to = ACCOUNT, amount = "1", toName, memo } = {}) => {
     engine.executed = Promise.withResolvers();
     engine.sendTransaction.mockResolvedValueOnce({ hash, nonce: 1n });
-    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to, amount }, ...(toName ? { toName } : {}) });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to, amount, ...(memo ? { memo } : {}) }, ...(toName ? { toName } : {}) });
     engine.executed.resolve({ data: { err: null } });
   };
   // What a send left behind, done: its watcher's steps, as many as it takes.
@@ -1502,7 +1502,7 @@ describe("arrival notices in the app on a phone", () => {
           wallet: "account of wallet A",
           nodeUrl,
           title: "A payment is waiting",
-          away: "It goes out when you open Dusk Wallet again.",
+          away: "It goes out when you open Dusk Wallet again. If Android closes the app first, you'll be asked to send it.",
           back: "Open Dusk Wallet to send it.",
         })
       );
@@ -1592,6 +1592,25 @@ describe("arrival notices in the app on a phone", () => {
     // The notice Android shows says which payment, and on a locked phone that hides it, only what came of it.
     expect([phoneNotices.watched[1].title, phoneNotices.watched[1].body, phoneNotices.watched[1].publicBody]).toEqual(["Your payment arrived", "0.03 DUSK to sofiadesign.dusk · Mainnet", "Mainnet"]);
     await vi.waitFor(() => expect(phoneNotices.settled).toContain("e2".repeat(32)));
+  });
+
+  // Sofía's: "Your payment arrived · 0.01 DUSK to Lena · Testnet", after Android had closed the app, without the memo
+  // that says which job it was.
+  it("names the payment's memo in its notice, the one Android shows once the app's closed too, never on a locked screen", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
+    await sendAndSettle(localSend, "e7".repeat(32), { amount: "10000000", toName: "lena.dusk", memo: "Metro sin cobertura 153" });
+    await settled("e7".repeat(32));
+    const watched = (hash) => phoneNotices.watched.find((w) => w.hash === hash);
+    await vi.waitFor(() => expect(watched("e7".repeat(32))).toBeTruthy());
+    expect([watched("e7".repeat(32)).body, watched("e7".repeat(32)).publicBody]).toEqual(["0.01 DUSK to lena.dusk · “Metro sin cobertura 153” · Mainnet", "Mainnet"]);
+    // A memo a notice can't show as it is: left to its details.
+    await sendAndSettle(localSend, "e8".repeat(32), { amount: "10000000", toName: "lena.dusk", memo: "Factura\u202e153" });
+    await settled("e8".repeat(32));
+    await vi.waitFor(() => expect(watched("e8".repeat(32))).toBeTruthy());
+    expect(watched("e8".repeat(32)).body).toBe("0.01 DUSK to lena.dusk · Mainnet");
+    await vi.waitFor(() => expect(phoneNotices.settled).toContain("e8".repeat(32)));
   });
 
   // Astra's: after a reset, Android kept looking for the old wallet's sends on its node, and told them.

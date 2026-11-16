@@ -801,7 +801,8 @@ describe("Tell me when it arrives, on a phone", () => {
     try {
       const waiting = { phase: "sending", hash: "", status: "", sendId: "send-0001", waits: true };
       const shown = await draw([null], { app: true, sent: waiting });
-      expect(shown.said()).toEqual(["If you leave Dusk Wallet, it goes out when you open it again."]);
+      // Sofía's: it said it would go, and after Android closed the app, Home said Not sent with Send it now.
+      expect(shown.said()).toEqual(["If you leave Dusk Wallet, it goes out when you open it again. If Android closes the app first, you'll be asked to send it."]);
       // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
       const locks = await draw([null], { app: true, sent: waiting, ov: { lockOnLeave: true } });
       expect(locks.said()).toEqual(["If you leave Dusk Wallet, it locks and this isn't sent."]);

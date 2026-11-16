@@ -369,7 +369,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
     document.body.replaceChildren(...homeView(ov([send()]), { state, actions }));
     expect(boxes(document)).toEqual([
-      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers. If you leave Dusk Wallet, it goes out when you open it again.Cancel",
+      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers. If you leave Dusk Wallet, it goes out when you open it again. If Android closes the app first, you'll be asked to send it.Cancel",
     ]);
     // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
     document.body.replaceChildren(...homeView(ov([send()], { lockOnLeave: true }), { state, actions }));
