@@ -224,6 +224,16 @@ pub async fn share<R: Runtime>(app: &AppHandle<R>, text: String, title: String, 
   }
 }
 
+/// Opens an https `url` in the phone's browser, never in this app (Android
+/// hands the web wallet's request links to it): whether it opened.
+pub async fn browse<R: Runtime>(app: &AppHandle<R>, url: String) -> Result<bool, String> {
+  let Some(share) = app.try_state::<Share<R>>() else {
+    return Ok(false);
+  };
+  let answer = share.0.run_mobile_plugin_async::<Value>("browse", json!({ "url": url })).await.map_err(|e| e.to_string())?;
+  Ok(answer.get("ok").and_then(Value::as_bool) == Some(true))
+}
+
 /// The wallet's Kotlin for arrival notices, once Android has it.
 struct Notices<R: Runtime>(PluginHandle<R>);
 

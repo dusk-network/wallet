@@ -428,10 +428,11 @@ function setApp(children) {
   }
   // Another screen than a request's own: the link the page opened with was
   // left, or paid, and goes from its address; and what a link or a QR code
-  // filled in goes with it, not the next Send's.
+  // filled in goes with it, not the next Send's. Not one that opened the app
+  // before it had a wallet, which waits through the setup's screens.
   if (!onLinksScreens()) {
     forgetRequestLink();
-    if (state.draft?.filledIn) state.draft = null;
+    if (state.draft?.filledIn && !(state.draft.linkSetup && ONBOARD_ROUTES.has(state.route))) state.draft = null;
   }
   systemBack.sync();
 }
@@ -1632,6 +1633,12 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   }
 
   if (!ov?.hasVault) {
+    // A payment link that opened the app before there's a wallet: it waits
+    // through the setup, however long, and the setup screen says so.
+    if (state.draft?.filledIn === "link" && state.draft.linkUrl && !state.draft.linkSetup) {
+      const { linkAt: _linkAt, ...waits } = state.draft;
+      state.draft = { ...waits, linkSetup: true };
+    }
     if (!ONBOARD_ROUTES.has(state.route)) {
       state.route = "onboard_welcome";
     }
@@ -1815,9 +1822,11 @@ listenForLinks((url) => {
   netMenu.close();
   acctMenu.close();
   // Opened while the wallet's locked, it waits behind the lock: when, for
-  // Send to say, and to be dropped after LINK_WAITS_MS.
+  // Send to say, and to be dropped after LINK_WAITS_MS. With no wallet here,
+  // it waits through the setup instead (`linkSetup`, as it's drawn), and the
+  // link as it came goes to the phone's browser if asked.
   if (!state.overview?.isUnlocked) Object.assign(draft, { linkAt: Date.now() });
-  Object.assign(state, { draft, route: "send" });
+  Object.assign(state, { draft: { ...draft, linkUrl: url }, route: "send" });
   render()
     .then(() => {
       state.needsRefresh = true;

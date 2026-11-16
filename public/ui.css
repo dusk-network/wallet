@@ -5832,6 +5832,24 @@ p.auth-note {
   text-align: center;
 }
 
+/* A payment link that opened the app before there's a wallet: it waits */
+.onboard-link {
+  text-align: left;
+}
+
+.onboard-link__note {
+  margin: 0;
+  font-size: 13px;
+}
+
+button.onboard-link__browser {
+  width: auto;
+  min-height: 36px;
+  margin-top: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
 /* "Forgot your password?" under Unlock: a quiet way to the restore */
 button.text-btn.auth-forgot {
   align-self: center;

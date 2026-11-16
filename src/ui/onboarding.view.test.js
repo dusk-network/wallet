@@ -353,6 +353,17 @@ describe("setting up and unlocking", () => {
     expect(acts.send).not.toHaveBeenCalled();
   });
 
+  // Amélie's: a payment link opened the app before it had a wallet. It waits through the setup, and is paid after it.
+  it("opens Send on a payment link that waited through the setup, once the wallet's made", async () => {
+    const draft = { to: "someone", amountDusk: "0.001", memo: "Les tulipes", filledFrom: "link", filledIn: "link", linkSetup: true, linkUrl: "https://apps.testnet.dusk.network/wallet/dashboard/send?to=someone" };
+    const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] }, draft };
+    const acts = actions();
+    const body = show(onboardingCreateConfirmView({ state, actions: acts }));
+    button(body, "Skip for now").click();
+    await settle();
+    expect([state.route, state.draft]).toEqual(["send", draft]);
+  });
+
   it("makes the wallet with Skip for now, without the words, and without saying they match", async () => {
     const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] } };
     const acts = actions();

@@ -69,6 +69,19 @@ async fn notices(app: tauri::AppHandle, action: String, args: serde_json::Value)
   }
 }
 
+/// Opens an https link in the phone's browser, never in this app, which
+/// Android hands the web wallet's request links to: whether it opened.
+#[tauri::command]
+async fn open_in_browser(app: tauri::AppHandle, url: String) -> Result<bool, String> {
+  #[cfg(target_os = "android")]
+  return android::browse(&app, url).await;
+  #[cfg(not(target_os = "android"))]
+  {
+    let _ = (app, url);
+    Ok(false)
+  }
+}
+
 /// Puts the app in the background as it is (Back on its first screen). False
 /// where there's no such thing.
 #[tauri::command]
@@ -95,7 +108,7 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     // dusk: payment links open the app's Send (popup/app.js).
     .plugin(tauri_plugin_deep_link::init())
-    .invoke_handler(tauri::generate_handler![share_text, save_download, move_to_back, fingerprint, notices])
+    .invoke_handler(tauri::generate_handler![share_text, save_download, move_to_back, fingerprint, notices, open_in_browser])
     .setup(|app| {
       // Stronghold needs a salt file used for Argon2 hashing.
       // We store it in the app's local data directory.

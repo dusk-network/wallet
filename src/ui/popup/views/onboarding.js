@@ -16,6 +16,9 @@ import { segmented } from "../../components/Segmented.js";
 import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
 import { detectPresetId } from "../../../shared/network.js";
 import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
+import { openInPhoneBrowser } from "../../../platform/native.js";
+import { makePaymentLink } from "@dusk-network/app-core/payment-links";
+import { readRequestLink } from "../../lib/requestLink.js";
 
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
@@ -125,6 +128,55 @@ function walletLanding(ov) {
 const passwordRefusal = (message) => /^Incorrect password$|^Too many attempts/.test(String(message ?? ""));
 const phraseRefusal = (message) => /already in your wallet|isn't a valid recovery phrase/.test(String(message ?? ""));
 
+// Where a first wallet's setup ends: Send, where a payment link opened the
+// app before there was a wallet here and waits for it (`linkSetup`), else Home.
+const setUpTo = (state) => (state.draft?.linkSetup ? "send" : "home");
+
+// A waiting link's web wallet link, for the phone's browser: as it came, or
+// as its dusk: link reads, where its network has a web wallet; else "".
+function webLinkOf(url) {
+  const text = String(url ?? "");
+  if (text.startsWith("https://")) return text;
+  const link = readRequestLink(text)?.link;
+  if (!link) return "";
+  return makePaymentLink({ to: link.to, amountLux: link.lux === null ? "" : String(link.lux), memo: link.memo, network: link.chainId }).https ?? "";
+}
+
+/**
+ * A payment link that opened the app before there's a wallet here (Amélie's:
+ * a request link landed her on "Set up your Dusk Wallet", on Mainnet, and for
+ * a second her wallet and money seemed gone): says it waits, with Open in
+ * browser instead, which hands it to the phone's browser and drops it here.
+ * It's paid on Send once a wallet's set up or imported.
+ * @returns {HTMLElement | null}
+ */
+function linkWaiting(state, actions) {
+  if (!state.draft?.linkSetup) return null;
+  const web = webLinkOf(state.draft.linkUrl);
+  return h("div", { class: "callout onboard-link", role: "status" }, [
+    h("div", { class: "callout-title", text: "A payment link is waiting" }),
+    h("p", { class: "muted onboard-link__note", text: "Set up or import a wallet to pay it." }),
+    web
+      ? h("button", {
+          class: "btn-outline onboard-link__browser",
+          type: "button",
+          text: "Open in browser instead",
+          onclick: async (event) => {
+            const button = event?.currentTarget;
+            if (button) button.disabled = true;
+            if (await openInPhoneBrowser(web)) {
+              state.draft = null;
+              await actions?.render?.()?.catch?.(() => {});
+              return;
+            }
+            if (button) button.disabled = false;
+            actions?.showToast?.("Couldn't open the browser.");
+          },
+        })
+      : null,
+  ].filter(Boolean));
+}
+
 // After a wallet is added: home, on the new wallet, with a toast.
 async function addedWallet(state, actions) {
   state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
@@ -205,6 +257,7 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
   return [
     h("div", { class: "auth-page" }, [
       h("h1", { class: "auth-title", text: "Set up your Dusk Wallet" }),
+      linkWaiting(state, actions),
       h("p", {
         class: "auth-lead",
         text: "Your recovery phrase is the only way to restore your wallet. Keep it safe.",
@@ -455,7 +508,7 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
       }
       const finger = state.onboard?.fingerprint === true;
       state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-      state.route = "home";
+      state.route = setUpTo(state);
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
       if (checked) actions?.showToast?.("Your recovery words match.");
@@ -706,7 +759,7 @@ function phraseForm({ state, actions, title, lead = "", landing = null, network 
           return;
         }
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-        state.route = "home";
+        state.route = setUpTo(state);
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
         // A new password: fingerprint unlock with it where asked, and the old one's gone.

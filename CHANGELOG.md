@@ -54,6 +54,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Had Import wallet's network picked already where it was picked on the setup screen, and on Testnet, still changeable there, and kept the form where it was as Testnet's band comes at the top.
 - Showed a dash for a shielded balance that can't be read now, never 0 DUSK, on Home, its total and the Available of Send and Unshield.
 - Said on Send when a payment link that waited behind the Android app's lock was opened, and kept such a link ten minutes, after which unlocking goes to Home.
+- Said on the Android app's setup screen that a payment link that opened it is waiting, with Open in browser instead, and opened its Send once a wallet's set up or imported.
 - Named the payer's memo in the Android app's notice for money that came in.
 - Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
 - Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.

@@ -1620,6 +1620,43 @@ describe("the app on a phone", () => {
   });
 });
 
+// Amélie's: a request link opened the app, which had no wallet, on "Set up your Dusk Wallet", on Mainnet: for a second
+// she thought her wallet and money were gone.
+describe("a payment link that opens the app before there's a wallet in it", () => {
+  const WEB = `https://apps.testnet.dusk.network/wallet/dashboard/send?to=${B}&amount=0.001&memo=Les+tulipes&network=testnet`;
+  const fresh = { hasVault: false, isUnlocked: false, accounts: [], wallets: [], walletKey: null, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" };
+  const opened = async (link, answers = {}) => {
+    const bridge = tauriBridge({ "plugin:deep-link|get_current": [link], ...answers });
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, async (message) => (message.type === "DUSK_UI_OVERVIEW" ? fresh : undefined), { tauri: bridge });
+    await t.render({ forceRefresh: true });
+    await flush();
+    return { t, bridge };
+  };
+  const waiting = (t) => {
+    const note = t.app.querySelector(".onboard-link");
+    return note ? visibleText(note) : "";
+  };
+
+  it("says on the setup screen that a payment link waits, to set up or import a wallet to pay it, or open it in the browser", async () => {
+    const { t } = await opened(WEB, { open_in_browser: true });
+    expect(t.state.route).toBe("onboard_welcome");
+    expect(waiting(t)).toBe("A payment link is waitingSet up or import a wallet to pay it.Open in browser instead");
+    expect(t.state.draft).toMatchObject({ to: B, memo: "Les tulipes", linkSetup: true });
+    // Open in browser instead: handed to the phone's browser, never to the app, which Android gives these links to.
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Open in browser instead").click();
+    await flush();
+    expect(t.dom.window.__TAURI_INTERNALS__.invoke).toHaveBeenCalledWith("open_in_browser", { url: WEB }, undefined);
+    expect([waiting(t), t.state.draft]).toEqual(["", null]);
+  });
+
+  it("offers a dusk: link to the browser as its web wallet's link", async () => {
+    const { t } = await opened(`dusk:public-${B}@dusk:2?amount=0.001&memo=Les+tulipes`, { open_in_browser: true });
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Open in browser instead").click();
+    await flush();
+    expect(t.dom.window.__TAURI_INTERNALS__.invoke).toHaveBeenCalledWith("open_in_browser", { url: WEB }, undefined);
+  });
+});
+
 describe("a payment link opened in the app while the wallet's locked", () => {
   const LINK = `dusk:public-${B}@dusk:2?amount=0.001&memo=Factura+2026-153`;
   // Locked: the wallet answers so till the password's given.
