@@ -5321,6 +5321,37 @@ details.receive-request > summary {
   margin-left: auto;
 }
 
+/* A request paid already: said with when, beside its Copy and Share */
+.request-row__paid {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+/* Asked on the card before a request paid already is copied or shared again */
+.request-paid-ask {
+  margin-top: 6px;
+}
+
+.request-paid-ask__text {
+  margin: 0;
+  font-size: 13px;
+}
+
+.request-paid-ask__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.request-paid-ask__actions > button {
+  width: auto;
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
 /* Colour only where it's done, or asks for a look */
 .request-state {
   font-size: 12.5px;

@@ -16,8 +16,8 @@ import { requestFileName, stamped } from "../../lib/fileNames.js";
 import { shortAddress } from "../../lib/strings.js";
 import { inCurrencyLine } from "../../lib/inCurrency.js";
 import { makePaymentLink, requestMessage } from "@dusk-network/app-core/payment-links";
-import { rememberRequest, sameRequest } from "../../../shared/paymentRequests.js";
-import { requestKept, requestNetwork, requestsSection } from "./requests.js";
+import { rememberRequest } from "../../../shared/paymentRequests.js";
+import { paidAsk, paidAtOf, requestKept, requestNetwork, requestsSection } from "./requests.js";
 import { amountChoices, amountForInput, formatDuskExact } from "../../../shared/amount.js";
 import { amountQuestionEls } from "../../components/AmountQuestion.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
@@ -37,9 +37,6 @@ function isTauriMobileLike() {
 }
 
 // A test network's name, for a request's picture and its file; "" on Mainnet.
-/** What's said as a request paid already is copied or shared again: its link goes, and no new one is kept. */
-export const PAID_ALREADY_TEXT = "This request was paid already.";
-
 const testNetworkOf = (ov) => {
   const name = String(ov?.networkName ?? "");
   return name && name !== "Mainnet" ? name : "";
@@ -148,7 +145,10 @@ export function receiveView(ov, { state, actions } = {}) {
     nameNote.hidden = false;
   });
 
-  // The address to read whole, and a button that copies it and says Copied in words.
+  // The address to read whole, and a button that copies it and says Copied in
+  // words; named for what it gives, as each Copy and Share here is (Nandini's
+  // and Sofía's: a request filled in, the first Copy and the first of two
+  // Shares gave a client the bare address).
   const copyAddress = copyButton({
     value: () => recipient,
     label: "Copy address",
@@ -188,18 +188,19 @@ export function receiveView(ov, { state, actions } = {}) {
   // The requests made here, drawn again on their own as one is kept, so what's pressed stays as it is.
   const requestsHost = h("div", { class: "receive-requests-host" });
   const drawRequests = () => requestsHost.replaceChildren(...[requestsSection(ov, { state, actions, share: isTauriMobileLike() ? shareKept : null })].filter(Boolean));
+  // What the form asks, as the list keeps a request.
+  const askedNow = () => ({ lux: curLux, memo: curMemo, network: requestNetwork(ov), to: curRecipient });
+  // When the request the form holds was paid, where it's one paid already; else null.
+  const paidNow = () => (wantRequest ? paidAtOf(state, askedNow()) : null);
   // Keeps what's asked in the list as it leaves the wallet: copied, shared or
   // downloaded. Sofía's: Copy request link on an invoice paid already made a
   // second, waiting one with its number, which a client could pay again. One
-  // paid already goes as its link, the same one, and it's said: nothing new
-  // is kept (rememberRequest keeps none twice).
+  // paid already is asked of first (paidAsk) and goes as its link, the same
+  // one: nothing new is kept (rememberRequest keeps none twice).
   const keepRequest = () => {
     if (!wantRequest) return;
-    const asked = { lux: curLux, memo: curMemo, network: requestNetwork(ov), to: curRecipient };
-    if (sameRequest(state.requests?.list, asked)?.paid) {
-      actions?.showToast?.(PAID_ALREADY_TEXT);
-      return;
-    }
+    const asked = askedNow();
+    if (paidAtOf(state, asked) !== null) return;
     rememberRequest(String(ov?.accounts?.[0] ?? ""), asked)
       .then((list) => {
         requestKept(state, list);
@@ -221,34 +222,50 @@ export function receiveView(ov, { state, actions } = {}) {
       network: testNetworkOf(ov),
     });
 
+  // A request paid already, given out again from the form or the buttons by
+  // the address: asked of first, under the buttons pressed (paidAsk).
+  const askFirst = (ask, act) => {
+    const at = paidNow();
+    if (at === null) return false;
+    ask.open(act, at);
+    return true;
+  };
   // The request's copy, which Enter in the memo presses; on once the QR
   // holds a request. On a phone it stays above the keyboard with the field
   // being typed in (keyboard.js), as Send's Review does.
   const copyRequestBtn = copyButton({
     value: () => (wantRequest ? requestText() : ""),
-    label: "Copy request link",
-    text: "Copy request link",
+    label: "Copy request",
+    text: "Copy request",
     className: "btn-outline",
     failText: "Copy failed",
     onFail: actions?.showToast,
     onCopied: keepRequest,
+    hold: () => askFirst(formAsk, "copy"),
     attrs: { "data-next": "" },
   });
   // In the app, the request's own Share, beside its Copy (Chen's and Sofía's:
   // Share sat up by the address, half under the header once the memo was typed).
+  const shareTheRequest = async () => {
+    if (!wantRequest || !curLink) return;
+    if (await shareRequest({ text: requestText(), qrValue: curQrValue, lux: curLux, memo: curMemo, to: curRecipient })) keepRequest();
+  };
   const shareRequestBtn = isTauriMobileLike()
     ? h("button", {
         class: "btn-outline",
         type: "button",
-        text: "Share",
-        "aria-label": "Share request",
-        onclick: async () => {
-          if (!wantRequest || !curLink) return;
-          if (await shareRequest({ text: requestText(), qrValue: curQrValue, lux: curLux, memo: curMemo, to: curRecipient })) keepRequest();
+        text: "Share request",
+        onclick: () => {
+          if (!askFirst(formAsk, "share")) shareTheRequest();
         },
       })
     : null;
   const requestActions = shareRequestBtn ? h("div", { class: "btnrow receive-request__actions" }, [copyRequestBtn, shareRequestBtn]) : copyRequestBtn;
+  // The form's question, and the one for the buttons by the address, kept with the form through a redraw.
+  const formAsk = paidAsk(r, "form", {
+    copy: { verb: "Copy", go: () => copyRequestBtn.pressAnyway() },
+    share: { verb: "Share", go: () => shareTheRequest() },
+  });
 
   // What the QR asks for, once it holds a request.
   const summaryMeta = h("span", { class: "receive-request__meta" });
@@ -270,6 +287,7 @@ export function receiveView(ov, { state, actions } = {}) {
         linkErr,
         linkNote,
         requestActions,
+        formAsk.el,
       ]),
     ]
   );
@@ -282,6 +300,7 @@ export function receiveView(ov, { state, actions } = {}) {
   });
   requestDetails.addEventListener("toggle", () => {
     r.requestOpen = requestDetails.open;
+    placeAddressRow();
     update();
     if (opening && requestDetails.open) {
       opening = false;
@@ -422,8 +441,9 @@ export function receiveView(ov, { state, actions } = {}) {
   const shareBtn = isTauriMobileLike()
     ? h("button", {
         class: "btn-outline",
-        text: "Share",
-        // The account or address, through the phone's share sheet; a request has its own Share, beside it.
+        type: "button",
+        text: "Share address",
+        // The account or address, through the phone's share sheet; a request has its own Share, beside its Copy.
         onclick: async () => {
           if (curRecipient) await shareOut(curRecipient, "Dusk address");
         },
@@ -440,20 +460,37 @@ export function receiveView(ov, { state, actions } = {}) {
         failText: "Copy failed",
         onFail: actions?.showToast,
         onCopied: keepRequest,
+        hold: () => askFirst(rowAsk, "app"),
       })
     : null;
 
   const downloadBtn = h("button", {
     class: "btn-outline",
+    type: "button",
     text: "Download QR PNG",
-    onclick: downloadCurrentQr,
+    onclick: () => {
+      if (!askFirst(rowAsk, "download")) downloadCurrentQr();
+    },
   });
 
   const btnRow = h(
     "div",
-    { class: "btnrow btnrow--grid" },
+    { class: "btnrow btnrow--grid receive-address-actions" },
     [copyAddress, shareBtn, appLinkBtn, downloadBtn].filter(Boolean)
   );
+  const rowAsk = paidAsk(r, "row", {
+    ...(appLinkBtn ? { app: { verb: "Copy", go: () => appLinkBtn.pressAnyway() } } : {}),
+    download: { verb: "Download", go: () => downloadCurrentQr() },
+  });
+  // While a request is being made, its Copy and Share come first: the
+  // address's buttons go below the form, and back above it once it's closed.
+  const placeAddressRow = () => {
+    const parent = requestDetails.parentNode;
+    if (!parent) return;
+    const anchor = requestDetails.open ? requestDetails.nextSibling : requestDetails;
+    parent.insertBefore(btnRow, anchor);
+    parent.insertBefore(rowAsk.el, btnRow.nextSibling);
+  };
 
   // --- Live update -----------------------------------------------------
   let t = 0;
@@ -528,9 +565,11 @@ export function receiveView(ov, { state, actions } = {}) {
     curQrValue = qrValue || "";
     qrCard.replaceChildren(qrCodeEl(qrValue || ""));
 
-    // The fields copy the name and the address; the request link is copied here.
+    // The fields copy the name and the address; the request is copied here,
+    // its Copy and Share the ones that lead while it's made.
     copyRequestBtn.disabled = !wantRequest;
     if (shareRequestBtn) shareRequestBtn.disabled = !wantRequest;
+    for (const button of [copyRequestBtn, shareRequestBtn].filter(Boolean)) button.className = wantRequest ? "btn-primary" : "btn-outline";
     if (wantRequest) {
       summaryMeta.textContent = made.lux !== null ? `${amountForInput(formatDuskPlain(made.lux))} DUSK` : "With memo";
     } else {
@@ -560,8 +599,7 @@ export function receiveView(ov, { state, actions } = {}) {
       qrCard,
       h("div", { class: "receive-fields" }, [nameField, addressField]),
       nameNote,
-      btnRow,
-      requestDetails,
+      ...(requestDetails.open ? [requestDetails, btnRow, rowAsk.el] : [btnRow, rowAsk.el, requestDetails]),
       requestsHost,
       qrMenu,
     ]),

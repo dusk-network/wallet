@@ -102,7 +102,7 @@ function scrollerOf(el, doc, win) {
 
 // The first main button after `field` on its screen or in its dialog: a
 // primary one, or the one its fields lead to (`data-next`), as Receive's
-// Copy request link.
+// Copy request.
 function nextButton(field, doc) {
   const scope = field.closest?.(".qrscan-overlay") ?? doc.getElementById?.("app") ?? doc.body;
   const all = Array.from(scope?.querySelectorAll?.("*") ?? []);
