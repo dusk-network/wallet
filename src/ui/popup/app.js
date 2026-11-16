@@ -1246,10 +1246,25 @@ function leave() {
 // switched since (another wallet, a restore). Sends left on their way are
 // looked up again, as they couldn't be while it was locked.
 let wasUnlocked = null;
+// How long a payment link opened while the wallet's locked waits behind the
+// lock (Sofía's: one opened long before, on a phone shared with another,
+// filled Send in as she unlocked from the app's icon, saying nothing of it).
+const LINK_WAITS_MS = 10 * 60_000;
 function returnAfterUnlock(ov) {
   const unlocked = Boolean(ov?.isUnlocked);
   const unlockedNow = unlocked && wasUnlocked === false;
   wasUnlocked = unlocked;
+  // A link that waited behind the lock, the wallet unlocked: past its time,
+  // Home, as usual, and the link's form goes; in time, it's taken, and stays
+  // the person's, whenever drawn again, with when it was opened for Send to
+  // say (Astra's: unlocked at minute 8 and edited, a redraw at minute 10
+  // threw it away).
+  if (unlocked && Number(state.draft?.linkAt) > 0 && !state.draft.linkTaken) {
+    if (Date.now() - Number(state.draft.linkAt) > LINK_WAITS_MS) {
+      state.draft = null;
+      if (state.route === "send" || state.route === "confirm") state.route = "home";
+    } else state.draft.linkTaken = true;
+  }
   const back = state.returnTo;
   if (back && unlocked) {
     state.returnTo = null;
@@ -1799,6 +1814,9 @@ listenForLinks((url) => {
   if (!draft) return;
   netMenu.close();
   acctMenu.close();
+  // Opened while the wallet's locked, it waits behind the lock: when, for
+  // Send to say, and to be dropped after LINK_WAITS_MS.
+  if (!state.overview?.isUnlocked) Object.assign(draft, { linkAt: Date.now() });
   Object.assign(state, { draft, route: "send" });
   render()
     .then(() => {

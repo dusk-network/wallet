@@ -53,6 +53,7 @@ import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/con
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
 import { whenAtText } from "./txRow.js";
+import { clockText } from "../../lib/time.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, linkAmount, networkMismatch } from "@dusk-network/app-core/payment-links";
 import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
@@ -364,8 +365,12 @@ export function sendFormView(ov, { state, actions } = {}) {
   const filledNote = h("p", { class: "field-hint send-filled-note", role: "status", hidden: true });
   // Whether Back asks first, said to the phone's Back as a link or a QR code fills the form in.
   let markAsks = () => {};
+  // A link that waited behind the lock says when it was opened (Sofía's: one
+  // from long before filled Send in after an unlock, with no word of it).
   const sayFilled = (from) => {
-    filledNote.textContent = filledText(from, ov?.nodeUrl);
+    const said = filledText(from, ov?.nodeUrl);
+    const linkAt = Number(state.draft?.linkAt) || 0;
+    filledNote.textContent = said && from === "link" && linkAt ? `${said} From a link opened at ${clockText(linkAt)}.` : said;
     filledNote.hidden = !filledNote.textContent;
     markAsks();
   };
@@ -430,6 +435,8 @@ export function sendFormView(ov, { state, actions } = {}) {
     nextDraft.filledFrom = source === "qr" ? "qr" : "link";
     // What filled it in, which typing over the recipient doesn't change.
     nextDraft.filledIn = nextDraft.filledFrom;
+    // Filled in here and now: no link that waited behind the lock.
+    nextDraft.linkAt = undefined;
     state.draft = nextDraft;
 
     sayRefused();
@@ -1143,6 +1150,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           requestChainId: state.draft?.requestChainId,
           filledFrom: state.draft?.filledFrom,
           filledIn: state.draft?.filledIn,
+          linkAt: state.draft?.linkAt,
           reviewedFor: reviewedFor(ov),
           // Sent again from Home's Send it now, back from its Review: still in
           // the place of the one Home said wasn't sent, while it's that payment

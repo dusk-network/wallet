@@ -1620,6 +1620,73 @@ describe("the app on a phone", () => {
   });
 });
 
+describe("a payment link opened in the app while the wallet's locked", () => {
+  const LINK = `dusk:public-${B}@dusk:2?amount=0.001&memo=Factura+2026-153`;
+  // Locked: the wallet answers so till the password's given.
+  const locked = async (message, t) => {
+    if (message.type === "DUSK_UI_UNLOCK") {
+      t.open = { ...t.open, isUnlocked: true };
+      return { ok: true };
+    }
+    return undefined;
+  };
+  const opened = async () => {
+    const bridge = tauriBridge();
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, locked, { tauri: bridge });
+    t.open = { ...t.open, isUnlocked: false };
+    await t.render({ forceRefresh: true });
+    bridge.emit([LINK]);
+    await flush();
+    return t;
+  };
+  const unlock = async (t) => {
+    t.app.querySelector("#unlock-password").value = "the password";
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
+    await flush();
+  };
+
+  afterEach(() => vi.useRealTimers());
+
+  // Sofía's: a link opened while the wallet was locked filled Send in after a later unlock from the app's icon, even
+  // one opened long before by someone else on a shared phone, saying nothing of where or when it came from.
+  it("says on Send when it was opened, once unlocked within ten minutes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 51));
+    const t = await opened();
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 59));
+    await unlock(t);
+    expect(t.state.route).toBe("send");
+    expect(t.app.querySelector(".to-input-wrap textarea").value).toBe(B);
+    expect(t.app.querySelector(".send-filled-note")?.textContent).toBe("Filled in from the link, to pay on Testnet. Check it before you send. From a link opened at 23:51.");
+  });
+
+  // Astra's: unlocked at minute 8 and the form edited, a redraw at minute 10 threw the payment away.
+  it("keeps it once it opened after an unlock in time, edited, through redraws past ten minutes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 51));
+    const t = await opened();
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 59));
+    await unlock(t);
+    const memo = () => t.app.querySelectorAll("input").find((i) => i.getAttribute("placeholder") === "Optional");
+    memo().value = "Factura 2026-153, paid";
+    memo().dispatchEvent(fakeEvent("input"));
+    vi.setSystemTime(new Date(2026, 10, 16, 0, 5));
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect([t.state.route, t.app.querySelector(".to-input-wrap textarea").value, memo().value]).toEqual(["send", B, "Factura 2026-153, paid"]);
+    expect(t.app.querySelector(".send-filled-note")?.textContent).toBe("Filled in from the link, to pay on Testnet. Check it before you send. From a link opened at 23:51.");
+  });
+
+  it("goes Home as usual on an unlock past ten minutes, the link's payment gone", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 51));
+    const t = await opened();
+    vi.setSystemTime(new Date(2026, 10, 16, 0, 2));
+    await unlock(t);
+    expect([t.state.route, t.state.draft]).toEqual(["home", null]);
+  });
+});
+
 // The phone's Back in the app, as Android hands it to the wallet (Tauri's
 // back-button event, here a fake): through what people do, into screens,
 // Back, the background, back in, a press between, Android answering late.
