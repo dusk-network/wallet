@@ -270,6 +270,30 @@ describe("stDUSK, found on the dashboard", () => {
   });
 });
 
+// Lena's, the third round: right after the extension's own unstake, Rewards by year kept the "taken out" from before.
+describe("a stake or an unstake with Sozu that goes through", () => {
+  it("has Staking read the history again for Rewards by year, once, and nothing for another send", async () => {
+    const UNSTAKE = "7f".repeat(32);
+    const PAYMENT = "7a".repeat(32);
+    const t = await popupOn("home");
+    t.open = { ...t.open, txs: [{ hash: UNSTAKE, status: "submitted", asset: { kind: "sozu", action: "sozu_unstake" } }, { hash: PAYMENT, status: "submitted" }] };
+    await t.render({ forceRefresh: true });
+    const read = () => ((t.state.sozu ??= {}).history = { key: "read before" });
+    read();
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: PAYMENT, status: "executed" });
+    await flush();
+    expect(t.state.sozu.history).toEqual({ key: "read before" });
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: UNSTAKE, status: "executed" });
+    await flush();
+    expect(t.state.sozu.history).toBeNull();
+    // Its next word, a recheck's: already read again.
+    read();
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: UNSTAKE, status: "executed", feePaid: "1856759" });
+    await flush();
+    expect(t.state.sozu.history).toEqual({ key: "read before" });
+  });
+});
+
 describe("a Copy button that says Copied", () => {
   it("keeps the focus when the popup is drawn again meanwhile", async () => {
     const t = await popupOn("receive");

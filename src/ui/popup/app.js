@@ -40,7 +40,7 @@ import { receiveView } from "./views/receive.js";
 import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
-import { sozuConfirmView } from "./views/sozu.js";
+import { readStakingAgain, sozuConfirmView } from "./views/sozu.js";
 import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentStatus, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
@@ -876,6 +876,8 @@ function installTxStatusListener() {
         ).toLowerCase();
         const record = hash && Array.isArray(state.overview?.txs) ? state.overview.txs.find((t) => String(t?.hash ?? "") === hash) : null;
         if (!endedStatus(status) && (endedTxs.has(hash) || endedStatus(String(record?.status ?? "")))) return;
+        // A stake or an unstake with Sozu through: Rewards by year reads the history again, it with it.
+        if (hash && endedStatus(status) && !endedTxs.has(hash) && (record?.asset?.kind === "sozu" || (state.sent?.hash === hash && state.sent?.sozu))) readStakingAgain(state);
         if (hash && endedStatus(status)) endedTxs.add(hash);
         const news = !hash || heardTxs.get(hash) !== status;
         if (hash) heardTxs.set(hash, status);
@@ -988,9 +990,12 @@ try {
 // A node can stop answering without an error, and between reads, minutes
 // apart, nothing else would find it silent: while an unlocked wallet shows and
 // the browser is online, the node is asked whether it answers, at once and
-// every 15 seconds. What came of it shows at once, without a read that may
-// hang; once it answers again, the balance is read again.
-const ASK_NODE_EVERY_MS = 15_000;
+// every 4 seconds, each ask given 6 (networkStatus.js NODE_ANSWER_MS), as the
+// web wallet asks: one that goes silent is said so within about 10 seconds
+// (Lena's and Amélie's: 17 to 21 s here, 6 to 9 there). What came of it shows
+// at once, without a read that may hang; once it answers again, the balance is
+// read again.
+const ASK_NODE_EVERY_MS = 4_000;
 let askNodeTimer = null;
 let askingNode = false;
 

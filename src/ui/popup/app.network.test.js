@@ -185,9 +185,10 @@ describe("a node that stops answering", () => {
       await settle();
       expect([words(), app.textContent.includes("may be out of date")]).toEqual(["", false]);
 
-      // The node goes silent: asked again a little on, it's said at once, the balance read last kept.
+      // The node goes silent: asked again 4 seconds on, as the web wallet asks, it's said at once, the balance read
+      // last kept (Lena's and Amélie's: 17 to 21 s, where the web wallet took 6 to 9).
       silent = true;
-      vi.advanceTimersByTime(15_000);
+      vi.advanceTimersByTime(4_000);
       await vi.waitFor(() => expect(words()).toBe("Can't reach the network"));
       expect(dot()).toContain("net-status--offline");
       expect(app.textContent).toContain("Your balance may be out of date.");

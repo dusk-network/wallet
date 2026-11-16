@@ -1662,6 +1662,21 @@ describe("background Phoenix tx lifecycle flow", () => {
       await expect(listTxs()).resolves.toEqual([]);
     });
 
+    // Lena's, the third time: Home opened in a second popup while the node was silent settled the send against the
+    // chain's history, its record forgotten; the Sent screen's rechecks said "unknown" and Completed kept "Up to" its
+    // fee. Where nothing's kept, the node is still asked where it stands, and nothing is written.
+    it("says the block and fee of a send whose record history settled, keeping nothing of it", async () => {
+      const { listTxs } = await import("../shared/txStore.js");
+      mocks.classifyTxPresence.mockResolvedValueOnce({ state: "executed_success", tx: { id: "0xsettled", err: null, gasSpent: "1856759", blockHeight: 4872903, tx: { gasPrice: "1" } } });
+      await expect(sendBackgroundMessage({ type: "DUSK_UI_RECHECK_TX", hash: "0xsettled" })).resolves.toMatchObject({
+        ok: true,
+        result: { status: "executed", feePaid: "1856759", blockHeight: "4872903" },
+      });
+      expect(mocks.classifyTxPresence).toHaveBeenCalledWith("https://testnet.nodes.dusk.network", "0xsettled");
+      expect(mocks.sentMessages).toContainEqual(expect.objectContaining({ type: "DUSK_UI_TX_STATUS", hash: "0xsettled", status: "executed", feePaid: "1856759" }));
+      await expect(listTxs()).resolves.toEqual([]);
+    });
+
     it("rechecks nothing it no longer keeps", async () => {
       const { listTxs } = await import("../shared/txStore.js");
       await seedTxMeta("0xold");

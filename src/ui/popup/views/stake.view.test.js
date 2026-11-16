@@ -11,7 +11,7 @@ import { activityKey } from "../activity.js";
 import { lookupPrimaryName } from "../../../shared/duskNames.js";
 import { maxAmountLux } from "../../../shared/amount.js";
 import { stakeConfirmView, stakeFormView } from "./stake.js";
-import { sozuConfirmView } from "./sozu.js";
+import { readStakingAgain, sozuConfirmView } from "./sozu.js";
 import { screenShown } from "../../lib/clickGuard.js";
 import { reviewOf, sentView } from "./sent.js";
 import { switchContext } from "../context.js";
@@ -1270,6 +1270,39 @@ describe("a stake with Sozu in figures", () => {
       expect(years()[0].join(" ")).not.toContain("taken out by unstaking");
 
       // The archive lists it now, with its block and its events: read again 20 s on, it's counted.
+      history.push(move(unstaked, "sozu_unstake", "30300000000", 4_800_006, Date.UTC(2026, 5, 1, 12)));
+      events[4800006] = [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }];
+      await vi.advanceTimersByTimeAsync(20_000);
+      await vi.waitFor(() => expect(years()[0]).toContain("Sozu, taken out by unstaking: 0.2248 DUSK"));
+      vi.useRealTimers();
+    });
+
+    // Lena's, the third round: Staking open before her own unstake, Rewards by year kept the "taken out" from before
+    // it for 25 s after it went through, beside a "grown" that had moved: what Staking read before stood.
+    it("reads the history again once its own unstake goes through, after it was read before it", async () => {
+      vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+      vi.setSystemTime(Date.UTC(2026, 5, 1, 12, 0, 10));
+      const [staked, unstaked] = ["7e".repeat(32), "7f".repeat(32)];
+      const events = {
+        4800005: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }],
+      };
+      archive.query = archiveWith(events);
+      const history = [move(staked, "sozu_stake", "100000000000", 4_800_005, Date.UTC(2026, 2, 1, 12))];
+      const overview = ov({ txs: [] });
+      const state = { route: "stake", staking: staking(owner()), sozu: holding(49_875_000_000n, 101_745_000_000n), activity: activityOf(overview, history) };
+      const app = popup(state, overview);
+      await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held, after deposit fees: 1.745 DUSK"]]));
+
+      // The unstake goes through: the wallet's own record of it, and the page told.
+      const own = { hash: unstaked, kind: "contract_call", contractId: PILOT, fnName: "sozu_unstake", amount: "0", status: "executed", profileIndex: 0, submittedAt: Date.UTC(2026, 5, 1, 12), executedAt: Date.UTC(2026, 5, 1, 12, 0, 5), nodeUrl: "https://testnet.nodes.dusk.network", origin: "Wallet", asset: { kind: "sozu", action: "sozu_unstake", pool: PILOT } };
+      overview.txs.push(own);
+      Object.assign(state.sozu, holding(34_875_000_000n, 71_145_000_000n));
+      readStakingAgain(state);
+      app.draw();
+      await vi.waitFor(() => expect(years()).toHaveLength(1));
+      expect(years()[0].join(" ")).not.toContain("taken out by unstaking");
+
+      // The archive lists it with its events: read again 20 s on, it's counted.
       history.push(move(unstaked, "sozu_unstake", "30300000000", 4_800_006, Date.UTC(2026, 5, 1, 12)));
       events[4800006] = [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }];
       await vi.advanceTimersByTimeAsync(20_000);
