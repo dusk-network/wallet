@@ -589,7 +589,8 @@ describe("a public payment handed to the node without a clear answer", () => {
     await askAgain();
     await expect(sent).resolves.toEqual({ hash: "c1", from: "found" });
     expect(attempt).toHaveBeenLastCalledWith({ found: { hash: "c1", nonce: "131" } });
-    expect(await kept()).toEqual([]);
+    // Said Sent, by its ID, till its block's in (forgetWent).
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", hash: "c1", waiting: false, went: expect.any(Number) })]);
   });
 
   it("nowhere, and its nonce unused, goes out once more as the very transaction made for it", async () => {
@@ -603,7 +604,7 @@ describe("a public payment handed to the node without a clear answer", () => {
     // Sent again as it was made: never made again, never twice.
     expect(attempt.mock.calls).toEqual([[{ waited: false }], [{ resend: true }]]);
     expect(host.release).not.toHaveBeenCalled();
-    expect(await kept()).toEqual([]);
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", hash: "c2", waiting: false, went: expect.any(Number) })]);
   });
 
   it("waits, maybe gone, while the node can't be asked, and holds the payments after it", async () => {
@@ -723,6 +724,69 @@ describe("a waiting payment as the wallet stops waiting for it", () => {
     await askAgain();
     expect(await sent).toBe(refused);
     expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: false, ended: "failed", error: "Insufficient balance" })]);
+  });
+});
+
+describe("a payment that went out after it waited", () => {
+  // Lena's, in the app: "Sending: 0.01 DUSK…" on Home, then for 20 s no card, no payment and the old balance, till
+  // its block came in.
+  const goesOut = async (hash = "w1") => {
+    const attempt = vi
+      .fn()
+      .mockRejectedValueOnce(offline())
+      .mockImplementationOnce(async () => {
+        // The engine notes its transaction's ID and nonce before it hands it over.
+        await waiting.noteHandingOver("s1", { hash, nonce: "42" }, host);
+        return { hash };
+      });
+    const sent = waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt, host });
+    await vi.advanceTimersByTimeAsync(0);
+    network.answers = true;
+    await askAgain();
+    await expect(sent).resolves.toEqual({ hash });
+  };
+
+  it("is said Sent, by its ID, till its block's in and the balance read since, never in neither list", async () => {
+    await goesOut();
+    const went = [expect.objectContaining({ sendId: "s1", hash: "w1", waiting: false, went: expect.any(Number) })];
+    expect(await kept()).toEqual(went);
+    // Never asked of the node as one handed over, nor dropped.
+    await waiting.followHandedOver(host);
+    expect(host.check).not.toHaveBeenCalled();
+    await expect(waiting.dropUnsent("s1")).resolves.toBe(false);
+    // On its way still, or done with the balance not read since: said Sent.
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [{ hash: "w1", status: "submitted" }]);
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [{ hash: "w1", status: "executed" }], { balanceRead: false });
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, null);
+    expect(await kept()).toEqual(went);
+    // Another wallet's or node's sends say nothing of it.
+    await waiting.forgetWent({ walletId: "another", nodeUrl: NODE }, []);
+    expect(await kept()).toEqual(went);
+    // In its block, the balance read after: gone.
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [{ hash: "w1", status: "executed" }]);
+    expect(await kept()).toEqual([]);
+  });
+
+  // Lena's, in the app again: it went out as Home read the wallet, after the sends were read, and that read forgot
+  // it as gone from them: no card, no payment and the old balance for 20 s.
+  it("is said Sent still after a read of the sends begun before it went out, which can't have it", async () => {
+    const read = waiting.sendsReadBegins();
+    await goesOut("w4");
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [], { read });
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", hash: "w4", waiting: false, went: expect.any(Number) })]);
+    // Read since, without it: the chain's history has it.
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [], { read: waiting.sendsReadBegins() });
+    expect(await kept()).toEqual([]);
+  });
+
+  it("goes once the chain's history has it, its record gone from the sends, or after a quarter of an hour", async () => {
+    await goesOut("w2");
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, []);
+    expect(await kept()).toEqual([]);
+    await goesOut("w3");
+    await vi.advanceTimersByTimeAsync(waiting.WENT_FOR_MS + 1);
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [{ hash: "w3", status: "submitted" }], { balanceRead: false });
+    expect(await kept()).toEqual([]);
   });
 });
 

@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), resendSend: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), resendSend: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null, balanceRead: null }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -102,6 +102,8 @@ vi.mock("../shared/walletEngine.js", () => ({
   getCachedGasPrice: vi.fn(async () => ({ median: "1" })),
   // The node's balance where a test says it (`engine.balance`), else none to read, as with no signal.
   getPublicBalance: async () => {
+    // A read that takes a while, where a test holds it (`engine.balanceRead`).
+    await engine.balanceRead?.();
     if (!engine.balance) throw new TypeError("Failed to fetch");
     return { nonce: 4n, value: engine.balance };
   },
@@ -201,6 +203,7 @@ beforeEach(() => {
   engine.executed = null;
   engine.handedOver = new Set();
   engine.balance = null;
+  engine.balanceRead = null;
   statusChecks.nodeAnswers = true;
 });
 
@@ -629,8 +632,81 @@ describe("a payment from Send in the app, as Android ends it or the signal goes 
     expect(engine.resendSend).toHaveBeenCalledWith({ sendId: "send-0008" });
     expect(engine.sendTransaction).toHaveBeenCalledOnce();
     const after = await overview(localSend);
-    expect(after.waitingSends).toEqual([]);
+    // Said Sent on Home till its block's in.
+    expect(after.waitingSends).toEqual([expect.objectContaining({ sendId: "send-0008", waiting: false, went: expect.any(Number) })]);
     expect(after.txs).toEqual([expect.objectContaining({ hash: HASH, status: "submitted", memo: "Cendol" })]);
+  });
+
+  // Lena's: a payment that waited offline said "Sending: 0.01 DUSK…" on Home, then for 20 s there was no card, no
+  // payment and the old balance, till its block came in.
+  it("says a payment that went out after it waited Sent on Home till its block's in and the balance is read after", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    const heard = page();
+    engine.sendTransaction.mockRejectedValueOnce(Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } })).mockImplementationOnce(async ({ sendId }) => {
+      await engine.handOverHook({ sendId, hash: HASH, nonce: "131" });
+      return { hash: HASH, nonce: 131n };
+    });
+    statusChecks.nodeAnswers = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reviewed = { ...params, _approvalContext: { walletId: "account of wallet A", profileIndex: 0, account: "account of wallet A", nodeUrl } };
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0013", walletId: "account of wallet A", params: reviewed });
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0013", waits: true }));
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: HASH } });
+
+    // Gone out: Sent on Home, and among the sends, never in neither.
+    engine.balance = 1_000_000_000n;
+    let ov = await overview(localSend);
+    expect(ov.waitingSends).toEqual([expect.objectContaining({ sendId: "send-0013", hash: HASH, waiting: false, went: expect.any(Number) })]);
+    expect(ov.txs).toEqual([expect.objectContaining({ hash: HASH, status: "submitted" })]);
+    // In its block, the balance not read: Sent still. Read: gone from Home, Activity has it.
+    const { getTxEpoch, patchTxMeta } = await import("../shared/txStore.js");
+    await patchTxMeta(HASH, { status: "executed" }, { epoch: await getTxEpoch() });
+    engine.balance = null;
+    ov = await overview(localSend);
+    expect(ov.waitingSends).toEqual([expect.objectContaining({ sendId: "send-0013", went: expect.any(Number) })]);
+    engine.balance = 990_000_000n;
+    ov = await overview(localSend);
+    expect(ov.waitingSends).toEqual([]);
+    expect(ov.txs).toEqual([expect.objectContaining({ hash: HASH, status: "executed" })]);
+  });
+
+  // Lena's again: it went out as Home read the wallet, after the sends were read, and that read forgot it: no card,
+  // no payment and the old balance for 20 s.
+  it("says a payment that went out as Home read the wallet Sent, though the sends read before it don't have it", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    const heard = page();
+    engine.sendTransaction.mockRejectedValueOnce(Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } })).mockImplementationOnce(async ({ sendId }) => {
+      await engine.handOverHook({ sendId, hash: HASH, nonce: "131" });
+      return { hash: HASH, nonce: 131n };
+    });
+    statusChecks.nodeAnswers = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reviewed = { ...params, _approvalContext: { walletId: "account of wallet A", profileIndex: 0, account: "account of wallet A", nodeUrl } };
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0014", walletId: "account of wallet A", params: reviewed });
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0014", waits: true }));
+
+    // Home reads the wallet: the sends, then the balance, which takes a while; it goes out meanwhile.
+    engine.balance = 1_000_000_000n;
+    const asked = Promise.withResolvers();
+    const answer = Promise.withResolvers();
+    engine.balanceRead = () => {
+      asked.resolve();
+      return answer.promise;
+    };
+    const reading = overview(localSend);
+    await asked.promise;
+    engine.balanceRead = null;
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: HASH } });
+    answer.resolve();
+    const ov = await reading;
+    // In the one or the other, never in neither.
+    expect([ov.txs, ov.waitingSends]).toEqual([[], [expect.objectContaining({ sendId: "send-0014", hash: HASH, waiting: false, went: expect.any(Number) })]]);
   });
 
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent

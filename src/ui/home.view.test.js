@@ -417,6 +417,19 @@ describe("payments from Send waiting for the network, on Home", () => {
     await vi.waitFor(() => expect(actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_DROP_UNSENT", sendId: "s2" }));
   });
 
+  // Lena's, in the app: "Sending: 0.01 DUSK…", then for 20 s no card, no payment and the old balance.
+  it("says one that went out after it waited Sent, with no button, till its block's in", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2, 40));
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
+    const went = send({ waiting: false, waits: false, went: at(2, 39), hash: "w1".repeat(32) });
+    document.body.replaceChildren(...homeView(ov([went]), { state, actions }));
+    expect(boxes(document)).toEqual(["Sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34"]);
+    expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
+  });
+
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
   // its copy too once it had the network back, without asking.
   it("says one held as its account sent something else while it waited, with what it pays, Send it too and Don't send", async () => {

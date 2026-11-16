@@ -38,7 +38,7 @@ import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import { formatDusk } from "../shared/amount.js";
 import { shortAddress } from "../ui/lib/strings.js";
-import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendHeld, sendWhenReachable, stopWaitingSends, waitingForNetwork, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, forgetWent, noteHandingOver, reviewedParams, sendHeld, sendsReadBegins, sendWhenReachable, stopWaitingSends, waitingForNetwork, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import {
@@ -590,8 +590,12 @@ export async function localSend(message) {
       // Recent activity (transaction list) scoped to the current node URL
       // and the wallet unlocked.
       let txs = [];
+      let txsRead = false;
+      // A payment gone out after this read began can't be among them (forgetWent).
+      const txsReadBegan = sendsReadBegins();
       try {
         txs = status.isUnlocked ? await listTxs({ nodeUrl: settings.nodeUrl, walletId: String(status.accounts?.[0] ?? "") }) : [];
+        txsRead = true;
       } catch {
         txs = [];
       }
@@ -662,6 +666,11 @@ export async function localSend(message) {
             { balance, shieldedBalance }
           ).catch(() => ({}))
         : {};
+      // A payment said Sent on Home after it waited goes once its block's in,
+      // by the sends read above, and the balance was read after them.
+      if (status.isUnlocked) {
+        await forgetWent({ walletId: String(status.accounts?.[0] ?? ""), nodeUrl: settings.nodeUrl }, txsRead ? txs : null, { balanceRead: Boolean(balance) && !balanceError, read: txsReadBegan }).catch(() => {});
+      }
       return {
         hasVault: Boolean(vault),
         isUnlocked: status.isUnlocked,

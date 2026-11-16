@@ -271,6 +271,36 @@ const keepInPlace = (record, replaces) =>
     return prior;
   });
 
+// Gone out after it waited: kept, with its transaction's ID, as went, for
+// Home to say Sent till its block is in and the balance read since
+// (forgetWent), so it never drops out of both Home and Activity as it goes
+// (Lena's: no card, no payment and the old balance for 20 s). One with no ID
+// kept is forgotten.
+const keepWent = (sendId) =>
+  changeKept((kept) => {
+    const record = kept[sendId];
+    if (!record?.hash) {
+      delete kept[sendId];
+      return;
+    }
+    const { ended: _ended, error: _error, stopped: _stopped, held: _held, ...went } = record;
+    kept[sendId] = { ...went, went: Date.now() };
+    wentAfter.set(sendId, ++steps);
+  });
+
+// Reads of the wallet's sends begun, and payments kept as went, in order, in
+// this life of the queue: a read knows nothing of a payment that went out
+// after it began (forgetWent). One that went in an earlier life went before
+// any read now.
+let steps = 0;
+const wentAfter = new Map();
+
+/**
+ * Marks a read of the wallet's sends as it begins, for forgetWent.
+ * @returns {number}
+ */
+export const sendsReadBegins = () => ++steps;
+
 // Kept as not sent: whatever was being handed over for it never went.
 const endKept = (sendId, ended, error = "") =>
   changeKept((kept) => {
@@ -345,16 +375,17 @@ async function hold(item, host, now) {
   tellWaits(host, item.sendId, false, false, true);
 }
 
-// Out of the queue, its record kept as `how` says: forgotten once it went
-// out, was called off with Cancel, or is followed by its transaction's ID;
-// kept as not sent otherwise. One called off that took the place of a
+// Out of the queue, its record kept as `how` says: kept as went once it went
+// out; forgotten once it was called off with Cancel, or is followed by its
+// transaction's ID; kept as not sent otherwise. One called off that took the place of a
 // payment Home said wasn't sent gives that payment its place back.
 function settle(item, how, error) {
   item.state = "settled";
   const at = queue.indexOf(item);
   if (at >= 0) queue.splice(at, 1);
   if (how === "cancelled") return forgetFor(item.sendId, item.prior).catch(() => {});
-  if (how === "out" || how === "followed") return forget(item.sendId).catch(() => {});
+  if (how === "out") return keepWent(item.sendId).catch(() => {});
+  if (how === "followed") return forget(item.sendId).catch(() => {});
   return endKept(item.sendId, how, how === "failed" ? String(error?.message ?? error ?? "") : "").catch(() => {});
 }
 
@@ -823,9 +854,10 @@ export function waitingForNetwork() {
  * asked of it), those held for Send it too as their account sent something
  * else meanwhile (`held`, waiting too), and those that stopped waiting
  * without going out (`ended`, the wallet closed meanwhile where nothing says
- * otherwise; `held` where it was held as it stopped).
+ * otherwise; `held` where it was held as it stopped), and those gone out after
+ * they waited (`went`, when), said Sent till their block's in (forgetWent).
  * @param {{ walletId: string, nodeUrl: string }} of
- * @returns {Promise<Array<WaitingRecord & { waiting: boolean, waits: boolean, unclear?: boolean, checks?: boolean, held?: boolean }>>}
+ * @returns {Promise<Array<WaitingRecord & { waiting: boolean, waits: boolean, unclear?: boolean, checks?: boolean, held?: boolean, went?: number }>>}
  */
 export async function waitingSendsOf({ walletId, nodeUrl }) {
   await writes;
@@ -841,11 +873,51 @@ export async function waitingSendsOf({ walletId, nodeUrl }) {
         const { held: _held, ...waiting } = record;
         return { ...waiting, ended: undefined, waiting: true, waits: item.state === "waiting" || item.state === "unclear", ...(item.handedOver ? { unclear: true } : {}) };
       }
+      // Gone out after it waited: said Sent till its block's in and the balance read.
+      if (record.went) return { ...record, ended: undefined, waiting: false, waits: false };
       // Handed over as the wallet stopped: asked of the node once it answers (`checks`).
       if (record.hash) return { ...record, ended: undefined, waiting: true, waits: false, unclear: true, checks: true };
       return { ...record, ended: record.ended ?? "closed", waiting: false, waits: false };
     })
     .sort((a, b) => Number(a.at) - Number(b.at));
+}
+
+/** How long a payment gone out after it waited is said Sent, at most. */
+export const WENT_FOR_MS = 15 * 60_000;
+
+/**
+ * Forgets the payments said Sent on Home after they waited, of one wallet on
+ * one node, whose transaction's done and the balance read since: its record
+ * among the wallet's sends final, or gone from them as the chain's history
+ * has it now; and any said Sent longer than WENT_FOR_MS. Nothing where the
+ * sends couldn't be read (`txs` null), or the balance wasn't; nor of one gone
+ * out after the sends began to be read (`read`, sendsReadBegins), which they
+ * can't have (Lena's: gone out as Home read the wallet, it went from Home by
+ * the sends read before, and was in neither for 20 s).
+ * @param {{ walletId: string, nodeUrl: string }} of
+ * @param {Array<{ hash?: string, status?: string }> | null} txs - the wallet's sends, read before the balance
+ * @param {{ balanceRead?: boolean, read?: number }} [opts] - whether the balance was read after them, and
+ *   when their read began, as sendsReadBegins said: now where it's not said
+ */
+export async function forgetWent({ walletId, nodeUrl }, txs, { balanceRead = true, read = steps } = {}) {
+  await writes;
+  const kept = await readKept().catch(() => ({}));
+  const status = new Map((Array.isArray(txs) ? txs : []).map((tx) => [String(tx?.hash ?? ""), String(tx?.status ?? "")]));
+  const now = Date.now();
+  const done = (record) => {
+    if (now - Number(record.went) > WENT_FOR_MS) return true;
+    if (!Array.isArray(txs) || !balanceRead || (wentAfter.get(record.sendId) ?? 0) > read) return false;
+    const said = status.get(String(record.hash));
+    return said === undefined || ["executed", "failed", "removed"].includes(said);
+  };
+  const gone = Object.values(kept)
+    .filter((record) => record?.went && record.walletId === walletId && record.nodeUrl === nodeUrl && done(record))
+    .map((record) => record.sendId);
+  if (!gone.length) return;
+  await changeKept((all) => {
+    for (const sendId of gone) if (all[sendId]?.went) delete all[sendId];
+  });
+  for (const sendId of gone) wentAfter.delete(sendId);
 }
 
 /**
@@ -909,7 +981,7 @@ export async function followHandedOver(host, { every = 0 } = {}) {
     await writes;
     const kept = await readKept().catch(() => ({}));
     for (const record of Object.values(kept)) {
-      if (!record?.hash || active(record.sendId)) continue;
+      if (!record?.hash || record.went || active(record.sendId)) continue;
       try {
         // Still being handed over: neither said not sent nor followed, till it's done.
         if (typeof host.underWay === "function" && (await Promise.resolve().then(() => host.underWay(record.sendId)).catch(() => false))) continue;

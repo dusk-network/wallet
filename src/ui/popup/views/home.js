@@ -11,7 +11,7 @@ import { balance, balancesHidden } from "../../components/Balance.js";
 import { keptSendDraft } from "../../lib/sendDraft.js";
 import { shortAddress } from "../../lib/strings.js";
 import { contactNameText } from "../../lib/contactNames.js";
-import { reviewContextOf, unsentOf, waitingOf } from "../../lib/waiting.js";
+import { reviewContextOf, unsentOf, waitingOf, wentOf } from "../../lib/waiting.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { NOT_SENT_TEXT, SENT_MEANWHILE_TEXT } from "../../../shared/waitingSends.js";
@@ -327,7 +327,8 @@ function staleNote(ov, hasBalance) {
 
 /**
  * The payments from Send that wait for the network, each with what it pays,
- * to whom, its memo and when it was made, to tell them apart, and Cancel; and
+ * to whom, its memo and when it was made, to tell them apart, and Cancel;
+ * those that went out after they waited, as Sent till their block's in; and
  * those that stopped waiting without going out, said plainly, with Send it
  * now, which takes it straight to Review, and Don't send. None goes out by
  * itself once it's said not sent, and each is said until it's sent again and
@@ -337,7 +338,8 @@ function staleNote(ov, hasBalance) {
 function waitingSection(ov, { state, actions } = {}) {
   const waiting = waitingOf(ov);
   const unsent = unsentOf(ov);
-  if (!waiting.length && !unsent.length) return null;
+  const went = wentOf(ov);
+  if (!waiting.length && !unsent.length && !went.length) return null;
   const hidden = balancesHidden(ov);
   const contacts = Array.isArray(state?.addressBook?.items) ? state.addressBook.items : [];
   // To whom: a contact's name, your own profile's, the .dusk name it was sent to, or the address.
@@ -471,7 +473,12 @@ function waitingSection(ov, { state, actions } = {}) {
       ]),
     ]);
 
-  return h("div", { class: "home-waiting-list" }, [...waiting.map(waitingBox), ...unsent.map(unsentBox)]);
+  // Gone out after it waited: Sent, till its block's in and the balance read
+  // since (Lena's: no card, no payment and the old balance for 20 s as it went).
+  const wentBox = (send) =>
+    h("div", { class: "callout home-waiting home-waiting--went", role: "status" }, [h("div", { class: "callout-title" }, ["Sent: ", ...what(send)]), madeLine(send)]);
+
+  return h("div", { class: "home-waiting-list" }, [...waiting.map(waitingBox), ...went.map(wentBox), ...unsent.map(unsentBox)]);
 }
 
 /**

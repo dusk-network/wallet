@@ -69,7 +69,7 @@ import {
 } from "../shared/txStore.js";
 import { sendingProfile, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
-import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendHeld, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, forgetWent, noteHandingOver, reviewedParams, sendHeld, sendsReadBegins, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import { SEND_PASSWORD_COMMANDS, assertScreenWallet, engineContactsVault, handleUiCommand, sendParams } from "../wallet/uiCommands.js";
@@ -207,7 +207,8 @@ async function lastSend() {
   const [sent] = records.filter((tx) => Number(tx.submittedAt) >= since);
   const kept = await lastSendOf({ walletId, nodeUrl }).catch(() => null);
   const keptRecord = kept ? records.find((tx) => tx.hash === kept.hash) : null;
-  const waiting = (await waitingSendsOf({ walletId, nodeUrl }).catch(() => [])).filter((send) => Number(send.at) >= since).at(-1);
+  // Not one gone out after it waited: its record among the sends says it.
+  const waiting = (await waitingSendsOf({ walletId, nodeUrl }).catch(() => [])).filter((send) => !send.went && Number(send.at) >= since).at(-1);
   const last = [
     sent && { at: Number(sent.submittedAt), state: String(sent.status ?? "submitted") },
     kept && Number(kept.at) >= since && { at: Number(kept.at), state: String(keptRecord?.status ?? kept.state) },
@@ -1411,8 +1412,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // to provide MetaMask-like feedback instead of
         // ephemeral toasts.
         let txs = [];
+        let txsRead = false;
+        // A payment gone out after this read began can't be among them (forgetWent).
+        const txsReadBegan = sendsReadBegins();
         try {
           txs = status?.isUnlocked ? await listTxs({ nodeUrl: settings.nodeUrl, walletId }) : [];
+          txsRead = true;
         } catch {
           txs = [];
         }
@@ -1539,6 +1544,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
               { stakeRead: staked !== null }
             ).catch(() => ({}))
           : {};
+
+        // A payment said Sent on Home after it waited goes once its block's
+        // in, by the sends read above, and the balance was read after them.
+        if (status.isUnlocked) {
+          await forgetWent({ walletId: String(status.accounts?.[0] ?? ""), nodeUrl: settings.nodeUrl }, txsRead ? txs : null, { balanceRead: Boolean(balance) && !balanceError, read: txsReadBegan }).catch(() => {});
+        }
 
         sendResponse({
           hasVault: Boolean(vault),

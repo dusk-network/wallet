@@ -50,6 +50,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Made Try again the one button after a check of the recovery words that didn't match, with Show my recovery words a small link apart below it.
 - Said Paid, or Paid twice, with when beside a paid request's Copy and Share, which ask on its card first, "This request was paid already, on …", with Copy anyway or Share anyway and Cancel; and asked the same before Receive's form gives out a request paid already, rather than a toast after.
 - Named Receive's buttons by what they give, Copy address and Share address, Copy request and Share request, with a request's Copy and Share first while it's made, the address's below the form.
+- Kept a payment that waited on Home as it went out, as Sent, till its block is in and the balance read after, rather than in neither Home nor Activity for a while.
 - Named the payer's memo in the Android app's notice for money that came in.
 - Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
 - Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.

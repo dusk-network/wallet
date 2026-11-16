@@ -1,7 +1,7 @@
-// The payments from Send the overview lists as waiting for the network, or
-// as not sent (shared/waitingSends.js), for the profile shown: what Home
-// lists, what Send's Available and Max leave out, and what Review says is
-// waiting already.
+// The payments from Send the overview lists as waiting for the network, as
+// not sent, or as gone out after they waited (shared/waitingSends.js), for
+// the profile shown: what Home lists, what Send's Available and Max leave
+// out, and what Review says is waiting already.
 
 import { safeBigInt } from "../../shared/amount.js";
 
@@ -26,7 +26,10 @@ const ofProfile = (ov) =>
 export const waitingOf = (ov) => ofProfile(ov).filter((send) => send.waiting);
 
 /** The profile's payments that stopped waiting without going out. */
-export const unsentOf = (ov) => ofProfile(ov).filter((send) => !send.waiting);
+export const unsentOf = (ov) => ofProfile(ov).filter((send) => !send.waiting && !send.went);
+
+/** The profile's payments gone out after they waited, said Sent till their block's in. */
+export const wentOf = (ov) => ofProfile(ov).filter((send) => !send.waiting && send.went);
 
 /**
  * What the payments waiting to go out from the profile's public or shielded
