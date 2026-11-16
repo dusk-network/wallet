@@ -1349,6 +1349,8 @@ const netMenu = createNetworkMenuController({
       });
 
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to switch network");
+      // Picked on the setup screen, before there's a wallet: Import wallet has it picked.
+      if (!state.overview?.hasVault) state.setupNetwork = preset.id;
 
       showToast(`Switched to ${preset.label}`);
       state.needsRefresh = true;

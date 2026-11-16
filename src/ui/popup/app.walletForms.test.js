@@ -354,6 +354,78 @@ describe("Import wallet's network", () => {
     expect([t.state.route, overview.nodeUrl]).toEqual(["home", "https://testnet.nodes.dusk.network"]);
   });
 
+  // Lena's and Chen's, in the app: Testnet picked on the setup screen, the import page had neither picked, and Enter
+  // after the password went back up to "Choose Mainnet or Testnet."; Sofía's: so after Go back and in again.
+  it("has the network picked on the setup screen, or Testnet, which is only ever picked, picked as it opens, still changeable", async () => {
+    const messages = [];
+    const answer = async (message) => {
+      messages.push(message);
+      if (message.type === "DUSK_UI_SET_NODE_URL") Object.assign(overview, { nodeUrl: message.nodeUrl, networkName: message.nodeUrl.includes("testnet") ? "Testnet" : "Mainnet" });
+      return { ok: true };
+    };
+    const onboard = { mode: "import", mnemonic: null, password: "", reveal: false };
+    const mainnet = { hasVault: false, isUnlocked: false, accounts: [], accountCount: 0, wallets: [], walletKey: null, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" };
+    const testnet = { ...mainnet, networkName: "Testnet", nodeUrl: "https://testnet.nodes.dusk.network" };
+    const tabs = (t) => t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]').map((tab) => tab.getAttribute("aria-selected"));
+
+    // On Testnet: picked. Enter after the password imports there, with nothing to choose first.
+    let t = await popupAt("onboard_import", { onboard: { ...onboard } }, answer, testnet);
+    expect(tabs(t)).toEqual(["false", "true"]);
+    const names = [...WORDS.map((_, i) => `Word ${i + 1}`), "Password", "Confirm password"];
+    typeAll(fieldsOf(t.app, names));
+    button(t.app, "Import wallet").click();
+    await flush();
+    expect(t.app.querySelectorAll(".form-error, [role=alert]").map((el) => el.textContent).filter(Boolean)).not.toContain("Choose Mainnet or Testnet.");
+    expect(messages.filter((m) => m.type === "DUSK_UI_CREATE_WALLET")).toHaveLength(1);
+
+    // Mainnet, the wallet's first network: picked only where it was picked, on the setup screen or here before.
+    t = await popupAt("onboard_import", { onboard: { ...onboard }, setupNetwork: null }, answer, mainnet);
+    expect(tabs(t)).toEqual(["false", "false"]);
+    t = await popupAt("onboard_import", { onboard: { ...onboard }, setupNetwork: "mainnet" }, answer, mainnet);
+    expect(tabs(t)).toEqual(["true", "false"]);
+    // Still changeable, and what's picked here stays picked for the next time in.
+    t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]')[1].click();
+    await flush();
+    expect([tabs(t), t.state.setupNetwork]).toEqual([["false", "true"], "testnet"]);
+  });
+
+  it("keeps the network picked on the setup screen's network menu for Import wallet", async () => {
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    dom.document.body.innerHTML = "";
+    const pill = dom.document.createElement("button");
+    pill.id = "network-pill";
+    pill.className = "network-pill";
+    const label = dom.document.createElement("span");
+    label.className = "network-pill__label";
+    pill.appendChild(label);
+    const actions = dom.document.createElement("div");
+    actions.id = "header-actions";
+    const app = dom.document.createElement("div");
+    app.id = "app";
+    dom.document.body.append(pill, actions, app);
+    vi.stubGlobal("browser", { runtime: { id: "dusk-wallet", sendMessage: () => {}, onMessage: { addListener: () => {} } } });
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    send.mockReset();
+    const fresh = { hasVault: false, isUnlocked: false, accounts: [], wallets: [], walletKey: null, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" };
+    send.mockImplementation(async (message) => {
+      if (message.type === "DUSK_UI_SET_NODE_URL") Object.assign(fresh, { nodeUrl: message.nodeUrl, networkName: "Testnet" });
+      return message.type === "DUSK_UI_OVERVIEW" ? fresh : { ok: true };
+    });
+    const { state } = await import("./state.js");
+    Object.assign(state, { route: "onboard_welcome" });
+    const { render } = await import("./app.js");
+    await render();
+    await flush();
+    pill.click();
+    dom.document.body
+      .querySelectorAll(".net-menu [role=menuitemradio]")
+      .find((el) => el.querySelector(".net-menu-item-label").textContent === "Testnet")
+      .click();
+    await flush();
+    expect(state.setupNetwork).toBe("testnet");
+  });
+
   it("asks nothing on another network picked before, nor beside other wallets, where the top bar names it", async () => {
     const devnet = { hasVault: false, isUnlocked: false, accounts: [], wallets: [], walletKey: null, networkName: "Devnet", nodeUrl: "https://devnet.nodes.dusk.network" };
     let t = await popupAt("onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, async () => ({}), devnet);

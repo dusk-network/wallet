@@ -536,19 +536,23 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
 // Import wallet's network, Mainnet or Testnet, the ones people hold DUSK on,
 // each saying what its DUSK is (real, or test DUSK with no value): none is
 // picked to begin with, and Import waits till one is, so a phrase
-// used on Testnet doesn't open on Mainnet with nothing in it. Picking one
+// used on Testnet doesn't open on Mainnet with nothing in it; but the one
+// picked on the setup screen's network menu, or here before (`state.setupNetwork`),
+// is, and Testnet, which the wallet is on only by a choice (Lena's and
+// Chen's: Testnet picked there, here neither was, and Enter after the
+// password went back up to "Choose Mainnet or Testnet."). Picking one
 // moves the wallet there, as the network menu does, and keeps what's typed.
 // On another network, picked before in Settings, nothing's asked: the top bar
 // names it. `setDisabled` holds it while the wallet is made; `picked` says
 // whether one was, and says to pick one where none was.
 const NETWORK_DUSK = Object.freeze({ mainnet: "real DUSK", testnet: "test DUSK, no value" });
-function networkChoice(ov, actions) {
+function networkChoice(ov, actions, state) {
   const on = detectPresetId({ nodeUrl: ov?.nodeUrl, proverUrl: ov?.proverUrl, archiverUrl: ov?.archiverUrl });
   if (!ov?.nodeUrl || (on !== "mainnet" && on !== "testnet")) return null;
   const offered = NETWORK_PRESETS.filter((preset) => preset.id === "mainnet" || preset.id === "testnet");
   const host = h("div", { class: "onboard-network" });
   const err = formError();
-  let picked = null;
+  let picked = state?.setupNetwork === on || on === "testnet" ? on : null;
   let busy = false;
   let held = false;
   const draw = () =>
@@ -573,6 +577,7 @@ function networkChoice(ov, actions) {
       const res = await actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: preset.nodeUrl, proverUrl: preset.proverUrl, archiverUrl: preset.archiverUrl });
       if (res?.error) throw new Error(res.error.message ?? `Couldn't switch to ${preset.label}`);
       picked = id;
+      if (state) state.setupNetwork = id;
     } catch (e) {
       err.show(e?.message ?? String(e));
     } finally {
@@ -752,7 +757,7 @@ export function onboardingImportView({ state, actions, adding = false, ov } = {}
     adding,
     landing: adding ? walletLanding(ov) : null,
     // The first wallet's: one added opens on the network the others are on, named in the top bar.
-    network: adding ? null : networkChoice(ov, actions),
+    network: adding ? null : networkChoice(ov, actions, state),
     title: "Import wallet",
     verb: "Import wallet",
     busyVerb: "Importing…",

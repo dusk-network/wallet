@@ -52,18 +52,37 @@ function stripOf(name, { nodeUrl, chainId, refusal, proverUrl, archiverUrl }) {
 export function syncTestnetStrip(host, name, { nodeUrl = "", chainId = null, refusal = "", proverUrl = "", archiverUrl = "" } = {}) {
   if (!host) return null;
   const current = host.querySelector(".testnet-strip");
+  const was = heightOf(current);
   const strip = stripOf(name, { nodeUrl, chainId, refusal, proverUrl, archiverUrl });
   if (!strip) {
     current?.remove();
+    keepStill(host, -was);
     return null;
   }
   if (current) {
     if (current.textContent !== strip.text) current.textContent = strip.text;
     if (current.className !== strip.className) current.className = strip.className;
     if (current.getAttribute("role") !== strip.role) current.setAttribute("role", strip.role);
+    keepStill(host, heightOf(current) - was);
     return current;
   }
   const el = h("div", { class: strip.className, role: strip.role, text: strip.text });
   host.insertBefore(el, host.firstChild);
+  keepStill(host, heightOf(el));
   return el;
+}
+
+const heightOf = (el) => Number(el?.getBoundingClientRect?.().height) || 0;
+
+// The strip came, went or changed height as the person was at something on
+// the page (Chen's, in the app: Testnet picked on Import, the form went down
+// under her thumb as its strip came, her tap for box 1 landing on its hint):
+// what they were at stays where it was on the screen.
+function keepStill(host, grew) {
+  const doc = host.ownerDocument ?? globalThis.document;
+  const at = doc?.activeElement;
+  if (!grew || !at || at === doc.body || !host.contains(at)) return;
+  const panel = host.querySelector(".panel-content");
+  const scroller = panel && panel.scrollHeight > panel.clientHeight ? panel : doc.scrollingElement;
+  if (scroller) scroller.scrollTop += grew;
 }
