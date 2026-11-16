@@ -43,12 +43,13 @@ import {
   duskNameErrorText,
   duskNameRecipient,
   duskNamesNetwork,
+  duskNamesOwners,
   lookupDuskName,
   lookupPrimaryName,
 } from "../../../shared/duskNames.js";
 
 import { openQrScanModal } from "../../components/QrScanModal.js";
-import { forgetRequestLink, readPastedRequest, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
+import { forgetRequestLink, pastedRequestNames, readPastedRequest, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
@@ -124,6 +125,12 @@ function waitingAgainWords(ov, { lux, masked, to, memo, name = "", time }) {
     ` DUSK to ${own ? "yourself" : name || shortAddress(to)}${memo.trim() ? " with this memo" : ""}, made ${whenAtText(time)}.`,
   ];
 }
+
+// A shared request whose .dusk names are being looked up before it's read
+// (pastedRequestNames), through redraws of Send: on the draft it began on,
+// which a change to To, Amount or Memo, or leaving Send, replaces. One at a
+// time.
+let pasteReading = null;
 
 export function sendFormView(ov, { state, actions } = {}) {
   // A request for another network leaves nothing of itself here, whether it
@@ -213,6 +220,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     value: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
     masked: hidden && Boolean(draft.amountMasked),
     onInput: () => {
+      stopReading();
       checkAmount();
       syncDraft();
     },
@@ -249,6 +257,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     onclick: () => {
       const maxLux = getMaxAmountLux();
       if (maxLux == null || maxLux <= 0n) return;
+      stopReading();
       // The real amount, which gets sent, shown as dots with balances hidden.
       field.setValue(formatLuxForInput(maxLux), { masked: hidden });
       checkAmount();
@@ -453,9 +462,51 @@ export function sendFormView(ov, { state, actions } = {}) {
   // pasted in To is read as a paste (readPastedRequest): a shared request's
   // message by its link; a QR code's, as the link it holds.
   const looksLikeRequest = (text) => readPastedRequest(text, ov?.nodeUrl) !== null;
+
+  // A shared request's .dusk names, looked up on the wallet's network before
+  // it fills anything in, as the web wallet does: "sofiadesign.dusk asks
+  // you…" over another account's link is refused (readPastedRequest's
+  // `owners`), and a name whose lookup failed says nothing. Meanwhile To says
+  // so and Review waits. To, Amount or Memo changed meanwhile comes first:
+  // the paste fills in nothing.
+  const readingHere = () => Boolean(pasteReading) && pasteReading.draft === state.draft && pasteReading.context === state.context;
+  const sayReading = () => {
+    reviewOff(true);
+    showNameBox([h("div", { class: "muted", role: "status", text: `Looking up ${pasteReading.names.join(", ")}…` })]);
+  };
+  const stopReading = () => {
+    if (!pasteReading) return;
+    pasteReading = null;
+    showNameBox([]);
+    reviewOff(false);
+  };
+  const awaitReading = (reading) => {
+    reading.owners.then((owners) => {
+      // Stopped, or the draft, wallet, profile, network or screen changed, or Send was drawn again.
+      if (pasteReading !== reading || !readingHere() || state.route !== "send" || !to.isConnected) return;
+      stopReading();
+      const read = readPastedRequest(reading.text, ov?.nodeUrl, { owners });
+      if (read) applyRequest(read, { source: "request" });
+      toBefore = String(to.value ?? "");
+    });
+  };
+  const readWithNames = (text, names) => {
+    if (readingHere() && pasteReading.text === text) return "reading";
+    // The draft it's read for, as the form holds it now.
+    state.draft = { ...(state.draft || {}) };
+    const owners = duskNamesOwners(names, { nodeUrl: ov?.nodeUrl }).catch(() => new Map());
+    pasteReading = { text, names, draft: state.draft, context: state.context, owners };
+    sayReading();
+    awaitReading(pasteReading);
+    return "reading";
+  };
+
   const maybeDecodeRequest = (raw, { source = "request" } = {}) => {
     const s = String(raw || "").trim();
     if (!s) return false;
+    const names = source === "qr" ? [] : pastedRequestNames(s, ov?.nodeUrl);
+    if (names.length) return readWithNames(s, names);
+    stopReading();
     const read = source === "qr" ? readRequestLink(s, ov?.nodeUrl) : readPastedRequest(s, ov?.nodeUrl);
     if (read) return applyRequest(read, { source });
     if (source !== "qr") return false;
@@ -804,6 +855,11 @@ export function sendFormView(ov, { state, actions } = {}) {
   };
 
   const updateToType = () => {
+    // A paste being read says so till it's read.
+    if (readingHere()) {
+      sayReading();
+      return;
+    }
     // Whatever Review said was about what was here before.
     setErr("");
     to.value = joinedAddress(to.value || "");
@@ -973,6 +1029,8 @@ export function sendFormView(ov, { state, actions } = {}) {
   // What To held before this input, to tell a link put in whole from one typed.
   let toBefore = String(to.value ?? "");
   function onRecipientInput(e) {
+    // Another recipient, typed or put in: a paste being read fills in nothing.
+    stopReading();
     const now = String(to.value ?? "");
     const whole = /^insertFrom/.test(String(e?.inputType ?? "")) || now.length - toBefore.length > 1;
     toBefore = now;
@@ -991,6 +1049,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   }
   to.addEventListener("input", onRecipientInput);
   memo.addEventListener("input", () => {
+    stopReading();
     checkMemo();
     syncDraft();
   });
@@ -1089,7 +1148,10 @@ export function sendFormView(ov, { state, actions } = {}) {
         // one for another network, or that can't be read, says why under the
         // field, and goes no further.
         const rawTo = to.value.trim();
-        if (looksLikeRequest(rawTo) && maybeDecodeRequest(rawTo, { source: "request" }) === "refused") return;
+        // A paste's .dusk names still being looked up: it's read first.
+        if (readingHere()) return;
+        const decoded = looksLikeRequest(rawTo) ? maybeDecodeRequest(rawTo, { source: "request" }) : false;
+        if (decoded === "refused" || decoded === "reading") return;
 
         const toVal = to.value.trim();
         // A link refused says why under the field already: that's all.
@@ -1174,6 +1236,10 @@ export function sendFormView(ov, { state, actions } = {}) {
 
   // Runs once the Review button exists, since a .dusk name toggles it.
   updateToType();
+  // A paste still being read as Send is drawn again goes on here; one for
+  // another draft is over.
+  if (readingHere()) awaitReading(pasteReading);
+  else pasteReading = null;
   // A link already paid says so as it opens.
   sayAgain();
   // The node's gas price, as Review asks it: the fee and Max from it.

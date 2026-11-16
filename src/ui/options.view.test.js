@@ -274,6 +274,12 @@ describe("profile names", () => {
         await name(2, typed);
         expect([shownError(2), question(2)], typed).toEqual(["That looks like sofiadesign.dusk, which belongs to another account. Choose another name.", []]);
       }
+      // Marek's, the round after that: "sofiadesign·dusk", a middle dot, saved without a word, and History then filed
+      // his transfers under it, right above Sofía's; so after any point that reads as a full stop.
+      for (const point of ["\u00b7", "\u2022", "\uff0e", "\u3002", "\uff61", "\u2027", "\u2219"]) {
+        await name(2, `sofiadesign${point}dusk`);
+        expect([shownError(2), question(2)], point).toEqual(["That looks like sofiadesign.dusk, which belongs to another account. Choose another name.", []]);
+      }
       expect(setAccountName).not.toHaveBeenCalled();
       // This profile's own: saved, nothing asked.
       await name(2, "mine.dusk");

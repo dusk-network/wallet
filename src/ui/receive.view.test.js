@@ -688,6 +688,33 @@ describe("the requests made here", () => {
     for (const key of Object.keys(items)) delete items[key];
   });
 
+  // Amélie's: Lucas's new request said "Check it's this one" of a payment she'd made two minutes before he asked.
+  // Sofía's: an unpaid invoice said "Check" for an hour as another invoice of the same amount was paid.
+  it("counts no payment made before a request was asked, nor one whose memo is another request's, for it", async () => {
+    items[KEY] = {
+      [ACCOUNT]: [
+        kept({ id: "tulips", lux: "10000000", memo: "Les tulipes de dimanche", at: T0 + 2 * 60_000 }),
+        kept({ id: "f101", lux: "30000000", memo: "Factura F-2026-101", at: T0 + HOUR }),
+        kept({ id: "f102", lux: "30000000", memo: "Factura F-2026-102", at: T0 + HOUR + 60_000 }),
+      ],
+    };
+    const entries = [
+      // Two minutes before Lucas asked: same amount, another memo.
+      paidIn("b1".repeat(32), "10000000", "Wi-Fi coupé r35", T0, 4_687_000),
+      // F-2026-102 paid, the same amount as F-2026-101.
+      paidIn("b2".repeat(32), "30000000", "Factura F-2026-102", T0 + 2 * HOUR, 4_687_700),
+    ];
+    const state = { receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
+    await draw(state);
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toContain("Paid"));
+    const byMemo = Object.fromEntries(dom.document.body.querySelectorAll(".request-row").map((row) => [visibleText(row.querySelector(".request-row__memo")), visibleText(row.querySelector(".request-state"))]));
+    expect(byMemo).toEqual({
+      "“Les tulipes de dimanche” · ": "Waiting",
+      "“Factura F-2026-101” · ": "Waiting",
+      "“Factura F-2026-102” · ": "Paid",
+    });
+  });
+
   it("keeps a request as its link is copied, once, and lists it as waiting", async () => {
     const state = { receive: { tab: "public", requestOpen: true, amountDusk: "1.25", memo: "Factura 33" } };
     await draw(state);

@@ -218,8 +218,8 @@ describe("contacts", () => {
   it("won't save a contact named like a .dusk name it isn't saved from", async () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list" });
     typeInto(view.field("Address"), ACCOUNT);
-    // Marek's: a .dusk name in small capitals, or after a fullwidth point, passed too.
-    for (const name of ["alice.dusk", "ALICE.Dusk", " alice.dusk ", "alice.dusk.", "alice.\u1d05\u1d1c\ua731\u1d0b", "alice\uff0edusk"]) {
+    // Marek's: a .dusk name in small capitals, or after a fullwidth point, passed too; then after a middle dot.
+    for (const name of ["alice.dusk", "ALICE.Dusk", " alice.dusk ", "alice.dusk.", "alice.\u1d05\u1d1c\ua731\u1d0b", "alice\uff0edusk", "alice\u00b7dusk", "alice\u3002dusk", "alice\u2022dusk"]) {
       typeInto(view.field("Name"), name);
       view.button("Save").click();
       await settle();

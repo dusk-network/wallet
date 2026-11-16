@@ -59,6 +59,9 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Said within about 10 seconds that the figures may be out of date once the node stops answering, asking it every 4 seconds as the web wallet does.
 - Read Rewards by year again as soon as a stake or an unstake with Sozu goes through.
 - Said in the Android app that a payment waiting for the network goes out once it's opened again, and that it'll be asked to be sent if Android closes the app first, and named a payment's memo in its notice that it arrived.
+- Refused a pasted share message whose line says another amount, memo, network or name than its link, a .dusk name looked up first, saying "The message and its link don't agree.", and a pasted link with a word or a space after it, whatever field it ends with, saying so.
+- Took a point that reads as a full stop, as in sofiadesign·dusk, for the .dusk name it imitates, in profile and contact names.
+- Counted for a request no payment made before it was asked, nor one whose memo is another of the requests'.
 - Named the payer's memo in the Android app's notice for money that came in.
 - Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
 - Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.
