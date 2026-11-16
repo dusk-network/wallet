@@ -45,6 +45,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Held a payment that waited for the network where its account sent something else meanwhile, saying so with Send it too and Don't send, rather than sending it by itself.
 - Named the payer's memo in the Android app's notice for money that came in.
 - Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
 - Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.

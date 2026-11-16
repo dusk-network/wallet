@@ -25,7 +25,7 @@ import {
   executionEventOk,
   waitForTxExecution,
 } from "../shared/txExecution.js";
-import { classifyTxPresence, finalizedTxMetadata, handedOverState } from "../shared/txLifecycle.js";
+import { accountNonce, accountNonceNow, classifyTxPresence, finalizedTxMetadata, handedOverState } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx } from "../shared/txReconcile.js";
 import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.js";
 import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
@@ -38,7 +38,7 @@ import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import { formatDusk } from "../shared/amount.js";
 import { shortAddress } from "../ui/lib/strings.js";
-import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingForNetwork, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendHeld, sendWhenReachable, stopWaitingSends, waitingForNetwork, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import {
@@ -69,6 +69,7 @@ import {
   resendSend,
   forgetHandedOver,
   sendUnderWay,
+  lastOwnNonce,
   setHandOverHook,
   selectAccountIndex,
   setShieldedCheckpointNow,
@@ -194,6 +195,11 @@ const waitingHost = {
   check: (record) => handedOverState(record.nodeUrl, record),
   release: async (sendId) => forgetHandedOver({ sendId }),
   underWay: async (sendId) => sendUnderWay({ sendId })?.underWay === true,
+  // Whether the account sent something else while one waited: its nonce on
+  // the node now, and the last the wallet's own sends took.
+  nonceNow: (record) => accountNonceNow(record.nodeUrl, record.account),
+  chainNonce: (record) => accountNonce(record.nodeUrl, record.account),
+  ownNonce: async (record) => lastOwnNonce({ profileIndex: Number(record.profileIndex) || 0 }).nonce,
   // Handed to the node: kept as a sent one, from when it was made, and looked
   // up by its ID at once; `unclear`, as a send with no clear answer.
   follow: async ({ record, hash, unclear = false }) => {
@@ -791,6 +797,11 @@ export async function localSend(message) {
     // whether it was called off before it went out.
     if (message?.type === "DUSK_UI_CANCEL_SEND") {
       return { ok: true, result: { cancelled: await cancelWaitingSend(String(message.sendId ?? ""), waitingHost) } };
+    }
+
+    // Send it too, on a payment held as its account sent something else while it waited.
+    if (message?.type === "DUSK_UI_SEND_HELD") {
+      return { ok: true, result: { sending: await sendHeld(String(message.sendId ?? ""), waitingHost) } };
     }
 
     // Don't send on a payment from Send that wasn't sent.

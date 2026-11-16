@@ -14,7 +14,7 @@ import { contactNameText } from "../../lib/contactNames.js";
 import { reviewContextOf, unsentOf, waitingOf } from "../../lib/waiting.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
-import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
+import { NOT_SENT_TEXT, SENT_MEANWHILE_TEXT } from "../../../shared/waitingSends.js";
 import { whenAtText } from "./txRow.js";
 import { UNCLEAR_TEXT, appLeaveText, reasonText } from "./sent.js";
 import { isTauriRuntime } from "../../../platform/runtime.js";
@@ -390,21 +390,42 @@ function waitingSection(ov, { state, actions } = {}) {
             : "It goes out once the network answers."
           : "";
   const titleOf = (send) => (sending(send) ? "Sending: " : send.unclear ? "Not confirmed: " : "Not sent yet: ");
+  // Its account sent something else while it waited (Chen's: one waiting on
+  // her first phone went out after she'd paid the same from her second): it
+  // goes only on Send it too.
+  const cancelled = (send, res) =>
+    actions?.showToast?.(
+      res?.result?.cancelled
+        ? { text: `Not sent: ${said(send)}. Nothing was sent and no fee was charged.`, tone: "ok" }
+        : res?.error
+          ? "Couldn't cancel it. Try again."
+          : "It went out already, so it can't be cancelled."
+    );
+  const heldBox = (send) =>
+    h("div", { class: "callout warn home-waiting home-waiting--held", role: "status" }, [
+      h("div", { class: "callout-title" }, ["Not sent yet: ", ...what(send)]),
+      madeLine(send),
+      h("p", { class: "muted home-waiting__note", text: SENT_MEANWHILE_TEXT }),
+      h("div", { class: "home-waiting__actions" }, [
+        button("Send it too", async () => {
+          const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_SEND_HELD", sendId: send.sendId })).catch(() => null);
+          if (!res?.result?.sending) actions?.showToast?.("Couldn't send it. Try again.");
+          refresh();
+        }),
+        button("Don't send", async () => {
+          cancelled(send, await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
+          refresh();
+        }),
+      ]),
+    ]);
   const waitingBox = (send) =>
-    h("div", { class: "callout home-waiting", role: "status" }, [
+    send.held ? heldBox(send) : h("div", { class: "callout home-waiting", role: "status" }, [
       h("div", { class: "callout-title" }, [titleOf(send), ...what(send)]),
       madeLine(send),
       waitingNote(send) ? h("p", { class: "muted home-waiting__note", text: waitingNote(send) }) : null,
       send.unclear ? null : h("div", { class: "home-waiting__actions" }, [
         button("Cancel", async () => {
-          const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null);
-          actions?.showToast?.(
-            res?.result?.cancelled
-              ? { text: `Not sent: ${said(send)}. Nothing was sent and no fee was charged.`, tone: "ok" }
-              : res?.error
-                ? "Couldn't cancel it. Try again."
-                : "It went out already, so it can't be cancelled."
-          );
+          cancelled(send, await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
           refresh();
         }),
       ]),
@@ -416,13 +437,14 @@ function waitingSection(ov, { state, actions } = {}) {
       madeLine(send),
       h("p", {
         class: "muted home-waiting__note",
-        text: NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
+        text: send.held ? SENT_MEANWHILE_TEXT : NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
       }),
       h("div", { class: "home-waiting__actions" }, [
         // Straight to Review, with what it pays: sent from there in its
-        // place, which it keeps till the payment's handed over.
+        // place, which it keeps till the payment's handed over. One held as
+        // its account sent something else, as it was held: Send it too.
         button(
-          "Send it now",
+          send.held ? "Send it too" : "Send it now",
           async () => {
             const lux = safeBigInt(send.lux, 0n);
             state.draft = {
@@ -439,7 +461,8 @@ function waitingSection(ov, { state, actions } = {}) {
             state.route = "confirm";
             actions?.render?.()?.catch?.(() => {});
           },
-          "btn-primary"
+          // Its account sent something else meanwhile: neither answer leads.
+          send.held ? "btn-outline" : "btn-primary"
         ),
         button("Don't send", async () => {
           await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: send.sendId })).catch(() => {});

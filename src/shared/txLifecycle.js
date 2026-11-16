@@ -101,14 +101,52 @@ export async function queryMempoolTxs(nodeUrl) {
   return Array.isArray(json?.mempoolTxs) ? json.mempoolTxs : [];
 }
 
-// An account's nonce, as the node's state has it now: the last one used.
-async function accountNonce(nodeUrl, account) {
+/**
+ * An account's nonce, as the node's chain has it now: the last one used. A
+ * new public transaction's is counted from it.
+ * @param {string} nodeUrl
+ * @param {string} account
+ * @returns {Promise<bigint>}
+ */
+export async function accountNonce(nodeUrl, account) {
   const url = new URL(`/on/account:${encodeURIComponent(String(account))}/status`, String(nodeUrl || "").trim()).toString();
   const res = await fetchWithTimeout(url, { method: "POST" }, 5_000);
   if (!res.ok) throw new Error(`Account request failed (${res.status})`);
   const nonce = decimal(losslessJson(await res.text())?.nonce);
   if (nonce === undefined) throw new Error("The node gave no nonce");
   return BigInt(nonce);
+}
+
+// A transaction's JSON as the node gives it, or null.
+function txJson(text) {
+  try {
+    return losslessJson(String(text ?? ""));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The account's nonce now, as the node has it: the last one its chain used,
+ * or, past that, the last of the account's transactions waiting in the
+ * node's mempool, where that can be read. A payment that waited tells by it
+ * whether its account sent anything else meanwhile (waitingSends.js).
+ * @param {string} nodeUrl
+ * @param {string} account
+ * @returns {Promise<bigint>}
+ */
+export async function accountNonceNow(nodeUrl, account) {
+  const [used, waiting] = await Promise.all([
+    accountNonce(nodeUrl, account),
+    queryMempoolTxs(nodeUrl).catch(() => []),
+  ]);
+  let nonce = used;
+  for (const tx of waiting) {
+    const said = txJson(tx?.json);
+    const its = decimal(said?.nonce);
+    if (said?.type === "moonlight" && String(said?.sender ?? "") === String(account) && its !== undefined && BigInt(its) > nonce) nonce = BigInt(its);
+  }
+  return nonce;
 }
 
 // The account's transactions read for the one at a nonce: those it sent from
@@ -142,12 +180,7 @@ async function nonceTakenBy(nodeUrl, { account, nonce, at }) {
     if (hashes.length) {
       const txs = await postGraphql(nodeUrl, `query { ${hashes.map((id, i) => `t${i}: tx(hash: ${JSON.stringify(id)}) { tx { json } }`).join(" ")} }`);
       for (const [i, id] of hashes.entries()) {
-        let said = null;
-        try {
-          said = losslessJson(String(txs?.[`t${i}`]?.tx?.json ?? ""));
-        } catch {
-          said = null;
-        }
+        const said = txJson(txs?.[`t${i}`]?.tx?.json);
         const its = decimal(said?.nonce);
         if (said?.type === "moonlight" && String(said?.sender ?? "") === String(account) && its !== undefined && BigInt(its) === want) return id;
       }

@@ -11,6 +11,9 @@ const mocks = vi.hoisted(() => ({
   classifyTxPresence: vi.fn(),
   // Where a payment handed over without a clear answer stands, as the node says it.
   handedOverState: vi.fn(async () => ({ state: "unknown" })),
+  // The account's nonce as the node has it now, its mempool's included.
+  accountNonceNow: vi.fn(async () => 41n),
+  accountNonce: vi.fn(async () => 41n),
   notifyTxExecuted: vi.fn(async () => true),
   requestUserApproval: vi.fn(async () => null),
   bindPendingWallet: vi.fn(() => true),
@@ -48,6 +51,8 @@ vi.mock("../shared/txLifecycle.js", async (importOriginal) => ({
   ...(await importOriginal()),
   classifyTxPresence: mocks.classifyTxPresence,
   handedOverState: mocks.handedOverState,
+  accountNonceNow: mocks.accountNonceNow,
+  accountNonce: mocks.accountNonce,
 }));
 
 vi.mock("../background/engineHost.js", () => ({
@@ -1234,6 +1239,53 @@ describe("background Phoenix tx lifecycle flow", () => {
         expect(sends()[1][1]).toMatchObject({ sendId: "send-0001", memo: "Hors ligne un" });
       } finally {
         mocks.nodeAnswers = true;
+        vi.useRealTimers();
+      }
+    });
+
+    // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
+    // its copy too once it had the network back, without asking.
+    it("holds a payment that waited where its account sent something else meanwhile, and sends it on Send it too", async () => {
+      const { engineCall } = await import("../background/engineHost.js");
+      const sends = () => engineCall.mock.calls.filter(([method]) => method === "dusk_sendTransaction");
+      engineCall.mockImplementation(async (method) => {
+        if (method === "dusk_lastOwnNonce") return { nonce: null };
+        if (method !== "dusk_sendTransaction") return true;
+        if (sends().length === 1) throw Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } });
+        return { hash: "0xtoo" };
+      });
+      const reviewed = { ...params, memo: "night shift 6", _approvalContext: { walletId: "acct0", profileIndex: 0, account: "acct0", nodeUrl: "https://testnet.nodes.dusk.network" } };
+      mocks.nodeAnswers = false;
+      // Paid from her other phone meanwhile: the account's nonce went on from the one Review read.
+      mocks.accountNonceNow.mockResolvedValue(42n);
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const response = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_SEND_TX", walletId: "acct0", sendId: "send-held-1", seenNonce: "41", params: reviewed }, {}, resolve));
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-held-1", waits: true }));
+        mocks.nodeAnswers = true;
+        await vi.advanceTimersByTimeAsync(5_000);
+        await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-held-1", waits: false, held: true }));
+        expect(mocks.accountNonceNow).toHaveBeenCalledWith("https://testnet.nodes.dusk.network", "acct0");
+        expect(engineCall).toHaveBeenCalledWith("dusk_lastOwnNonce", { profileIndex: 0 });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(sends()).toHaveLength(1);
+        const overview = new Promise((resolve) => mocks.listener({ type: "DUSK_UI_OVERVIEW" }, {}, resolve));
+        await vi.advanceTimersByTimeAsync(0);
+        expect((await overview).waitingSends).toEqual([expect.objectContaining({ sendId: "send-held-1", memo: "night shift 6", waiting: true, held: true })]);
+
+        // Send it too: out it goes once the chain has her other payment, never at its nonce (Astra's).
+        await expect(sendBackgroundMessage({ type: "DUSK_UI_SEND_HELD", sendId: "send-held-1" })).resolves.toEqual({ ok: true, result: { sending: true } });
+        await vi.advanceTimersByTimeAsync(10_000);
+        expect(sends()).toHaveLength(1);
+        expect(mocks.accountNonce).toHaveBeenCalledWith("https://testnet.nodes.dusk.network", "acct0");
+        mocks.accountNonce.mockResolvedValue(42n);
+        await vi.advanceTimersByTimeAsync(5_000);
+        await expect(response).resolves.toMatchObject({ ok: true, result: { hash: "0xtoo" } });
+        expect(sends()).toHaveLength(2);
+      } finally {
+        mocks.nodeAnswers = true;
+        mocks.accountNonceNow.mockResolvedValue(41n);
+        mocks.accountNonce.mockResolvedValue(41n);
         vi.useRealTimers();
       }
     });

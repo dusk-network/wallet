@@ -16,6 +16,7 @@ import { askSendPassword } from "../../components/SendPasswordDialog.js";
 import { SEND_PASSWORD_WAITS } from "../../../shared/errors.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { connectionLost, sendRefused, sentOf } from "../../../shared/sendOutcome.js";
+import { SENT_MEANWHILE_TEXT } from "../../../shared/waitingSends.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
 // with a toast: Sending while the wallet signs it and hands it to the network,
@@ -144,6 +145,14 @@ export function sentSteps(sent, ov) {
           .filter(Boolean)
           .join(" "),
       },
+      { label: "Sent to the network", state: "upcoming", sub: "" },
+      { label: "Completed", state: "upcoming", sub: "" },
+    ];
+  }
+  if (phase === "sending" && sent?.held) {
+    // Its account sent something else while it waited: it goes only on Send it too.
+    return [
+      { label: "Not sent yet", state: "unknown", sub: SENT_MEANWHILE_TEXT },
       { label: "Sent to the network", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
@@ -355,10 +364,13 @@ export async function sendFromReview({ state, actions, message, summary, backRou
     backRoute,
     doneRoute,
     // A payment that waits for the network, by which it's called off; whether
-    // it waits now; and whether it was handed over, from when it may have gone.
+    // it waits now; whether it was handed over, from when it may have gone;
+    // and whether it's held for Send it too, its account having sent
+    // something else meanwhile.
     sendId: canWait ? newSendId() : "",
     waits: false,
     handedOver: false,
+    held: false,
   };
   state.sent = sent;
   state.route = "sent";
@@ -403,6 +415,7 @@ export async function sendFromReview({ state, actions, message, summary, backRou
   } else {
     sent.phase = "sent";
     sent.waits = false;
+    sent.held = false;
     sent.status = "submitted";
     sent.hash = String(res.result?.hash ?? "");
     sent.sentAt = Date.now();
@@ -687,6 +700,46 @@ export function sentView(ov, { state, actions, sozu } = {}) {
           },
         })
       : null;
+  // Held, its account having sent something else while it waited: Send it
+  // too sends it as it would have gone, Don't send calls it off.
+  const held = phase === "sending" && sent.sendId && sent.held;
+  const heldActions = held
+    ? [
+        h("button", {
+          class: "btn-outline sent-secondary",
+          type: "button",
+          text: "Send it too",
+          onclick: async (event) => {
+            const button = event?.currentTarget;
+            if (button) button.disabled = true;
+            const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_SEND_HELD", sendId: sent.sendId })).catch(() => null);
+            if (res?.result?.sending) {
+              sent.held = false;
+              sent.waits = true;
+              if (state.sent === sent && state.route === "sent") actions?.render?.({ cached: true })?.catch?.(() => {});
+              return;
+            }
+            if (button) button.disabled = false;
+            actions?.showToast?.("Couldn't send it. Try again.");
+          },
+        }),
+        h("button", {
+          class: "btn-outline sent-secondary",
+          type: "button",
+          text: "Don't send",
+          onclick: async (event) => {
+            const button = event?.currentTarget;
+            if (button) button.disabled = true;
+            const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: sent.sendId })).catch(() => null);
+            // Called off, it says Not sent as the send's answer comes.
+            if (!res?.result?.cancelled) {
+              if (button) button.disabled = false;
+              actions?.showToast?.(res?.error ? "Couldn't cancel it. Try again." : "It went out already, so it can't be cancelled.");
+            }
+          },
+        }),
+      ]
+    : null;
   const explorer = explorerUrl
     ? h(
         "button",
@@ -706,7 +759,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
   // (noticeOffer). In the app on a phone, one waiting for the network goes
   // out only while the app's open, which it says.
   const waitsHere = phase === "sending" && (sent.waits || offline()) && !sent.handedOver;
-  const note = final || (isPhone() && !isTauriRuntime())
+  const note = final || held || (isPhone() && !isTauriRuntime())
     ? null
     : h("p", {
         class: "sent-note",
@@ -721,10 +774,10 @@ export function sentView(ov, { state, actions, sozu } = {}) {
     h("div", { class: "sent", "data-phase": phase, "data-status": status }, [
       head,
       note,
-      final ? null : noticeOffer({ state, actions }),
+      final || held ? null : noticeOffer({ state, actions }),
       stepper,
       details.children.length ? details : null,
-      h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : cancel ? [cancel, done] : [done, explorer]).filter(Boolean)),
+      h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : held ? [...heldActions, done] : cancel ? [cancel, done] : [done, explorer]).filter(Boolean)),
     ].filter(Boolean)),
   ];
 }

@@ -1501,6 +1501,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         toName: duskName?.name || undefined,
         // Sent again from Home's Send it now: in the place of the one it said wasn't sent.
         ...(d.replaces ? { replaces: String(d.replaces) } : {}),
+        // Its account's nonce as this Review read it: one that waits for the
+        // network goes out by itself only where nothing else went meanwhile.
+        ...(privacy === "public" && /^\d+$/.test(String(ov?.balance?.nonce ?? "")) ? { seenNonce: String(ov.balance.nonce) } : {}),
       },
       summary: {
         title: "Send",

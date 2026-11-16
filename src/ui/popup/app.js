@@ -821,8 +821,11 @@ function installTxStatusListener() {
           const sent = state.sent;
           // Handed over, it may have gone out from then on, whatever comes after.
           const handedOver = Boolean(msg.handedOver) && !sent?.handedOver;
-          if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && (sent.waits !== Boolean(msg.waits) || handedOver)) {
+          // Held for Send it too, its account having sent something else meanwhile.
+          const held = Boolean(msg.held);
+          if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && (sent.waits !== Boolean(msg.waits) || handedOver || Boolean(sent.held) !== held)) {
             sent.waits = Boolean(msg.waits);
+            sent.held = held;
             if (handedOver) sent.handedOver = true;
             if (state.route === "sent") {
               toaster.announce(sentAnnouncement(sent, state.overview));

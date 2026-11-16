@@ -31,6 +31,7 @@ import {
   resendSend,
   forgetHandedOver,
   sendUnderWay,
+  lastOwnNonce,
   selectAccountIndex,
   signAuth,
   signMessage,
@@ -502,6 +503,13 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // started again, asks before it says one wasn't sent.
         case "dusk_sendUnderWay": {
           sendResponse({ id, result: sendUnderWay(params ?? {}) });
+          return;
+        }
+
+        // The last nonce the wallet's own sends took, which a payment that
+        // waited counts as known before it goes out by itself.
+        case "dusk_lastOwnNonce": {
+          sendResponse({ id, result: lastOwnNonce(params ?? {}) });
           return;
         }
 

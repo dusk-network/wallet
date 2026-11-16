@@ -416,4 +416,45 @@ describe("payments from Send waiting for the network, on Home", () => {
     document.body.querySelectorAll(".home-waiting button").filter((b) => b.textContent === "Don't send")[1].click();
     await vi.waitFor(() => expect(actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_DROP_UNSENT", sendId: "s2" }));
   });
+
+  // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
+  // its copy too once it had the network back, without asking.
+  it("says one held as its account sent something else while it waited, with what it pays, Send it too and Don't send", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2, 40));
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
+    const sent = [];
+    const actions = {
+      render: vi.fn(async () => {}),
+      showToast: vi.fn(),
+      send: vi.fn(async (message) => {
+        sent.push(message);
+        return { ok: true, result: message.type === "DUSK_UI_SEND_HELD" ? { sending: true } : { cancelled: true } };
+      }),
+    };
+    const held = send({ waits: false, held: true });
+    const stopped = send({ sendId: "s2", memo: "Hors ligne deux", waiting: false, waits: false, ended: "locked", held: true });
+    document.body.replaceChildren(...homeView(ov([held, stopped]), { state, actions }));
+    expect(boxes(document)).toEqual([
+      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
+      "Not sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
+    ]);
+
+    // Send it too: it goes as it would have.
+    const buttons = () => document.body.querySelectorAll(".home-waiting button");
+    buttons()[0].click();
+    await vi.waitFor(() => expect(actions.render).toHaveBeenCalledWith({ forceRefresh: true }));
+    expect(sent).toEqual([{ type: "DUSK_UI_SEND_HELD", sendId: "s1" }]);
+    expect(actions.showToast).not.toHaveBeenCalled();
+    // Don't send: called off, and said.
+    buttons()[1].click();
+    await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+    expect(sent.at(-1)).toEqual({ type: "DUSK_UI_CANCEL_SEND", sendId: "s1" });
+    expect(actions.showToast).toHaveBeenCalledWith({ text: "Not sent: 0.01 DUSK to Lucas (petit-fils). Nothing was sent and no fee was charged.", tone: "ok" });
+    // One the wallet stopped as it waited for the answer: Send it too opens Review, as Send it now does.
+    buttons()[2].click();
+    await vi.waitFor(() => expect(state.route).toBe("confirm"));
+    expect(state.draft).toMatchObject({ to: LUCAS, amountLux: "10000000", memo: "Hors ligne deux", replaces: "s2" });
+  });
 });

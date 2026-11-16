@@ -1559,6 +1559,19 @@ export function sendUnderWay({ sendId } = {}) {
   return { underWay: handingOver.has(String(sendId ?? "")) };
 }
 
+/**
+ * The last nonce this wallet's own transactions took for a profile's public
+ * account on the network it's on, since the unlock: a payment that waited
+ * counts them as known, never as something else the account sent while it
+ * waited (waitingSends.js). Null where none did.
+ * @param {{ profileIndex?: number }} [params]
+ * @returns {{ nonce: string | null }}
+ */
+export function lastOwnNonce({ profileIndex } = {}) {
+  const kept = state.unlocked ? moonlightNonces.get(`${getNetworkKey()}|${getWalletId()}|${Number(profileIndex) || 0}`) : null;
+  return { nonce: kept == null ? null : kept.toString() };
+}
+
 // What's told of a payment from Send before it's handed to the node, on every
 // try: its send's ID, and its transaction's ID and nonce (waitingSends.js
 // keeps them with the payment, so one handed over is looked up by them, never
