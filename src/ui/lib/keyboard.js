@@ -263,6 +263,14 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
   // Where the focus goes next, if anywhere: another field keeps it so.
   doc.addEventListener("focusout", (e) => markSideways(e.relatedTarget ?? null));
   win.visualViewport?.addEventListener?.("resize", soon);
+  // Back from the phone's app switcher, the keyboard up again over the field
+  // still typed in, which says nothing of it (Marek's: a recovery-word box
+  // half behind it): above it again.
+  doc.addEventListener("visibilitychange", () => {
+    if (doc.visibilityState !== "hidden") soon();
+  });
+  win.addEventListener?.("focus", soon);
+  win.addEventListener?.("pageshow", soon);
   // Turned sideways or back: the room made for the keyboard the other way
   // round goes, and the page goes back where it was before the keyboard came;
   // a field still typed in goes above the keyboard again from there.

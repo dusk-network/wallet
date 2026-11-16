@@ -6,14 +6,21 @@
 // Tab the marked one; the arrow keys move the mark, and Escape puts them away
 // till the next letter. A word that's the only one, typed whole, needs none.
 // Letters that start no word are said to at once, in that row: Not a recovery
-// word. Only the box typed in has them, and they go as it's left.
+// word. Only the box typed in has them, and they go as it's left, and the
+// moment the page is hidden or loses the focus, as for a phone's app switcher,
+// coming back only as the box is typed in again (Marek's: Firefox's switcher
+// kept a card of the chips, the word being typed in clear beside its masked
+// box). In Firefox for Android, none: its switcher takes the card before the
+// page hears it's leaving, chips and all. What's said of letters that start
+// no word stays.
 //
 // They come from the list in the app, never the phone's keyboard, which
 // learns what's typed: nothing is sent, kept or logged. To a screen reader
 // the chips are a listbox under the box, the marked one its active option.
 
-import { isRecoveryWord, wordSuggestions } from "@dusk-network/app-core/recovery-words";
+import { wordSuggestions } from "@dusk-network/app-core/recovery-words";
 import { wordlist } from "@scure/bip39/wordlists/english";
+import { isFirefoxAndroid } from "../lib/device.js";
 import { h } from "../lib/dom.js";
 
 /** What's said under a box whose letters start no recovery word. */
@@ -23,6 +30,25 @@ export const NOT_A_WORD_TEXT = "Not a recovery word";
 const COLUMNS = 2;
 
 let made = 0;
+
+// The sets of suggestions showing now, put away together as the page is
+// hidden or loses the focus.
+const showing = new Set();
+let watched = null;
+function watchPage() {
+  const win = globalThis.window;
+  if (watched === win || typeof win?.addEventListener !== "function") return;
+  watched = win;
+  const putAway = () => {
+    for (const each of [...showing]) each.hide();
+  };
+  const doc = globalThis.document;
+  win.addEventListener("blur", putAway);
+  win.addEventListener("pagehide", putAway);
+  doc?.addEventListener?.("visibilitychange", () => {
+    if (doc.visibilityState === "hidden") putAway();
+  });
+}
 
 /**
  * Where the chips of the box at `i` go, of the `count` shown in a grid of
@@ -43,6 +69,7 @@ export const underBox = (cells, i, count) => ({ after: cells[Math.min(i - (i % C
  * @param {{ take: (input: HTMLInputElement, word: string, by: "tap" | "enter" | "tab") => void }} opts
  */
 export function createWordSuggestions({ take }) {
+  watchPage();
   const id = `srp-suggest-${++made}`;
   // Pressed, the row keeps the focus in the box, and a phone its keyboard.
   const list = h("div", { class: "srp-suggest", id, role: "listbox", "aria-label": "Suggested words", hidden: true, onmousedown: (e) => e.preventDefault?.() });
@@ -71,6 +98,7 @@ export function createWordSuggestions({ take }) {
   }
 
   function hide() {
+    showing.delete(api);
     if (!box && list.hidden && note.hidden) return;
     list.hidden = true;
     note.hidden = true;
@@ -92,7 +120,7 @@ export function createWordSuggestions({ take }) {
     if (input && word) take(input, word, by);
   }
 
-  return {
+  const api = {
     /**
      * A box of the set, told of its suggestions; a password box's role stays
      * its own, as ARIA has none other for it.
@@ -109,9 +137,9 @@ export function createWordSuggestions({ take }) {
 
     /**
      * What `input`, the box typed in, has under it, in a row after `after`
-     * (underBox): chips for what's typed in it (`typing`); as it's focused,
-     * only for a word not finished; and that its letters start no word.
-     * Whether they don't.
+     * (underBox): chips for what's typed in it, only as it's typed in
+     * (`typing`), never as it's focused again; and that its letters start no
+     * word. Whether they don't.
      * @param {HTMLInputElement} input
      * @param {{ after: HTMLElement, end?: boolean, typing?: boolean }} opts
      * @returns {{ none: boolean }}
@@ -121,7 +149,7 @@ export function createWordSuggestions({ take }) {
       const found = wordSuggestions(typed, wordlist);
       const none = [...typed].length >= 2 && found.length === 0;
       const whole = found.length === 1 && found[0] === typed.toLowerCase();
-      const next = !none && !whole && (typing || !isRecoveryWord(typed, wordlist)) ? found : [];
+      const next = typing && !none && !whole && !isFirefoxAndroid() ? found : [];
       if (!next.length && !none) {
         hide();
         return { none };
@@ -134,6 +162,7 @@ export function createWordSuggestions({ take }) {
       hide();
       box = input;
       words = next;
+      showing.add(api);
       place(after, end);
       if (none) {
         note.textContent = NOT_A_WORD_TEXT;
@@ -192,4 +221,5 @@ export function createWordSuggestions({ take }) {
       return false;
     },
   };
+  return api;
 }

@@ -522,14 +522,17 @@ describe("words suggested as a box is typed in", () => {
     // Letters that start a word again: the mark goes as they're typed.
     typeInto(box(5), "ab");
     expect([note(input), markOf(5), box(5).getAttribute("aria-errormessage")]).toEqual(["", [false, null], null]);
-    // A word not finished: marked once its box is left, as before; its words again as it's back in it.
+    // A word not finished: marked once its box is left, as before; back in it, its words come again only as it's
+    // typed in (Marek's: chips shown again with no key pressed).
     typeInto(box(5), "aban");
     expect(markOf(5)).toEqual([false, null]);
     leave(box(5), box(9));
     expect([markOf(5), chips(input)]).toEqual([[true, "true"], []]);
     box(5).focus();
     box(5).dispatchEvent(fakeEvent("focus"));
-    expect([chips(input), markOf(5)]).toEqual([["abandon"], [true, "true"]]);
+    expect([chips(input), markOf(5)]).toEqual([[], [true, "true"]]);
+    typeInto(box(5), "aband");
+    expect(chips(input)).toEqual(["abandon"]);
     listOf(input).querySelector("[role=option]").click();
     expect([box(5).value, markOf(5), dom.document.activeElement === box(6)]).toEqual(["abandon", [false, null], true]);
   });
@@ -547,6 +550,35 @@ describe("words suggested as a box is typed in", () => {
     leave(box(2), box(7));
     box(2).dispatchEvent(fakeEvent("focus"));
     expect(chips(input)).toEqual([]);
+  });
+
+  // Marek's, Sofía's, Chen's and Lena's: the chips print the word being typed in clear beside a masked box, and
+  // Firefox's app switcher kept a card of them.
+  it("puts the chips away the moment the page is hidden or loses the focus, back only as the box is typed in again", () => {
+    const { input, box } = mount();
+    for (const away of [
+      () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      },
+      () => dom.window.dispatchEvent(fakeEvent("pagehide")),
+      () => dom.window.dispatchEvent(fakeEvent("blur")),
+    ]) {
+      dom.document.visibilityState = "visible";
+      box(4).focus();
+      typeInto(box(4), "ca");
+      expect(chips(input)).toEqual(["cabbage", "cabin", "cable", "cactus"]);
+      away();
+      expect([chips(input), listOf(input).hidden]).toEqual([[], true]);
+      // Back, the box still focused: nothing till a key.
+      dom.document.visibilityState = "visible";
+      dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      box(4).dispatchEvent(fakeEvent("focus"));
+      expect(chips(input)).toEqual([]);
+      typeInto(box(4), "cab");
+      expect(chips(input)).toEqual(["cabbage", "cabin", "cable"]);
+      typeInto(box(4), "");
+    }
   });
 
   it("still spreads a pasted phrase over the boxes and moves on at a space, with nothing left suggested", () => {
@@ -590,6 +622,18 @@ describe("words suggested as a box is typed in", () => {
     ]);
     listOf(input).querySelectorAll("[role=option]")[2].click();
     expect([words()[0], dom.document.activeElement === box(2)]).toEqual(["vendor", true]);
+  });
+
+  // Marek's: Firefox for Android's app switcher took its card of the page before the page heard it was leaving,
+  // chips and all, the word being typed in clear beside its masked box.
+  it("shows none in Firefox for Android, and still says when letters start no word", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const { input, box, words } = mount();
+    box(1).focus();
+    typeKeys("ca", { as: "text" });
+    expect([words()[0], chips(input)]).toEqual(["ca", []]);
+    typeInto(box(1), "xq");
+    expect([note(input), chips(input)]).toEqual(["Not a recovery word", []]);
   });
 
   it("asks nothing of the network and logs nothing as words are typed", () => {

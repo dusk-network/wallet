@@ -63,6 +63,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Took a point that reads as a full stop, as in sofiadesign·dusk, for the .dusk name it imitates, in profile and contact names.
 - Counted for a request no payment made before it was asked, nor one whose memo is another of the requests'.
 - Filled in Send in the wallet's tab open already from a request link, in place, so the phone's Back in Firefox for Android asks Leave this payment? there too rather than going to Home.
+- Put the suggested recovery words away as the page is hidden or loses the focus, back only as the box is typed in again, with none in Firefox for Android, and brought the box typed in above the keyboard again on coming back.
 - Named the payer's memo in the Android app's notice for money that came in.
 - Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
 - Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.

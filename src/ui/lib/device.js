@@ -8,5 +8,15 @@ import { isTauriRuntime } from "../../platform/runtime.js";
  */
 export const isPhone = (nav = globalThis.navigator) => /Android|iPhone|iPad|iPod/i.test(String(nav?.userAgent ?? ""));
 
+/**
+ * Whether this is Firefox on an Android phone or tablet, the extension's
+ * page there, not the app.
+ * @param {Navigator} [nav]
+ */
+export const isFirefoxAndroid = (nav = globalThis.navigator) => {
+  const agent = String(nav?.userAgent ?? "");
+  return /Android/i.test(agent) && /\bFirefox\//.test(agent);
+};
+
 /** Where the wallet keeps its data, in words: "this browser", or in the app "this phone" or "this computer". */
 export const thisDevice = () => (!isTauriRuntime() ? "this browser" : isPhone() ? "this phone" : "this computer");
