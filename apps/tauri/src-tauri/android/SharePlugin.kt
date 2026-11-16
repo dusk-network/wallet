@@ -12,6 +12,7 @@ package network.dusk.wallet
 import android.app.Activity
 import android.content.ClipData
 import android.content.Intent
+import android.net.Uri
 import android.util.Base64
 import androidx.core.content.FileProvider
 import app.tauri.annotation.Command
@@ -29,6 +30,11 @@ class ShareArgs {
   // A PNG, base64, and the name it's shared as.
   var image: String = ""
   var name: String = ""
+}
+
+@InvokeArg
+class BrowseArgs {
+  var url: String = ""
 }
 
 @TauriPlugin
@@ -61,6 +67,29 @@ class SharePlugin(private val activity: Activity) : Plugin(activity) {
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
       }
       activity.startActivity(Intent.createChooser(send, args.title.ifEmpty { null }))
+      answer(invoke, true)
+    } catch (_: Exception) {
+      answer(invoke, false)
+    }
+  }
+
+  /**
+   * Opens an https `url` in the phone's browser, never in this app, which
+   * Android hands the web wallet's request links to as App Links: a
+   * browser's, as what opens a web page with no host of its own picks it.
+   */
+  @Command
+  fun browse(invoke: Invoke) {
+    val args = invoke.parseArgs(BrowseArgs::class.java)
+    try {
+      val uri = Uri.parse(args.url)
+      if (uri.scheme != "https") return answer(invoke, false)
+      val view = Intent(Intent.ACTION_VIEW, uri).apply {
+        addCategory(Intent.CATEGORY_BROWSABLE)
+        selector = Intent(Intent.ACTION_VIEW, Uri.parse("https://")).addCategory(Intent.CATEGORY_BROWSABLE)
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      }
+      activity.startActivity(view)
       answer(invoke, true)
     } catch (_: Exception) {
       answer(invoke, false)

@@ -272,14 +272,14 @@ test("keeps Memo and Review above the keyboard on Send opened again from its Rev
   expect(await memo.evaluate((node) => node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
 });
 
-// Chen's, Sofía's and Amélie's: the request's Amount and Memo above the keyboard, Copy request link under it.
-test("keeps Copy request link above the keyboard with the request's Memo", async ({ page }) => {
+// Chen's, Sofía's and Amélie's: the request's Amount and Memo above the keyboard, Copy request under it.
+test("keeps Copy request above the keyboard with the request's Memo", async ({ page }) => {
   await popupOn(page, "receive", { receive: { tab: "public", requestOpen: true, amountDusk: "0.05", memo: "", context: null } });
   const memo = page.locator(".receive-request").getByLabel("Memo");
   await expect(memo).toBeVisible();
   await memo.focus();
   const top = await clearOfKeyboard(page);
-  const copy = page.getByRole("button", { name: "Copy request link" });
+  const copy = page.getByRole("button", { name: "Copy request", exact: true });
   await expect.poll(() => copy.evaluate((node) => node.getBoundingClientRect().bottom)).toBeLessThanOrEqual(top);
   expect(await memo.evaluate((node) => node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
 });

@@ -148,6 +148,45 @@ describe("the network at the top", () => {
   });
 });
 
+// Chen's, in the app: Testnet picked on Import, its strip came at the top and the form went down under her thumb, her
+// tap for box 1 landing on its hint.
+describe("a test network's strip coming or going", () => {
+  it("leaves what the person is at where it was on the screen, and moves nothing they aren't at", async () => {
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    const { syncTestnetStrip } = await import("../components/TestnetStrip.js");
+    const make = (tag, className = "") => Object.assign(dom.document.createElement(tag), { className });
+    const panel = make("div", "panel");
+    const content = Object.assign(make("main", "panel-content"), { scrollTop: 0, scrollHeight: 1600, clientHeight: 700 });
+    const tab = make("button");
+    content.append(tab);
+    panel.append(content);
+    dom.document.body.append(panel);
+    // The strip's height as it shows: 35 px.
+    const proto = Object.getPrototypeOf(tab);
+    const measure = proto.getBoundingClientRect;
+    proto.getBoundingClientRect = function () {
+      return this.classList?.contains("testnet-strip") ? { top: 0, bottom: 35, height: 35 } : measure.call(this);
+    };
+    try {
+      tab.focus();
+      syncTestnetStrip(panel, "Testnet", { nodeUrl: "https://testnet.nodes.dusk.network" });
+      expect([panel.firstChild.className, content.scrollTop]).toEqual(["testnet-strip", 35]);
+      // The same strip again: nothing moves.
+      syncTestnetStrip(panel, "Testnet", { nodeUrl: "https://testnet.nodes.dusk.network" });
+      expect(content.scrollTop).toBe(35);
+      // Gone, as Mainnet's picked: back up by as much.
+      syncTestnetStrip(panel, "Mainnet", { nodeUrl: "https://nodes.dusk.network" });
+      expect([panel.querySelector(".testnet-strip"), content.scrollTop]).toEqual([null, 0]);
+      // Nothing focused on the page: the page as it is.
+      tab.blur();
+      syncTestnetStrip(panel, "Testnet", { nodeUrl: "https://testnet.nodes.dusk.network" });
+      expect(content.scrollTop).toBe(0);
+    } finally {
+      proto.getBoundingClientRect = measure;
+    }
+  });
+});
+
 describe("header", () => {
   it.each(Object.keys(VIEWS))("holds the account chip and Settings, no ▾ button or Refresh (%s)", async (view) => {
     const { host, renderHeader } = await setup(view);

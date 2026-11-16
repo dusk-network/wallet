@@ -16,6 +16,9 @@ import { segmented } from "../../components/Segmented.js";
 import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
 import { detectPresetId } from "../../../shared/network.js";
 import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
+import { openInPhoneBrowser } from "../../../platform/native.js";
+import { makePaymentLink } from "@dusk-network/app-core/payment-links";
+import { readRequestLink } from "../../lib/requestLink.js";
 
 function generateMnemonic12() {
   const entropy = new Uint8Array(16);
@@ -125,6 +128,55 @@ function walletLanding(ov) {
 const passwordRefusal = (message) => /^Incorrect password$|^Too many attempts/.test(String(message ?? ""));
 const phraseRefusal = (message) => /already in your wallet|isn't a valid recovery phrase/.test(String(message ?? ""));
 
+// Where a first wallet's setup ends: Send, where a payment link opened the
+// app before there was a wallet here and waits for it (`linkSetup`), else Home.
+const setUpTo = (state) => (state.draft?.linkSetup ? "send" : "home");
+
+// A waiting link's web wallet link, for the phone's browser: as it came, or
+// as its dusk: link reads, where its network has a web wallet; else "".
+function webLinkOf(url) {
+  const text = String(url ?? "");
+  if (text.startsWith("https://")) return text;
+  const link = readRequestLink(text)?.link;
+  if (!link) return "";
+  return makePaymentLink({ to: link.to, amountLux: link.lux === null ? "" : String(link.lux), memo: link.memo, network: link.chainId }).https ?? "";
+}
+
+/**
+ * A payment link that opened the app before there's a wallet here (Amélie's:
+ * a request link landed her on "Set up your Dusk Wallet", on Mainnet, and for
+ * a second her wallet and money seemed gone): says it waits, with Open in
+ * browser instead, which hands it to the phone's browser and drops it here.
+ * It's paid on Send once a wallet's set up or imported.
+ * @returns {HTMLElement | null}
+ */
+function linkWaiting(state, actions) {
+  if (!state.draft?.linkSetup) return null;
+  const web = webLinkOf(state.draft.linkUrl);
+  return h("div", { class: "callout onboard-link", role: "status" }, [
+    h("div", { class: "callout-title", text: "A payment link is waiting" }),
+    h("p", { class: "muted onboard-link__note", text: "Set up or import a wallet to pay it." }),
+    web
+      ? h("button", {
+          class: "btn-outline onboard-link__browser",
+          type: "button",
+          text: "Open in browser instead",
+          onclick: async (event) => {
+            const button = event?.currentTarget;
+            if (button) button.disabled = true;
+            if (await openInPhoneBrowser(web)) {
+              state.draft = null;
+              await actions?.render?.()?.catch?.(() => {});
+              return;
+            }
+            if (button) button.disabled = false;
+            actions?.showToast?.("Couldn't open the browser.");
+          },
+        })
+      : null,
+  ].filter(Boolean));
+}
+
 // After a wallet is added: home, on the new wallet, with a toast.
 async function addedWallet(state, actions) {
   state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
@@ -205,6 +257,7 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
   return [
     h("div", { class: "auth-page" }, [
       h("h1", { class: "auth-title", text: "Set up your Dusk Wallet" }),
+      linkWaiting(state, actions),
       h("p", {
         class: "auth-lead",
         text: "Your recovery phrase is the only way to restore your wallet. Keep it safe.",
@@ -382,7 +435,15 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   // Chosen as the words were left; the same through redraws.
   state.onboard.checkPlaces ??= wordPlaces(expected.split(" ").filter(Boolean).length);
   let checkBtn;
-  const words = createWordCheck({ places: state.onboard.checkPlaces, onDone: () => checkBtn?.click() });
+  // Check waits till every box holds a word, and the wallet isn't being made.
+  let busy = false;
+  const words = createWordCheck({
+    places: state.onboard.checkPlaces,
+    onDone: () => checkBtn?.click(),
+    onReady: (ready) => {
+      if (checkBtn) checkBtn.disabled = busy || !ready;
+    },
+  });
   const wordsError = fieldError(words.el, { markInvalid: false });
   const err = formError();
   // Beside other wallets, the password they share, in place of a new one.
@@ -402,7 +463,6 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   });
   const backBtn = nav.querySelector("button");
 
-  let busy = false;
   let skipBtn;
   const setBusy = (isBusy, msg) => {
     busy = Boolean(isBusy);
@@ -413,7 +473,8 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
     words.setDisabled(busy);
     if (current) current.pwd.disabled = busy;
     if (backBtn) backBtn.disabled = busy;
-    for (const b of [checkBtn, skipBtn]) if (b) b.disabled = busy;
+    if (checkBtn) checkBtn.disabled = busy || !words.ready();
+    if (skipBtn) skipBtn.disabled = busy;
     busyBody.style.display = busy ? "block" : "none";
   };
 
@@ -447,7 +508,7 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
       }
       const finger = state.onboard?.fingerprint === true;
       state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-      state.route = "home";
+      state.route = setUpTo(state);
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
       if (checked) actions?.showToast?.("Your recovery words match.");
@@ -471,13 +532,11 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
     class: "btn-primary btn-full",
     type: "button",
     text: "Check",
+    disabled: !words.ready(),
     onclick: () => {
-      if (busy) return;
+      // Never with a box that holds no word: that's no answer to say doesn't match.
+      if (busy || !words.ready()) return;
       wordsError.show("");
-      if (!words.filled()) {
-        wordsError.show("Enter the three words.");
-        return;
-      }
       // Compared here, and then forgotten. A mismatch shows no word.
       const match = recoveryWordsMatch(expected, words.typed());
       words.clear();
@@ -530,19 +589,23 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
 // Import wallet's network, Mainnet or Testnet, the ones people hold DUSK on,
 // each saying what its DUSK is (real, or test DUSK with no value): none is
 // picked to begin with, and Import waits till one is, so a phrase
-// used on Testnet doesn't open on Mainnet with nothing in it. Picking one
+// used on Testnet doesn't open on Mainnet with nothing in it; but the one
+// picked on the setup screen's network menu, or here before (`state.setupNetwork`),
+// is, and Testnet, which the wallet is on only by a choice (Lena's and
+// Chen's: Testnet picked there, here neither was, and Enter after the
+// password went back up to "Choose Mainnet or Testnet."). Picking one
 // moves the wallet there, as the network menu does, and keeps what's typed.
 // On another network, picked before in Settings, nothing's asked: the top bar
 // names it. `setDisabled` holds it while the wallet is made; `picked` says
 // whether one was, and says to pick one where none was.
 const NETWORK_DUSK = Object.freeze({ mainnet: "real DUSK", testnet: "test DUSK, no value" });
-function networkChoice(ov, actions) {
+function networkChoice(ov, actions, state) {
   const on = detectPresetId({ nodeUrl: ov?.nodeUrl, proverUrl: ov?.proverUrl, archiverUrl: ov?.archiverUrl });
   if (!ov?.nodeUrl || (on !== "mainnet" && on !== "testnet")) return null;
   const offered = NETWORK_PRESETS.filter((preset) => preset.id === "mainnet" || preset.id === "testnet");
   const host = h("div", { class: "onboard-network" });
   const err = formError();
-  let picked = null;
+  let picked = state?.setupNetwork === on || on === "testnet" ? on : null;
   let busy = false;
   let held = false;
   const draw = () =>
@@ -567,6 +630,7 @@ function networkChoice(ov, actions) {
       const res = await actions?.send?.({ type: "DUSK_UI_SET_NODE_URL", nodeUrl: preset.nodeUrl, proverUrl: preset.proverUrl, archiverUrl: preset.archiverUrl });
       if (res?.error) throw new Error(res.error.message ?? `Couldn't switch to ${preset.label}`);
       picked = id;
+      if (state) state.setupNetwork = id;
     } catch (e) {
       err.show(e?.message ?? String(e));
     } finally {
@@ -695,7 +759,7 @@ function phraseForm({ state, actions, title, lead = "", landing = null, network 
           return;
         }
         state.onboard = { mode: null, mnemonic: null, password: "", reveal: false };
-        state.route = "home";
+        state.route = setUpTo(state);
         state.needsRefresh = true;
         await actions?.render?.({ forceRefresh: true });
         // A new password: fingerprint unlock with it where asked, and the old one's gone.
@@ -746,7 +810,7 @@ export function onboardingImportView({ state, actions, adding = false, ov } = {}
     adding,
     landing: adding ? walletLanding(ov) : null,
     // The first wallet's: one added opens on the network the others are on, named in the top bar.
-    network: adding ? null : networkChoice(ov, actions),
+    network: adding ? null : networkChoice(ov, actions, state),
     title: "Import wallet",
     verb: "Import wallet",
     busyVerb: "Importing…",

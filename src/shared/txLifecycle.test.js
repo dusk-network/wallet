@@ -168,4 +168,30 @@ describe("txLifecycle reconciliation", () => {
       await expect(handedOverState("https://node.example", { hash: "abc" })).resolves.toEqual({ state: "unknown" });
     });
   });
+
+  // Chen's: a payment that waited went out after she'd paid the same from her other phone. Before one goes out by
+  // itself, the account's nonce now is read: its chain's, or past it, its own sends waiting in the node's mempool.
+  describe("an account's nonce now", () => {
+    const reply = (body) => ({ ok: true, text: async () => JSON.stringify(body) });
+    const node = (status, mempool) => vi.fn(async (url, init) => (String(url).includes("/on/account:") ? reply(status) : /mempoolTxs/.test(String(init?.body)) ? mempool : reply({})));
+    const json = (sender, nonce, type = "moonlight") => JSON.stringify({ type, sender, receiver: "someone", value: 1, nonce });
+
+    it("is its chain's, or the last of its own transactions waiting in the node's mempool", async () => {
+      const { accountNonceNow } = await import("./txLifecycle.js");
+      const waiting = [{ id: "a", json: json("chen-account", 42) }, { id: "b", json: json("someone", 99) }, { id: "c", json: json("chen-account", 77, "phoenix") }, { id: "d", json: "not json" }];
+      globalThis.fetch = node({ nonce: 41 }, reply({ mempoolTxs: waiting }));
+      await expect(accountNonceNow("https://node.example", "chen-account")).resolves.toBe(42n);
+      globalThis.fetch = node({ nonce: 41 }, reply({ mempoolTxs: [] }));
+      await expect(accountNonceNow("https://node.example", "chen-account")).resolves.toBe(41n);
+      // A mempool that can't be read: the chain's.
+      globalThis.fetch = node({ nonce: 41 }, { ok: false, status: 500 });
+      await expect(accountNonceNow("https://node.example", "chen-account")).resolves.toBe(41n);
+    });
+
+    it("can't be told where the node gives no nonce", async () => {
+      const { accountNonceNow } = await import("./txLifecycle.js");
+      globalThis.fetch = node({ balance: 1 }, reply({ mempoolTxs: [] }));
+      await expect(accountNonceNow("https://node.example", "chen-account")).rejects.toThrow("The node gave no nonce");
+    });
+  });
 });

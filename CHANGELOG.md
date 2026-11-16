@@ -45,12 +45,31 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Held a payment that waited for the network where its account sent something else meanwhile, saying so with Send it too and Don't send, rather than sending it by itself.
+- Went on to the next box with Enter in Check your recovery words, suggestions shown or not, and checked only once every box holds a word, a word taken with Enter in the last box being only taken.
+- Made Try again the one button after a check of the recovery words that didn't match, with Show my recovery words a small link apart below it.
+- Said Paid, or Paid twice, with when beside a paid request's Copy and Share, which ask on its card first, "This request was paid already, on …", with Copy anyway or Share anyway and Cancel; and asked the same before Receive's form gives out a request paid already, rather than a toast after.
+- Named Receive's buttons by what they give, Copy address and Share address, Copy request and Share request, with a request's Copy and Share first while it's made, the address's below the form.
+- Kept a payment that waited on Home as it went out, as Sent, till its block is in and the balance read after, rather than in neither Home nor Activity for a while.
+- Had Import wallet's network picked already where it was picked on the setup screen, and on Testnet, still changeable there, and kept the form where it was as Testnet's band comes at the top.
+- Showed a dash for a shielded balance that can't be read now, never 0 DUSK, on Home, its total and the Available of Send and Unshield.
+- Said on Send when a payment link that waited behind the Android app's lock was opened, and kept such a link ten minutes, after which unlocking goes to Home.
+- Said on the Android app's setup screen that a payment link that opened it is waiting, with Open in browser instead, and opened its Send once a wallet's set up or imported.
+- Said the fee charged on Completed once the node answers again also where Home or Activity, opened meanwhile, had read the send's block.
+- Said within about 10 seconds that the figures may be out of date once the node stops answering, asking it every 4 seconds as the web wallet does.
+- Read Rewards by year again as soon as a stake or an unstake with Sozu goes through.
+- Said in the Android app that a payment waiting for the network goes out once it's opened again, and that it'll be asked to be sent if Android closes the app first, and named a payment's memo in its notice that it arrived.
+- Refused a pasted share message whose line says another amount, memo, network or name than its link, a .dusk name looked up first, saying "The message and its link don't agree.", and a pasted link with a word or a space after it, whatever field it ends with, saying so.
+- Took a point that reads as a full stop, as in sofiadesign·dusk, for the .dusk name it imitates, in profile and contact names.
+- Counted for a request no payment made before it was asked, nor one whose memo is another of the requests'.
+- Filled in Send in the wallet's tab open already from a request link, in place, so the phone's Back in Firefox for Android asks Leave this payment? there too rather than going to Home.
+- Put the suggested recovery words away as the page is hidden or loses the focus, back only as the box is typed in again, with none in Firefox for Android, and brought the box typed in above the keyboard again on coming back.
 - Named the payer's memo in the Android app's notice for money that came in.
 - Asked Leave this payment? (Leave / Stay) before Back drops a payment a link or a QR code filled in, in Firefox for Android and the Android app too.
 - Showed the shielded balance as reading, or as can't be read now without a network, till a sync has gone through, rather than 0 DUSK with Not synced or Sync failed.
 - Said one thing at a time of a payment that waited, on Home: Not sent yet while it waits and Sending as it goes out, and listed it in Activity as it went out, rather than in neither for a while; and in Firefox for Android that it goes on while the Keep open tab stays open.
 - Gave each request its own Share in the Android app, beside its Copy, in Request payment and in the list, with Share by the address for the address alone, and brought Request payment into view at its Amount as it's opened.
-- Copied or shared a request paid already as its own link, saying it was paid, rather than making a second one with the same invoice.
+- Copied or shared a request paid already as its own link, rather than making a second one with the same invoice.
 - Said the fee charged on Completed once a node that went silent answers again, rather than the most it could be.
 - Read Rewards by year again after a stake or an unstake with Sozu, till the history lists it and it's counted.
 - Said Staking's figures may be out of date while the node doesn't answer or the network's gone, as Home says its balance may be.

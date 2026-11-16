@@ -5321,6 +5321,37 @@ details.receive-request > summary {
   margin-left: auto;
 }
 
+/* A request paid already: said with when, beside its Copy and Share */
+.request-row__paid {
+  align-self: center;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+/* Asked on the card before a request paid already is copied or shared again */
+.request-paid-ask {
+  margin-top: 6px;
+}
+
+.request-paid-ask__text {
+  margin: 0;
+  font-size: 13px;
+}
+
+.request-paid-ask__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.request-paid-ask__actions > button {
+  width: auto;
+  min-height: 36px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
 /* Colour only where it's done, or asks for a look */
 .request-state {
   font-size: 12.5px;
@@ -5801,6 +5832,24 @@ p.auth-note {
   text-align: center;
 }
 
+/* A payment link that opened the app before there's a wallet: it waits */
+.onboard-link {
+  text-align: left;
+}
+
+.onboard-link__note {
+  margin: 0;
+  font-size: 13px;
+}
+
+button.onboard-link__browser {
+  width: auto;
+  min-height: 36px;
+  margin-top: 10px;
+  padding: 8px 14px;
+  font-size: 13px;
+}
+
 /* "Forgot your password?" under Unlock: a quiet way to the restore */
 button.text-btn.auth-forgot {
   align-self: center;
@@ -5851,6 +5900,15 @@ button.text-btn.srp-show {
   display: block;
   min-height: 44px;
   margin-top: 2px;
+}
+
+/* Show my recovery words, after a check that didn't match: small, and apart
+   below Try again, the one button there. */
+button.text-btn.words-show {
+  align-self: center;
+  min-height: 44px;
+  margin-top: 20px;
+  color: var(--text-muted);
 }
 
 /* -------------------------------------------------------

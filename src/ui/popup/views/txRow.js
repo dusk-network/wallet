@@ -62,6 +62,13 @@ export function dayLabel(ms, now = Date.now()) {
   return `${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}${year}`;
 }
 
+/** On which day and when, in a sentence, today's too: "on Mon 16 Nov at 14:32". */
+export function onDayAtText(ms, now = Date.now()) {
+  const d = new Date(ms);
+  const year = d.getFullYear() === new Date(now).getFullYear() ? "" : ` ${d.getFullYear()}`;
+  return `on ${DAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}${year} at ${clockText(ms)}`;
+}
+
 /** When, in a sentence: "at 14:32", "yesterday at 14:32", "on Thu 5 Nov at 14:32". */
 export function whenAtText(ms, now = Date.now(), { seconds = false } = {}) {
   const day = dayLabel(ms, now);

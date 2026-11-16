@@ -20,8 +20,12 @@ export function isShieldedTxMeta(meta) {
  */
 export async function reconcileTxPresence(hash, { preserveRemoved = false, epoch } = {}) {
   const meta = await getTxMeta(hash);
-  // Nothing kept to reconcile: cleared by a reset, or never this wallet's.
-  if (!meta) return { status: "unknown", origin: "Wallet", nodeUrl: "", error: "" };
+  // Nothing kept to reconcile: forgotten once the chain's history had it (as
+  // Activity settles a send, in any window), or cleared by a reset. Where it
+  // stands is still asked of the node the wallet's on, and nothing written:
+  // the Sent screen still hears its block and fee (Lena's, third time:
+  // "Completed … Network fee Up to 0,0025" for good, Home opened meanwhile).
+  if (!meta) return presenceOnly(hash);
   const patchTxMeta = (h, patch) => patchStored(h, patch, { epoch });
   const settings = await getSettings();
   const nodeUrl = meta?.nodeUrl ?? settings?.nodeUrl ?? "";
@@ -157,6 +161,18 @@ export async function reconcileTxPresence(hash, { preserveRemoved = false, epoch
     nodeUrl,
     error: presence.error || "reconciliation_unavailable",
   };
+}
+
+// Where a transaction no record is kept of stands, as the node the wallet's on
+// says it: in a block, with its fee, or not known here.
+async function presenceOnly(hash) {
+  const nodeUrl = String((await getSettings().catch(() => null))?.nodeUrl ?? "");
+  const presence = nodeUrl ? await classifyTxPresence(nodeUrl, hash) : null;
+  if (presence?.state === "executed_success" || presence?.state === "executed_failed") {
+    const failed = presence.state === "executed_failed";
+    return { status: failed ? "failed" : "executed", ok: !failed, origin: "Wallet", nodeUrl, error: failed ? presence.error || "" : "", ...finalizedTxMetadata(presence.tx) };
+  }
+  return { status: "unknown", origin: "Wallet", nodeUrl: "", error: "" };
 }
 
 /**

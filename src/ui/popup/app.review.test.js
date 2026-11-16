@@ -49,7 +49,7 @@ const flush = async () => {
 
 // The popup on `route` with wallet A open; `t.open` is what the wallet's
 // overview says, `t.deliver` the wallet's own messages to the popup.
-async function popupOn(route, extra = {}, answer = async () => undefined, { history, tauri, mount = false } = {}) {
+async function popupOn(route, extra = {}, answer = async () => undefined, { history, tauri, mount = false, tab } = {}) {
   const dom = installFakeDom({ pathname: "/popup.html" });
   if (history) dom.window.history = history(dom.window);
   // The app on an Android phone: Tauri's bridge to the wrapper.
@@ -66,6 +66,8 @@ async function popupOn(route, extra = {}, answer = async () => undefined, { hist
   let onMessage = null;
   vi.stubGlobal("browser", {
     runtime: { id: "dusk-wallet", sendMessage: () => {}, onMessage: { addListener: (fn) => (onMessage = fn) } },
+    // `tab`: the page in a tab of its own, as the extension's full page.
+    ...(tab ? { tabs: { getCurrent: async () => tab } } : {}),
   });
   vi.resetModules();
   const { send } = await import("../../wallet/bus.js");
@@ -86,7 +88,12 @@ async function popupOn(route, extra = {}, answer = async () => undefined, { hist
   if (mount) mountPopup();
   else await render();
   await flush();
-  return Object.assign(t, { state, render, deliver: (message) => onMessage(message), asked: (type) => send.mock.calls.map(([m]) => m).filter((m) => m.type === type) });
+  return Object.assign(t, {
+    state,
+    render,
+    deliver: (message, sender = {}, sendResponse = () => {}) => onMessage(message, sender, sendResponse),
+    asked: (type) => send.mock.calls.map(([m]) => m).filter((m) => m.type === type),
+  });
 }
 
 describe("a Review drawn for wallet A, with wallet B opened in another window", () => {
@@ -267,6 +274,30 @@ describe("stDUSK, found on the dashboard", () => {
     t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
     await flush();
     expect(t.asked("DUSK_UI_ASSETS_WATCH_TOKEN").map((m) => m.walletId)).toEqual([A, B]);
+  });
+});
+
+// Lena's, the third round: right after the extension's own unstake, Rewards by year kept the "taken out" from before.
+describe("a stake or an unstake with Sozu that goes through", () => {
+  it("has Staking read the history again for Rewards by year, once, and nothing for another send", async () => {
+    const UNSTAKE = "7f".repeat(32);
+    const PAYMENT = "7a".repeat(32);
+    const t = await popupOn("home");
+    t.open = { ...t.open, txs: [{ hash: UNSTAKE, status: "submitted", asset: { kind: "sozu", action: "sozu_unstake" } }, { hash: PAYMENT, status: "submitted" }] };
+    await t.render({ forceRefresh: true });
+    const read = () => ((t.state.sozu ??= {}).history = { key: "read before" });
+    read();
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: PAYMENT, status: "executed" });
+    await flush();
+    expect(t.state.sozu.history).toEqual({ key: "read before" });
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: UNSTAKE, status: "executed" });
+    await flush();
+    expect(t.state.sozu.history).toBeNull();
+    // Its next word, a recheck's: already read again.
+    read();
+    t.deliver({ type: "DUSK_UI_TX_STATUS", hash: UNSTAKE, status: "executed", feePaid: "1856759" });
+    await flush();
+    expect(t.state.sozu.history).toEqual({ key: "read before" });
   });
 });
 
@@ -1620,6 +1651,110 @@ describe("the app on a phone", () => {
   });
 });
 
+// Amélie's: a request link opened the app, which had no wallet, on "Set up your Dusk Wallet", on Mainnet: for a second
+// she thought her wallet and money were gone.
+describe("a payment link that opens the app before there's a wallet in it", () => {
+  const WEB = `https://apps.testnet.dusk.network/wallet/dashboard/send?to=${B}&amount=0.001&memo=Les+tulipes&network=testnet`;
+  const fresh = { hasVault: false, isUnlocked: false, accounts: [], wallets: [], walletKey: null, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" };
+  const opened = async (link, answers = {}) => {
+    const bridge = tauriBridge({ "plugin:deep-link|get_current": [link], ...answers });
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, async (message) => (message.type === "DUSK_UI_OVERVIEW" ? fresh : undefined), { tauri: bridge });
+    await t.render({ forceRefresh: true });
+    await flush();
+    return { t, bridge };
+  };
+  const waiting = (t) => {
+    const note = t.app.querySelector(".onboard-link");
+    return note ? visibleText(note) : "";
+  };
+
+  it("says on the setup screen that a payment link waits, to set up or import a wallet to pay it, or open it in the browser", async () => {
+    const { t } = await opened(WEB, { open_in_browser: true });
+    expect(t.state.route).toBe("onboard_welcome");
+    expect(waiting(t)).toBe("A payment link is waitingSet up or import a wallet to pay it.Open in browser instead");
+    expect(t.state.draft).toMatchObject({ to: B, memo: "Les tulipes", linkSetup: true });
+    // Open in browser instead: handed to the phone's browser, never to the app, which Android gives these links to.
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Open in browser instead").click();
+    await flush();
+    expect(t.dom.window.__TAURI_INTERNALS__.invoke).toHaveBeenCalledWith("open_in_browser", { url: WEB }, undefined);
+    expect([waiting(t), t.state.draft]).toEqual(["", null]);
+  });
+
+  it("offers a dusk: link to the browser as its web wallet's link", async () => {
+    const { t } = await opened(`dusk:public-${B}@dusk:2?amount=0.001&memo=Les+tulipes`, { open_in_browser: true });
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Open in browser instead").click();
+    await flush();
+    expect(t.dom.window.__TAURI_INTERNALS__.invoke).toHaveBeenCalledWith("open_in_browser", { url: WEB }, undefined);
+  });
+});
+
+describe("a payment link opened in the app while the wallet's locked", () => {
+  const LINK = `dusk:public-${B}@dusk:2?amount=0.001&memo=Factura+2026-153`;
+  // Locked: the wallet answers so till the password's given.
+  const locked = async (message, t) => {
+    if (message.type === "DUSK_UI_UNLOCK") {
+      t.open = { ...t.open, isUnlocked: true };
+      return { ok: true };
+    }
+    return undefined;
+  };
+  const opened = async () => {
+    const bridge = tauriBridge();
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, locked, { tauri: bridge });
+    t.open = { ...t.open, isUnlocked: false };
+    await t.render({ forceRefresh: true });
+    bridge.emit([LINK]);
+    await flush();
+    return t;
+  };
+  const unlock = async (t) => {
+    t.app.querySelector("#unlock-password").value = "the password";
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
+    await flush();
+  };
+
+  afterEach(() => vi.useRealTimers());
+
+  // Sofía's: a link opened while the wallet was locked filled Send in after a later unlock from the app's icon, even
+  // one opened long before by someone else on a shared phone, saying nothing of where or when it came from.
+  it("says on Send when it was opened, once unlocked within ten minutes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 51));
+    const t = await opened();
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 59));
+    await unlock(t);
+    expect(t.state.route).toBe("send");
+    expect(t.app.querySelector(".to-input-wrap textarea").value).toBe(B);
+    expect(t.app.querySelector(".send-filled-note")?.textContent).toBe("Filled in from the link, to pay on Testnet. Check it before you send. From a link opened at 23:51.");
+  });
+
+  // Astra's: unlocked at minute 8 and the form edited, a redraw at minute 10 threw the payment away.
+  it("keeps it once it opened after an unlock in time, edited, through redraws past ten minutes", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 51));
+    const t = await opened();
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 59));
+    await unlock(t);
+    const memo = () => t.app.querySelectorAll("input").find((i) => i.getAttribute("placeholder") === "Optional");
+    memo().value = "Factura 2026-153, paid";
+    memo().dispatchEvent(fakeEvent("input"));
+    vi.setSystemTime(new Date(2026, 10, 16, 0, 5));
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect([t.state.route, t.app.querySelector(".to-input-wrap textarea").value, memo().value]).toEqual(["send", B, "Factura 2026-153, paid"]);
+    expect(t.app.querySelector(".send-filled-note")?.textContent).toBe("Filled in from the link, to pay on Testnet. Check it before you send. From a link opened at 23:51.");
+  });
+
+  it("goes Home as usual on an unlock past ten minutes, the link's payment gone", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 15, 23, 51));
+    const t = await opened();
+    vi.setSystemTime(new Date(2026, 10, 16, 0, 2));
+    await unlock(t);
+    expect([t.state.route, t.state.draft]).toEqual(["home", null]);
+  });
+});
+
 // The phone's Back in the app, as Android hands it to the wallet (Tauri's
 // back-button event, here a fake): through what people do, into screens,
 // Back, the background, back in, a press between, Android answering late.
@@ -1702,6 +1837,78 @@ describe("the phone's Back in the app, as Android hands it over", () => {
   });
 });
 
+
+// Amélie's, Chen's and Marek's, in Firefox for Android: a link opened from the
+// web wallet's page sent the wallet's tab, open already, to Send's address, and
+// the phone's Back went to the page it showed before, Home, without a word.
+describe("a request link handed to the wallet's tab open already", () => {
+  it("fills Send in on the page as it is, and the phone's Back asks before the payment goes", async () => {
+    const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
+    const link = makePaymentLink({ amount: "0.02", memo: "popiah", network: "testnet", to: B }).https;
+    let history;
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, {
+      // A page pressed in before, as a browser keeps it: no press now.
+      history: (win) => {
+        win.navigator = { userActivation: { isActive: false, hasBeenActive: true } };
+        return (history = pageHistory(win));
+      },
+      tab: { id: 7 },
+    });
+    const values = () => ["To", "Amount", "Memo"].map((name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name)?.value);
+    const question = () => t.dom.document.querySelector("[role=alertdialog]");
+    const answered = vi.fn();
+
+    // Another tab's link: this page's left as it is.
+    t.deliver({ type: "DUSK_UI_OPEN_LINK", tabId: 8, link }, {}, answered);
+    await flush();
+    expect([t.state.route, answered.mock.calls.length]).toEqual(["home", 0]);
+
+    t.deliver({ type: "DUSK_UI_OPEN_LINK", tabId: 7, link }, {}, answered);
+    await flush();
+    expect(answered.mock.calls).toEqual([[{ ok: true }]]);
+    expect([t.state.route, ...values()]).toEqual(["send", B, "0.02", "popiah"]);
+    expect(t.app.textContent).toContain("Filled in from the link");
+
+    history.back();
+    await flush();
+    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.StayLeave");
+    // The question's own Back is Stay.
+    history.back();
+    await flush();
+    expect([question(), t.state.route, ...values(), history.closed]).toEqual([null, "send", B, "0.02", "popiah", false]);
+  });
+});
+
+// Astra's: a link handed to the tab in place left the request the tab was opened with in its address, and a reload,
+// or Firefox bringing the tab back, filled Send with that one.
+describe("a request link handed to a wallet tab opened with another", () => {
+  it("takes the one the tab was opened with off its address, from every entry it comes back to", async () => {
+    const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
+    const before = makePaymentLink({ amount: "0.02", memo: "Cadeau", network: "testnet", to: B }).https;
+    const handed = makePaymentLink({ amount: "0.05", memo: "Laksa", network: "testnet", to: B }).https;
+    let history;
+    const t = await popupOn("send", { addressBook: { loaded: true, items: [] } }, undefined, {
+      history: (win) => (history = addressedHistory(win, `/full.html?route=send&link=${encodeURIComponent(before)}`)),
+      tab: { id: 7 },
+    });
+    const values = () => ["To", "Amount", "Memo"].map((name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name)?.value);
+    expect(values()).toEqual([B, "0.02", "Cadeau"]);
+    t.deliver({ type: "DUSK_UI_OPEN_LINK", tabId: 7, link: handed }, {}, vi.fn());
+    await flush();
+    expect(values()).toEqual([B, "0.05", "Laksa"]);
+    expect(history.url).toBe("/full.html");
+    // Pulled down: the wallet, not the request it was opened with.
+    vi.resetModules();
+    const { state } = await import("./state.js");
+    expect([state.route, state.draft]).toEqual(["home", null]);
+    // Nor on any entry of the page's it comes back to.
+    while (history.at > 0) {
+      history.back();
+      await flush();
+      expect(history.url).toBe("/full.html");
+    }
+  });
+});
 
 // Chen's, in Firefox for Android: Activity's search typed quickly kept "sa" of
 // "satay": each letter drew the screen again, and a field swapped under a

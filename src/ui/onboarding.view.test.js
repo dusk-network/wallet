@@ -225,17 +225,25 @@ describe("setting up and unlocking", () => {
     expect(names()).toEqual(places.map((p) => `Word ${p}`));
     expect(body.querySelectorAll("button").filter(isShown).map((b) => b.textContent)).toEqual(["← Back", "Check", "Skip for now"]);
 
+    // Lena's: nothing checked, and nothing said, till every box holds a word.
+    expect(button(body, "Check").disabled).toBe(true);
     button(body, "Check").click();
     await settle();
-    expect(errorOf(body.querySelector("[role=group]"))).toBe("Enter the three words.");
+    expect(body.querySelectorAll("[role=alert]").filter(isShown)).toEqual([]);
     // One word wrong, then three made up: said, and nothing else; no word of the phrase, and nothing made.
     const words = MNEMONIC.split(" ");
     const MISMATCH = "← BackCheck your recovery wordsThat doesn't match your recovery words. Check the words you wrote down.Try againShow my recovery words";
-    for (const typed of [places.map((p, i) => (i === 1 ? "abandn" : words[p - 1])), ["maison", "velo", "gateau"]]) {
+    for (const typed of [places.map((p, i) => (i === 1 ? "zoo" : words[p - 1])), ["kiwi", "lemon", "cabin"]]) {
       wordBoxes(body).forEach((input, i) => typeInto(input, typed[i]));
       button(body, "Check").click();
       await settle();
       expect(visibleText(body)).toBe(MISMATCH);
+      // Amélie's: Try again the one button, Skip for now gone; Show my recovery words below it, apart and small.
+      expect(body.querySelectorAll("button").filter(isShown).map((b) => [b.textContent, b.className])).toEqual([
+        ["← Back", expect.any(String)],
+        ["Try again", "btn-primary btn-full"],
+        ["Show my recovery words", "text-btn words-show"],
+      ]);
       expect([body.querySelector(".srp-grid"), wordBoxes(body)]).toEqual([null, []]);
       expect([state.route, state.onboard.reveal, acts.send.mock.calls]).toEqual(["onboard_create_confirm", false, []]);
       // Try again: the same three, empty, the first to type in.
@@ -267,7 +275,7 @@ describe("setting up and unlocking", () => {
   });
 
   // Hein's: Check your recovery words suggests as Import does, from the wallet's list, never from the phrase.
-  it("suggests words in Check your recovery words as Import does, and Enter on the last box takes one and checks", async () => {
+  it("suggests words in Check your recovery words as Import does, and Enter on the last box takes one, checking only on the next", async () => {
     const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] } };
     const acts = actions();
     const body = show(onboardingCreateConfirmView({ state, actions: acts }));
@@ -300,12 +308,60 @@ describe("setting up and unlocking", () => {
     expect(third.getAttribute("aria-invalid")).toBe("true");
     typeInto(third, "abandon");
     expect(third.getAttribute("aria-invalid")).toBeNull();
-    // On the last box, Enter takes the marked word and checks, as Enter did.
+    // Amélie's: on the last box, Enter takes the marked word and no more; the check is a press of its own.
     typeInto(ninth, "aban");
+    ninth.dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+    await settle();
+    expect([ninth.value, dom.document.activeElement === ninth, chips()]).toEqual(["abandon", true, []]);
+    expect(acts.send).not.toHaveBeenCalled();
     ninth.dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
     await settle();
     expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC }));
     expect(acts.showToast).toHaveBeenCalledWith("Your recovery words match.");
+  });
+
+  // Lena's: a whole word typed in the first box, no suggestion showing, and Enter checked at once, two boxes empty,
+  // saying "That doesn't match your recovery words".
+  it("goes on to the next box with Enter on any box but the last, and checks only once every box holds a word", async () => {
+    const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] } };
+    const acts = actions();
+    const body = show(onboardingCreateConfirmView({ state, actions: acts }));
+    const [third, sixth, ninth] = wordBoxes(body);
+    const check = button(body, "Check");
+    const alerts = () => body.querySelectorAll("[role=alert]").filter(isShown).map((el) => el.textContent);
+    third.focus();
+    typeInto(third, "zoo");
+    third.dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+    await settle();
+    expect([dom.document.activeElement === sixth, check.disabled, alerts(), acts.send.mock.calls]).toEqual([true, true, [], []]);
+    // Enter on the last box with a box still empty: to that box, nothing checked or said.
+    ninth.focus();
+    typeInto(ninth, "abandon");
+    ninth.dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+    await settle();
+    expect([dom.document.activeElement === sixth, check.disabled, alerts(), wordBoxes(body).length]).toEqual([true, true, [], 3]);
+    // Half a word is no word: Check waits.
+    typeInto(sixth, "aban");
+    expect(check.disabled).toBe(true);
+    typeInto(sixth, "abandon");
+    expect(check.disabled).toBe(false);
+    // Every box holds one: Enter on the last checks, and says what it found.
+    ninth.focus();
+    ninth.dispatchEvent(fakeEvent("keydown", { key: "Enter" }));
+    await settle();
+    expect(alerts()).toEqual(["That doesn't match your recovery words. Check the words you wrote down."]);
+    expect(acts.send).not.toHaveBeenCalled();
+  });
+
+  // Amélie's: a payment link opened the app before it had a wallet. It waits through the setup, and is paid after it.
+  it("opens Send on a payment link that waited through the setup, once the wallet's made", async () => {
+    const draft = { to: "someone", amountDusk: "0.001", memo: "Les tulipes", filledFrom: "link", filledIn: "link", linkSetup: true, linkUrl: "https://apps.testnet.dusk.network/wallet/dashboard/send?to=someone" };
+    const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] }, draft };
+    const acts = actions();
+    const body = show(onboardingCreateConfirmView({ state, actions: acts }));
+    button(body, "Skip for now").click();
+    await settle();
+    expect([state.route, state.draft]).toEqual(["send", draft]);
   });
 
   it("makes the wallet with Skip for now, without the words, and without saying they match", async () => {

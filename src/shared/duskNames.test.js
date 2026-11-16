@@ -493,6 +493,31 @@ describe("the lens's binding and interface", () => {
   });
 });
 
+describe("duskNamesOwners", () => {
+  // For app-core's checks that take `owners`: a pasted request's line, a profile's name.
+  it("gives each name's account and address, null for one not registered or expired, and leaves out one it couldn't say", async () => {
+    const said = {
+      "sofia.dusk": async () => active(moonlight(ACCOUNT), phoenix(ADDRESS)),
+      "gone.dusk": async () => answer("Absent"),
+      "late.dusk": async () => answer("Expired"),
+      "down.dusk": () => Promise.reject(new lens.LensReaderError("timeout", "lens timeout")),
+      "bare.dusk": async () => active(null, null),
+    };
+    const reader = useReader({ resolve: (name) => said[name]() });
+    const owners = await names.duskNamesOwners(["sofia.dusk", "gone.dusk", "late.dusk", "down.dusk", "bare.dusk", "sofia.dusk"], { nodeUrl: TESTNET });
+    expect([...owners]).toEqual([
+      ["sofia.dusk", { account: ACCOUNT, address: ADDRESS }],
+      ["gone.dusk", null],
+      ["late.dusk", null],
+    ]);
+    // Each once, on the wallet's network.
+    expect(reader.resolve.mock.calls.map(([name]) => name).sort()).toEqual(["bare.dusk", "down.dusk", "gone.dusk", "late.dusk", "sofia.dusk"]);
+    expect(lens.createLensReader).toHaveBeenCalledWith(releases.testnet, expect.objectContaining({ nodeUrl: TESTNET }));
+    // Off Mainnet and Testnet, none.
+    await expect(names.duskNamesOwners(["sofia.dusk"], { nodeUrl: "http://127.0.0.1:8080" })).resolves.toEqual(new Map());
+  });
+});
+
 describe("lookupDuskName", () => {
   it("shares a running lookup and reuses its answer for a minute", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });

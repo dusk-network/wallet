@@ -336,16 +336,23 @@ export function checkWordsView(ov, { state, actions } = {}) {
   // The three words at `places`, with the password they were asked with.
   const check = (password, count, places = wordPlaces(count)) => {
     let checkBtn;
-    const words = createWordCheck({ places, onDone: () => checkBtn.click() });
+    // Check waits till every box holds a word (Lena's: Enter in the first box checked with two empty).
+    const words = createWordCheck({
+      places,
+      onDone: () => checkBtn.click(),
+      onReady: (ready) => {
+        if (checkBtn) checkBtn.disabled = busy || !ready;
+      },
+    });
     const wordsError = fieldError(words.el, { markInvalid: false });
     checkBtn = h("button", {
       class: "btn-primary btn-full",
       type: "button",
       text: "Check",
+      disabled: true,
       onclick: async () => {
-        if (busy) return;
+        if (busy || !words.ready()) return;
         wordsError.show("");
-        if (!words.filled()) return wordsError.show("Enter the three words.");
         busy = true;
         checkBtn.disabled = true;
         words.setDisabled(true);
@@ -370,8 +377,8 @@ export function checkWordsView(ov, { state, actions } = {}) {
           );
         } catch (e) {
           wordsError.show(e?.message ?? String(e));
-          checkBtn.disabled = false;
           words.setDisabled(false);
+          checkBtn.disabled = !words.ready();
         } finally {
           busy = false;
         }

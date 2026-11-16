@@ -7,7 +7,7 @@ import { networks, routes } from "@dusk-network/networks";
 import { parsePaymentLink } from "@dusk-network/app-core/payment-links";
 import { TX_KIND } from "../shared/constants.js";
 import { isAccount } from "@dusk-network/networks/account";
-import { lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
+import { duskNamesOwners, lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { noteChainId } from "../shared/nodeNetwork.js";
 import { shortAddress } from "./lib/strings.js";
@@ -30,6 +30,7 @@ vi.mock("@dusk-network/networks/account", async (importOriginal) => ({
 }));
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
+  duskNamesOwners: vi.fn(async () => new Map()),
   lookupDuskName: vi.fn(),
   lookupPrimaryName: vi.fn(async () => null),
 }));
@@ -145,6 +146,8 @@ beforeEach(() => {
   lookupPrimaryName.mockImplementation(async () => null);
   isAccount.mockReset();
   isAccount.mockReturnValue(true);
+  duskNamesOwners.mockReset();
+  duskNamesOwners.mockImplementation(async () => new Map());
   lookupDuskName.mockReset();
   lookupDuskName.mockImplementation((input) => {
     const key = String(input).trim().toLowerCase();
@@ -275,6 +278,16 @@ describe("send to a .dusk name with both addresses", () => {
 
     form.radios()[0].click();
     expect(form.picked()).toEqual(["true", "false"]);
+    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+  });
+
+  // Lena's and Chen's: opened with no signal, the shielded balance said 0 where it couldn't be read.
+  it("says no Available for a shielded address while the shielded balance can't be read now, never 0", () => {
+    const form = mount(newState(), overview({ shieldedBalance: { value: "0", spendable: "0" }, shieldedStale: true, shieldedError: "Failed to fetch" }));
+    typeInto(form.to, ALICE.address);
+    expect(form.pill()).toBe("Shielded");
+    expect(isShown(dom.document.body.querySelector(".amount-avail"))).toBe(false);
+    typeInto(form.to, ALICE.account);
     expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
   });
 
@@ -2054,6 +2067,146 @@ describe("a request link", () => {
     expect(dom.document.body.querySelectorAll(".field-error").filter(isShown)).toEqual([]);
   });
 
+  // Lena's: her link and a word after it, as a chat line is copied whole, said "This link's network can't be read", or
+  // with the memo last, took the word into the memo ("Lena r35 odd danke!", or glued on from the next line).
+  it("refuses a link with a word after it, on its line or the next, whatever its last field, saying so", async () => {
+    const UNCLEAR = "The words after that link may be part of it. Paste the link alone.";
+    const networkLast = httpsLink(`to=${ALICE.account}&amount=0.01&memo=Lena+r35&network=testnet`);
+    const memoLast = httpsLink(`to=${ALICE.account}&network=testnet&amount=0.01&memo=Lena+r35+odd`);
+    for (const link of [networkLast, memoLast]) {
+      for (const text of [`${link} danke!`, `${link}\ndanke!`, `${link}\r\ndanke!`]) {
+        const state = newState();
+        const form = mount(state);
+        paste(form, text);
+        await settle();
+        expect(refusal(), JSON.stringify(text)).toEqual([UNCLEAR]);
+        expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], JSON.stringify(text)).toEqual(["", "", ""]);
+      }
+    }
+  });
+
+  // Marek's: the wallet's own share message with only its link's amount changed (0.002 to 0.15) filled 0.15 without a
+  // word, and a first line naming someone else, another amount or another memo was let by.
+  it("refuses a shared message whose line says another amount or memo than its link, and fills in nothing", async () => {
+    const DISAGREES = "The message and its link don't agree.";
+    const link = (amount) => httpsLink(`to=${ALICE.account}&amount=${amount}&memo=r35+marek+T2&network=testnet`);
+    for (const text of [
+      `You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nPay here: ${link("0.15")}`,
+      `Sofía asks you to pay 0.001 DUSK · coffee\nPay here: ${link("0.002")}`,
+      `You're asked to pay 0.002 DUSK on Testnet · r35 marek T3\nPay here: ${link("0.002")}`,
+    ]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, text);
+      await settle();
+      expect(refusal(), text).toEqual([DISAGREES]);
+      expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], text).toEqual(["", "", ""]);
+    }
+    // The message as the wallet wrote it: read, and filled in.
+    const state = newState();
+    const form = mount(state);
+    paste(form, `You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nPay here: ${link("0.002")}`);
+    await settle();
+    expect([refusal(), form.to.value, form.amount.value, state.draft?.memo]).toEqual([[], ALICE.account, "0.002", "r35 marek T2"]);
+  });
+
+  // Sofía's, as Marek tried it: "sofiadesign.dusk asks you…" over someone else's link filled in their account.
+  describe("whose .dusk name a shared request's line says it's from", () => {
+    const DISAGREES = "The message and its link don't agree.";
+    const message = (to) =>
+      `sofiadesign.dusk asks you to pay 0.002 DUSK on Testnet · F-2026-102\nPay here: ${httpsLink(`to=${to}&amount=0.002&memo=F-2026-102&network=testnet`)}`;
+    const sofias = new Map([["sofiadesign.dusk", { account: BOB.account }]]);
+    const lookingUp = () => dom.document.body.querySelectorAll(".name-box [role=status]").filter((el) => isShown(el)).map((el) => el.textContent);
+    const values = (form, state) => [form.to.value, form.amount.value, state.draft?.memo ?? ""];
+
+    it("is looked up on the wallet's network before anything's filled in, and refused over another account's link", async () => {
+      const answer = Promise.withResolvers();
+      duskNamesOwners.mockImplementation(() => answer.promise);
+      const state = newState();
+      const form = mount(state);
+      paste(form, message(ALICE.account));
+      await settle();
+      expect(duskNamesOwners.mock.calls).toEqual([[["sofiadesign.dusk"], { nodeUrl: "https://testnet.nodes.dusk.network" }]]);
+      // Nothing filled in, nor said wrong, meanwhile; Review waits.
+      expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual(["", "", "", [], ["Looking up sofiadesign.dusk…"], true]);
+      answer.resolve(sofias);
+      await settle();
+      expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual(["", "", "", [DISAGREES], [], false]);
+
+      // Over the name's own account's link: filled in.
+      duskNamesOwners.mockImplementation(async () => sofias);
+      const own = newState();
+      const ownForm = mount(own);
+      paste(ownForm, message(BOB.account));
+      await settle();
+      expect([...values(ownForm, own), refusal()]).toEqual([BOB.account, "0.002", "F-2026-102", []]);
+    });
+
+    it("says nothing of a name whose lookup failed: the request's filled in", async () => {
+      duskNamesOwners.mockImplementation(async () => new Map());
+      const state = newState();
+      const form = mount(state);
+      paste(form, message(ALICE.account));
+      await settle();
+      expect([...values(form, state), refusal()]).toEqual([ALICE.account, "0.002", "F-2026-102", []]);
+    });
+
+    it("fills in nothing once To, Amount or Memo changes as it's looked up: what's typed comes first", async () => {
+      for (const change of ["to", "amount", "memo"]) {
+        const answer = Promise.withResolvers();
+        duskNamesOwners.mockImplementation(() => answer.promise);
+        const state = newState();
+        const form = mount(state);
+        paste(form, message(ALICE.account));
+        await settle();
+        const memoField = dom.document.body.querySelectorAll("input").find((i) => i.getAttribute("placeholder") === "Optional");
+        const field = change === "to" ? form.to : change === "amount" ? form.amount : memoField;
+        typeInto(field, change === "amount" ? "0.5" : change === "to" ? "a" : "lunch");
+        await settle();
+        expect(lookingUp(), change).toEqual([]);
+        answer.resolve(sofias);
+        await settle();
+        expect([refusal(), field.value], change).toEqual([[], change === "amount" ? "0.5" : change === "to" ? "a" : "lunch"]);
+      }
+    });
+
+    it("is read still where Send is drawn again meanwhile, and not in a Send opened afresh", async () => {
+      const answer = Promise.withResolvers();
+      duskNamesOwners.mockImplementation(() => answer.promise);
+      const state = newState();
+      paste(mount(state), message(ALICE.account));
+      await settle();
+      // A refresh draws Send again from its draft.
+      const again = mount(state);
+      expect(lookingUp()).toEqual(["Looking up sofiadesign.dusk…"]);
+      answer.resolve(sofias);
+      await settle();
+      expect([refusal(), again.to.value]).toEqual([[DISAGREES], ""]);
+
+      // Left for Home and opened again: nothing of it.
+      const later = Promise.withResolvers();
+      duskNamesOwners.mockImplementation(() => later.promise);
+      const left = newState();
+      paste(mount(left), message(ALICE.account));
+      await settle();
+      left.draft = null;
+      const fresh = mount(left);
+      later.resolve(sofias);
+      await settle();
+      expect([refusal(), lookingUp(), fresh.to.value, fresh.review.disabled]).toEqual([[], [], "", false]);
+    });
+
+    it("isn't looked up for a request paid on another network, which says so", async () => {
+      const state = newState();
+      const form = mount(state, overview({ nodeUrl: "https://nodes.dusk.network" }));
+      paste(form, message(ALICE.account));
+      await settle();
+      expect(duskNamesOwners).not.toHaveBeenCalled();
+      expect(refusal()).toHaveLength(1);
+      expect(form.to.value).toBe("");
+    });
+  });
+
   // Nandini's and Chen's: a link's amount=2.125 was filled in as 2.1250 without a question, where typing 2.125 asks.
   it("reads a link's amount as typing does: 2.125 asks, with a button for each reading; a wallet's 2.1250 doesn't", async () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-SG" });
@@ -2113,12 +2266,13 @@ describe("a request link", () => {
       expect([typo.to.value, typo.amount.value], amount).toEqual(["", ""]);
     }
     // Marek's, the round after: a tab in a pasted link's amount, as a chat or mail can put in, was taken out
-    // ("0.001" + tab + "5" filled 0.0015); any space there, of any kind, refuses the link.
+    // ("0.001" + tab + "5" filled 0.0015); any space there, of any kind, refuses the link. Pasted, a space ends the
+    // link, as one before a word after it does (Lena's), and is said so.
     for (const space of ["\t", "\u00a0", "\u2009", "\u202f", "\u3000"]) {
       const spaced = mount(newState());
       paste(spaced, httpsLink(`to=${ALICE.account}&amount=0.001${space}5&memo=x&network=testnet`));
       await settle();
-      expect(refusal(), JSON.stringify(space)).toEqual(["This link's amount can't be read. Ask for a new one."]);
+      expect(refusal(), JSON.stringify(space)).toEqual(["The words after that link may be part of it. Paste the link alone."]);
       expect([spaced.to.value, spaced.amount.value], JSON.stringify(space)).toEqual(["", ""]);
     }
   });

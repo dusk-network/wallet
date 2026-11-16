@@ -1,4 +1,4 @@
-import { linkAmount, readPastedLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
+import { linkAmount, pastedDuskNames, readPastedLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
 
 import { chainIdFromNodeUrl } from "../../shared/chain.js";
 import { chainIdForNode } from "../../shared/nodeNetwork.js";
@@ -27,13 +27,32 @@ export function readRequestLink(text, nodeUrl) {
  * (app-core's readPastedLink): a link whole, or a shared request ("… asks you
  * to pay … Pay here: <link>") by its one link at its end, with its line break
  * or without, as a phone's one-line field drops it; refused with two links,
- * or words after the link. Read as readRequestLink reads a link; null for
- * what has no link, which Send takes as a recipient.
+ * or words after the link, or a line that says another amount, memo,
+ * network or name than its link: its .dusk names by whose they are
+ * (`owners`, pastedRequestNames). Read as readRequestLink reads a link; null
+ * for what has no link, which Send takes as a recipient.
  * @param {string} text
  * @param {string} [nodeUrl] - the wallet's node; without one, any network's
+ * @param {{ owners?: Map<string, { account?: string, address?: string } | null> }} [opts]
  */
-export function readPastedRequest(text, nodeUrl) {
-  return readPastedLink(text, nodeUrl === undefined ? {} : { network: walletChainOf(nodeUrl) });
+export function readPastedRequest(text, nodeUrl, { owners } = {}) {
+  return readPastedLink(text, { ...(nodeUrl === undefined ? {} : { network: walletChainOf(nodeUrl) }), ...(owners ? { owners } : {}) });
+}
+
+/**
+ * The .dusk names a shared request's line says it's from, to look up on the
+ * wallet's network before it's read (readPastedRequest's `owners`), as the
+ * web wallet does. None for text that isn't such a request, nor for one its
+ * line is refused for already, nor for a request paid on another network,
+ * whose names this wallet's name service can't say: it's said to be for
+ * that network, as its link alone is.
+ * @param {string} text
+ * @param {string} [nodeUrl] - the wallet's node
+ * @returns {string[]}
+ */
+export function pastedRequestNames(text, nodeUrl) {
+  const options = nodeUrl === undefined ? {} : { network: walletChainOf(nodeUrl) };
+  return readPastedLink(text, options)?.reason === "other-network" ? [] : pastedDuskNames(text, options);
 }
 
 /**

@@ -433,6 +433,21 @@ export function stakingHistory(ov, { state, actions }) {
   return sozuHistory(ov, sozuState(state), { state, actions });
 }
 
+/**
+ * A stake or an unstake with Sozu went through, or failed: what Staking read
+ * of the profile's history goes, and Rewards by year reads it again as it
+ * next draws, the new one counted as on its way till the archive lists it
+ * (Lena's, the third round: right after the extension's own unstake, the year
+ * kept the "taken out" from before it for 25 s, beside a "grown" that had
+ * moved, as what was read before the unstake stood).
+ * @param {object} state - the popup's state
+ */
+export function readStakingAgain(state) {
+  const st = sozuState(state);
+  if (st.history?.againTimer) clearTimeout(st.history.againTimer);
+  st.history = null;
+}
+
 /** How long Sozu's facts wait before they're read again, while some aren't on the archive. */
 export const FACTS_AGAIN_MS = 20_000;
 

@@ -414,8 +414,8 @@ async function runEndpointChecks({ nodeUrl, proverUrl, archiverUrl }) {
   });
 }
 
-/** How long a page's ask of the node gets before it's said not to answer: less than a page asks again. */
-export const NODE_ANSWER_MS = 10_000;
+/** How long a page's ask of the node gets before it's said not to answer, as the web wallet gives it: a silent node is said so within about 10 seconds of the asks every 4. */
+export const NODE_ANSWER_MS = 6_000;
 
 // The node's ask under way, by its address: one at a time, as a node that holds
 // them open would otherwise use up the browser's connections to it.

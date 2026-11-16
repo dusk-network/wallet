@@ -44,12 +44,13 @@ const depthOf = (state) => (state && Number.isInteger(state.duskDepth) && state.
  * @param {() => boolean} [opts.asks] - whether the screen's way back asks
  *   first, with what's typed on it
  * @param {Window} [opts.win]
- * @returns {{ sync: () => void }} `sync` after a screen, a dialog or a menu
- *   changes, and after a press
+ * @returns {{ sync: () => void, stepIn: () => void }} `sync` after a screen,
+ *   a dialog or a menu changes, and after a press; `stepIn` after a step in
+ *   no press brought
  */
 export function installSystemBack({ backStep, screenKey, onFirst, asks = () => false, win = globalThis.window }) {
   const history = win?.history;
-  if (typeof history?.pushState !== "function") return { sync() {} };
+  if (typeof history?.pushState !== "function") return { sync() {}, stepIn() {} };
   const doc = win.document ?? globalThis.document;
   // The wallet's entries above the page's own: where the browser is.
   let entries = depthOf(history.state);
@@ -186,5 +187,21 @@ export function installSystemBack({ backStep, screenKey, onFirst, asks = () => f
   doc?.addEventListener?.("input", typedIn, true);
   doc?.addEventListener?.("paste", () => setTimeout(typedIn, 0), true);
 
-  return { sync };
+  /**
+   * A step in no press brought, as a payment link handed to the wallet's tab
+   * opens its Send there: the screen's entries go up all the same where the
+   * page has had a press before, as Firefox for Android takes Back to them
+   * then; not in a page no one has pressed anything in yet, whose entries it
+   * skips, going back to the page before.
+   */
+  function stepIn() {
+    if (target !== null) return;
+    const activation = win.navigator?.userActivation;
+    if (activation && !activation.hasBeenActive) return;
+    shown = screenKey();
+    afterBack = false;
+    while (entries < needed()) push();
+  }
+
+  return { sync, stepIn };
 }

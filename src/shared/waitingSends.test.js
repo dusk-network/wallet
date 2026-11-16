@@ -589,7 +589,8 @@ describe("a public payment handed to the node without a clear answer", () => {
     await askAgain();
     await expect(sent).resolves.toEqual({ hash: "c1", from: "found" });
     expect(attempt).toHaveBeenLastCalledWith({ found: { hash: "c1", nonce: "131" } });
-    expect(await kept()).toEqual([]);
+    // Said Sent, by its ID, till its block's in (forgetWent).
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", hash: "c1", waiting: false, went: expect.any(Number) })]);
   });
 
   it("nowhere, and its nonce unused, goes out once more as the very transaction made for it", async () => {
@@ -603,7 +604,7 @@ describe("a public payment handed to the node without a clear answer", () => {
     // Sent again as it was made: never made again, never twice.
     expect(attempt.mock.calls).toEqual([[{ waited: false }], [{ resend: true }]]);
     expect(host.release).not.toHaveBeenCalled();
-    expect(await kept()).toEqual([]);
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", hash: "c2", waiting: false, went: expect.any(Number) })]);
   });
 
   it("waits, maybe gone, while the node can't be asked, and holds the payments after it", async () => {
@@ -726,6 +727,225 @@ describe("a waiting payment as the wallet stops waiting for it", () => {
   });
 });
 
+describe("a payment that went out after it waited", () => {
+  // Lena's, in the app: "Sending: 0.01 DUSK…" on Home, then for 20 s no card, no payment and the old balance, till
+  // its block came in.
+  const goesOut = async (hash = "w1") => {
+    const attempt = vi
+      .fn()
+      .mockRejectedValueOnce(offline())
+      .mockImplementationOnce(async () => {
+        // The engine notes its transaction's ID and nonce before it hands it over.
+        await waiting.noteHandingOver("s1", { hash, nonce: "42" }, host);
+        return { hash };
+      });
+    const sent = waiting.sendWhenReachable({ sendId: "s1", record: record(), attempt, host });
+    await vi.advanceTimersByTimeAsync(0);
+    network.answers = true;
+    await askAgain();
+    await expect(sent).resolves.toEqual({ hash });
+  };
+
+  it("is said Sent, by its ID, till its block's in and the balance read since, never in neither list", async () => {
+    await goesOut();
+    const went = [expect.objectContaining({ sendId: "s1", hash: "w1", waiting: false, went: expect.any(Number) })];
+    expect(await kept()).toEqual(went);
+    // Never asked of the node as one handed over, nor dropped.
+    await waiting.followHandedOver(host);
+    expect(host.check).not.toHaveBeenCalled();
+    await expect(waiting.dropUnsent("s1")).resolves.toBe(false);
+    // On its way still, or done with the balance not read since: said Sent.
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [{ hash: "w1", status: "submitted" }]);
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [{ hash: "w1", status: "executed" }], { balanceRead: false });
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, null);
+    expect(await kept()).toEqual(went);
+    // Another wallet's or node's sends say nothing of it.
+    await waiting.forgetWent({ walletId: "another", nodeUrl: NODE }, []);
+    expect(await kept()).toEqual(went);
+    // In its block, the balance read after: gone.
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [{ hash: "w1", status: "executed" }]);
+    expect(await kept()).toEqual([]);
+  });
+
+  // Lena's, in the app again: it went out as Home read the wallet, after the sends were read, and that read forgot
+  // it as gone from them: no card, no payment and the old balance for 20 s.
+  it("is said Sent still after a read of the sends begun before it went out, which can't have it", async () => {
+    const read = waiting.sendsReadBegins();
+    await goesOut("w4");
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [], { read });
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", hash: "w4", waiting: false, went: expect.any(Number) })]);
+    // Read since, without it: the chain's history has it.
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [], { read: waiting.sendsReadBegins() });
+    expect(await kept()).toEqual([]);
+  });
+
+  it("goes once the chain's history has it, its record gone from the sends, or after a quarter of an hour", async () => {
+    await goesOut("w2");
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, []);
+    expect(await kept()).toEqual([]);
+    await goesOut("w3");
+    await vi.advanceTimersByTimeAsync(waiting.WENT_FOR_MS + 1);
+    await waiting.forgetWent({ walletId: WALLET, nodeUrl: NODE }, [{ hash: "w3", status: "submitted" }], { balanceRead: false });
+    expect(await kept()).toEqual([]);
+  });
+});
+
+describe("a public payment that waited, its account having sent something else meanwhile", () => {
+  // Chen's: the Wi-Fi dropped as she paid on her first phone, so the payment waited; she paid the same from her
+  // second; once the first had the network back, it sent its copy too, without asking.
+  beforeEach(() => {
+    network.nonce = 41n;
+    network.own = null;
+    host.nonceNow = vi.fn(async () => {
+      if (network.nonce instanceof Error) throw network.nonce;
+      return network.nonce;
+    });
+    host.ownNonce = vi.fn(async () => network.own);
+  });
+  const waitsFromNonce = (sendId, attempt, over = {}) => waiting.sendWhenReachable({ sendId, record: record({ seenNonce: "41", ...over }), attempt, host });
+
+  it("isn't sent by itself: it's held and said so, and goes out only on Send it too", async () => {
+    const attempt = vi.fn().mockRejectedValueOnce(offline()).mockResolvedValueOnce({ hash: "h1" });
+    const sent = waitsFromNonce("s1", attempt);
+    await vi.advanceTimersByTimeAsync(0);
+    // Paid from the other phone meanwhile: the account's nonce went on.
+    network.nonce = 42n;
+    network.answers = true;
+    await askAgain();
+    await askAgain();
+    expect(attempt).toHaveBeenCalledOnce();
+    expect(host.nonceNow).toHaveBeenCalledWith(expect.objectContaining({ sendId: "s1", account: "chen-account", seenNonce: "41" }));
+    expect(host.tell).toHaveBeenLastCalledWith({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: true, waits: false, held: true })]);
+    // Nothing waits for the network: Android's notice of it goes.
+    expect(waiting.waitingForNetwork()).toEqual([]);
+
+    // Send it too: what was sent meanwhile counts as seen, and it goes out at once.
+    await expect(waiting.sendHeld("s1", host)).resolves.toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(sent).resolves.toEqual({ hash: "h1" });
+    expect(attempt).toHaveBeenCalledTimes(2);
+    expect(await kept()).toEqual([]);
+  });
+
+  // Astra's: the other phone's transaction still in the node's mempool, the chain not up to it, Send it too built one
+  // at its nonce, as the engine counts a new one's from the chain's.
+  it("goes out on Send it too only once the chain has the other transaction, or the mempool no longer holds it", async () => {
+    for (const other of ["in its block", "gone from the mempool"]) {
+      network.chain = 41n;
+      host.chainNonce = vi.fn(async () => network.chain);
+      network.nonce = 41n;
+      network.answers = false;
+      const attempt = vi.fn().mockRejectedValueOnce(offline()).mockResolvedValueOnce({ hash: "h1" });
+      const sent = waitsFromNonce("s1", attempt);
+      await vi.advanceTimersByTimeAsync(0);
+      // The other phone's, in the node's mempool at 42; the chain still at 41.
+      network.nonce = 42n;
+      network.answers = true;
+      await askAgain();
+      await expect(waiting.sendHeld("s1", host)).resolves.toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      await askAgain();
+      await askAgain();
+      expect(attempt, other).toHaveBeenCalledOnce();
+      expect(await kept(), other).toEqual([expect.objectContaining({ sendId: "s1", waiting: true })]);
+      if (other === "in its block") network.chain = 42n;
+      else network.nonce = 41n;
+      await askAgain();
+      await expect(sent, other).resolves.toEqual({ hash: "h1" });
+      expect(attempt, other).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it("held, Don't send calls it off: nothing sent, nothing kept", async () => {
+    const attempt = vi.fn().mockRejectedValueOnce(offline()).mockResolvedValueOnce({ hash: "h2" });
+    const sent = waitsFromNonce("s1", attempt).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    network.nonce = 43n;
+    network.answers = true;
+    await askAgain();
+    await expect(waiting.cancelWaitingSend("s1", host)).resolves.toBe(true);
+    expect((await sent).data).toEqual({ sent: false, cancelled: true });
+    await askAgain();
+    expect(attempt).toHaveBeenCalledOnce();
+    expect(await kept()).toEqual([]);
+  });
+
+  it("goes out by itself as before where nothing else was sent, the wallet's own sends counting as seen", async () => {
+    // Two that waited, one behind the other: the first one's own nonce is no one else's send for the second.
+    const first = vi.fn().mockRejectedValueOnce(offline()).mockImplementationOnce(async () => {
+      network.nonce = 42n;
+      network.own = 42n;
+      return { hash: "p1" };
+    });
+    const second = vi.fn(async () => ({ hash: "p2" }));
+    const one = waitsFromNonce("s1", first);
+    await vi.advanceTimersByTimeAsync(0);
+    const two = waitsFromNonce("s2", second, { memo: "Deux" });
+    network.answers = true;
+    await askAgain();
+    await expect(one).resolves.toEqual({ hash: "p1" });
+    await expect(two).resolves.toEqual({ hash: "p2" });
+    expect(host.tell.mock.calls.some(([m]) => m.held)).toBe(false);
+  });
+
+  it("waits on, sent by nothing, while the node can't say the account's nonce", async () => {
+    const attempt = vi.fn().mockRejectedValueOnce(offline()).mockResolvedValueOnce({ hash: "h3" });
+    const sent = waitsFromNonce("s1", attempt);
+    await vi.advanceTimersByTimeAsync(0);
+    network.nonce = new Error("Account request failed (503)");
+    network.answers = true;
+    await askAgain();
+    expect(attempt).toHaveBeenCalledOnce();
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: true, waits: true })]);
+    // It says it, and nothing else went: out it goes.
+    network.nonce = 41n;
+    await askAgain();
+    await expect(sent).resolves.toEqual({ hash: "h3" });
+  });
+
+  it("held as the wallet locks, is kept as not sent, still said held, and never goes by itself", async () => {
+    const attempt = vi.fn().mockRejectedValueOnce(offline()).mockResolvedValue({ hash: "h4" });
+    const sent = waitsFromNonce("s1", attempt).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    network.nonce = 42n;
+    network.answers = true;
+    await askAgain();
+    await waiting.stopWaitingSends("locked", host);
+    expect((await sent).data).toEqual({ sent: false, cancelled: true });
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: false, ended: "locked", held: true })]);
+    await expect(waiting.sendHeld("s1", host)).resolves.toBe(false);
+    await askAgain();
+    expect(attempt).toHaveBeenCalledOnce();
+  });
+
+  it("made already, goes again as it is only while nothing else of its account waits at its nonce", async () => {
+    const lost = Object.assign(new TypeError("Failed to fetch"), { data: { sent: "unknown", hash: "c9" } });
+    const attempt = vi
+      .fn()
+      .mockImplementationOnce(async () => {
+        await waiting.noteHandingOver("s1", { hash: "c9", nonce: "42" }, host);
+        throw lost;
+      })
+      .mockResolvedValueOnce({ hash: "c9" });
+    const sent = waitsFromNonce("s1", attempt);
+    await vi.advanceTimersByTimeAsync(0);
+    // The node never had it, but the account's other send waits in its mempool at that nonce.
+    network.says = "absent";
+    network.nonce = 42n;
+    network.answers = true;
+    await askAgain();
+    await askAgain();
+    expect(attempt).toHaveBeenCalledOnce();
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: true, unclear: true })]);
+    // That one gone from the mempool, never in a block: its nonce is free, and it goes.
+    network.nonce = 41n;
+    await askAgain();
+    await expect(sent).resolves.toEqual({ hash: "c9" });
+    expect(attempt).toHaveBeenLastCalledWith({ resend: true });
+  });
+});
+
 describe("what's kept of a payment from Send's message", () => {
   it("is whose, where, and what it pays, never more", () => {
     const message = {
@@ -748,5 +968,8 @@ describe("what's kept of a payment from Send's message", () => {
       feeLux: "2500000",
       memo: "Hors ligne un",
     });
+    // The account's nonce as its Review read it, where it says one.
+    expect(waiting.waitingRecordOf({ ...message, seenNonce: "41" })).toEqual(expect.objectContaining({ seenNonce: "41" }));
+    expect(waiting.waitingRecordOf({ ...message, seenNonce: "x" })).not.toHaveProperty("seenNonce");
   });
 });

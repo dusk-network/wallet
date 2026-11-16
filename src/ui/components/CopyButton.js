@@ -63,9 +63,12 @@ export function resetCopied(button) {
  * @param {string} [opts.failText]
  * @param {(text: string) => void} [opts.onFail]
  * @param {(copied: string) => void} [opts.onCopied] - once a copy went through
+ * @param {() => boolean} [opts.hold] - asked first on a press: true holds the
+ *   copy back, as when the caller asks before it; the button's `pressAnyway()`
+ *   copies past it, from the press that answers
  * @param {boolean} [opts.stopPropagation] - a press doesn't reach the row it sits in
  * @param {object} [opts.attrs] - more attributes: title, disabled, role
- * @returns {HTMLButtonElement}
+ * @returns {HTMLButtonElement & { pressAnyway: () => void }}
  */
 export function copyButton({
   value,
@@ -75,10 +78,13 @@ export function copyButton({
   failText = "Couldn't copy",
   onFail,
   onCopied,
+  hold,
   stopPropagation = false,
   attrs = {},
 }) {
   liveRegion();
+  // A press past `hold`, as its question's answer.
+  let anyway = false;
   const face = (part, words) =>
     text ? h("span", { class: part, text: words }) : h("span", { class: part, html: iconSvg(words) });
   const button = h(
@@ -93,6 +99,7 @@ export function copyButton({
       "data-label": label,
       onclick: async (event) => {
         if (stopPropagation) event?.stopPropagation?.();
+        if (!anyway && hold?.()) return;
         const copied = String((typeof value === "function" ? value() : value) ?? "");
         if (!copied) return;
         if (!(await copyToClipboard(copied))) {
@@ -110,5 +117,13 @@ export function copyButton({
       ]),
     ]
   );
+  button.pressAnyway = () => {
+    anyway = true;
+    try {
+      button.click();
+    } finally {
+      anyway = false;
+    }
+  };
   return button;
 }

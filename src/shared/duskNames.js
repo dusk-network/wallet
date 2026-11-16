@@ -283,24 +283,36 @@ export async function resolveDuskName(input, { nodeUrl } = {}) {
 }
 
 /**
+ * Whose each .dusk name given is, as the name service says it on the
+ * wallet's network, for app-core's checks that take `owners`
+ * (profileNameCheck, and readPastedLink for a pasted request's line): its
+ * account and address where it's registered, null where it isn't or has
+ * expired. One the lookup couldn't say, as where it failed, is left out:
+ * nothing's said of it. Each is looked up once. Never throws.
+ * @param {string[]} names - .dusk names, as the name service writes them
+ * @param {{ nodeUrl?: string }} [opts]
+ * @returns {Promise<Map<string, { account?: string, address?: string } | null>>}
+ */
+export async function duskNamesOwners(names, { nodeUrl } = {}) {
+  const found = await Promise.all([...new Set(names)].map(async (dusk) => [dusk, await resolveDuskName(dusk, { nodeUrl }).catch(() => null)]));
+  const owners = new Map();
+  for (const [dusk, result] of found) {
+    if (result?.ok && (result.account || result.address)) owners.set(dusk, { account: result.account, address: result.address });
+    else if (result?.reason === "not_registered" || result?.reason === "expired") owners.set(dusk, null);
+  }
+  return owners;
+}
+
+/**
  * Whose each .dusk name in a name is, for a profile's name to be checked
- * against (app-core's profileNameCheck `owners`): by the name as the name
- * service writes it (`nameDuskNames`), its account and address where it's
- * registered, null where it isn't or has expired; one whose lookup failed is
- * left out, and is asked about. Never throws.
+ * against (app-core's profileNameCheck `owners`): each as the name service
+ * writes it (`nameDuskNames`), as duskNamesOwners says it; one it couldn't
+ * say is asked about. Never throws.
  * @param {string} name - the name typed
  * @param {{ nodeUrl?: string }} [opts]
  * @returns {Promise<Map<string, { account?: string, address?: string } | null>>}
  */
-export async function duskNameOwners(name, { nodeUrl } = {}) {
-  const owners = new Map();
-  for (const dusk of nameDuskNames(name)) {
-    const found = await resolveDuskName(dusk, { nodeUrl }).catch(() => null);
-    if (found?.ok && (found.account || found.address)) owners.set(dusk, { account: found.account, address: found.address });
-    else if (found?.reason === "not_registered" || found?.reason === "expired") owners.set(dusk, null);
-  }
-  return owners;
-}
+export const duskNameOwners = (name, { nodeUrl } = {}) => duskNamesOwners(nameDuskNames(name), { nodeUrl });
 
 /**
  * The verified primary .dusk name of a public account, read with the lens

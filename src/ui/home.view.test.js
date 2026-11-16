@@ -223,6 +223,11 @@ describe("home balance", () => {
     expect(draw({ shieldedSync: { state: "idle", notes: 0 } }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
     // What was read before, kept: shown, as it can't be read now.
     expect(draw({ shieldedSync: { state: "error" }, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true }, false)).toEqual(["Shielded · can't be read now", "0.05 DUSK", "Public and shielded"]);
+    // Lena's and Chen's, opened offline after a cold start: "Shielded · can't be read now 0 DUSK", with "Public and
+    // shielded" counting it. A 0 kept from before is no reading now: a dash, and no total.
+    for (const sync of [{ state: "done", progress: 1, notes: 3 }, { state: "idle", notes: 3 }]) {
+      expect(draw({ shieldedSync: sync, shieldedError: "Failed to fetch", shieldedStale: true, balanceStale: true }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
+    }
     // Read: 0 is 0.
     expect(draw({ shieldedSync: { state: "done", progress: 1, notes: 0 } })).toEqual(["Shielded", "0 DUSK", "Public and shielded"]);
   });
@@ -271,10 +276,13 @@ describe("home balance", () => {
       };
     };
     // Opened offline: the figures read last, never a dash, and when they were read.
-    const offline = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedStale: true, stakeStale: true }, false);
-    expect(offline.total).toBe("1.105 DUSK");
+    const offline = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true, stakeStale: true }, false);
+    expect(offline.total).toBe("1.155 DUSK");
     expect(offline.label).toBe("Total balance");
     expect(offline.note).toMatch(/^Your balance may be out of date until you're back online\. Last read (at|yesterday at|on .+ at) /);
+    // Lena's and Chen's: a shielded 0 kept from before is no reading now, so no total counts it (Q11).
+    const noShielded = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedStale: true, stakeStale: true }, false);
+    expect([noShielded.total, noShielded.label]).toEqual(["0.8575 DUSK", "Public balance"]);
     // Online, the node silent: the same, without the connection.
     expect(draw({ balanceError: "timed out", balanceStale: true, balanceReadAt: readAt }).note).toMatch(/^Your balance may be out of date\. Last read /);
     // What the node couldn't give now, by name: the stake; the stake and the shielded balance.
@@ -361,7 +369,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
     document.body.replaceChildren(...homeView(ov([send()]), { state, actions }));
     expect(boxes(document)).toEqual([
-      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers. If you leave Dusk Wallet, it goes out when you open it again.Cancel",
+      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers. If you leave Dusk Wallet, it goes out when you open it again. If Android closes the app first, you'll be asked to send it.Cancel",
     ]);
     // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
     document.body.replaceChildren(...homeView(ov([send()], { lockOnLeave: true }), { state, actions }));
@@ -415,5 +423,59 @@ describe("payments from Send waiting for the network, on Home", () => {
     // Don't send: gone, Home drawn again.
     document.body.querySelectorAll(".home-waiting button").filter((b) => b.textContent === "Don't send")[1].click();
     await vi.waitFor(() => expect(actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_DROP_UNSENT", sendId: "s2" }));
+  });
+
+  // Lena's, in the app: "Sending: 0.01 DUSK…", then for 20 s no card, no payment and the old balance.
+  it("says one that went out after it waited Sent, with no button, till its block's in", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2, 40));
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
+    const went = send({ waiting: false, waits: false, went: at(2, 39), hash: "w1".repeat(32) });
+    document.body.replaceChildren(...homeView(ov([went]), { state, actions }));
+    expect(boxes(document)).toEqual(["Sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34"]);
+    expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
+  });
+
+  // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
+  // its copy too once it had the network back, without asking.
+  it("says one held as its account sent something else while it waited, with what it pays, Send it too and Don't send", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2, 40));
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
+    const sent = [];
+    const actions = {
+      render: vi.fn(async () => {}),
+      showToast: vi.fn(),
+      send: vi.fn(async (message) => {
+        sent.push(message);
+        return { ok: true, result: message.type === "DUSK_UI_SEND_HELD" ? { sending: true } : { cancelled: true } };
+      }),
+    };
+    const held = send({ waits: false, held: true });
+    const stopped = send({ sendId: "s2", memo: "Hors ligne deux", waiting: false, waits: false, ended: "locked", held: true });
+    document.body.replaceChildren(...homeView(ov([held, stopped]), { state, actions }));
+    expect(boxes(document)).toEqual([
+      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
+      "Not sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
+    ]);
+
+    // Send it too: it goes as it would have.
+    const buttons = () => document.body.querySelectorAll(".home-waiting button");
+    buttons()[0].click();
+    await vi.waitFor(() => expect(actions.render).toHaveBeenCalledWith({ forceRefresh: true }));
+    expect(sent).toEqual([{ type: "DUSK_UI_SEND_HELD", sendId: "s1" }]);
+    expect(actions.showToast).not.toHaveBeenCalled();
+    // Don't send: called off, and said.
+    buttons()[1].click();
+    await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
+    expect(sent.at(-1)).toEqual({ type: "DUSK_UI_CANCEL_SEND", sendId: "s1" });
+    expect(actions.showToast).toHaveBeenCalledWith({ text: "Not sent: 0.01 DUSK to Lucas (petit-fils). Nothing was sent and no fee was charged.", tone: "ok" });
+    // One the wallet stopped as it waited for the answer: Send it too opens Review, as Send it now does.
+    buttons()[2].click();
+    await vi.waitFor(() => expect(state.route).toBe("confirm"));
+    expect(state.draft).toMatchObject({ to: LUCAS, amountLux: "10000000", memo: "Hors ligne deux", replaces: "s2" });
   });
 });

@@ -40,7 +40,7 @@ import { receiveView } from "./views/receive.js";
 import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
-import { sozuConfirmView } from "./views/sozu.js";
+import { readStakingAgain, sozuConfirmView } from "./views/sozu.js";
 import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentStatus, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
@@ -68,6 +68,7 @@ import {
   getExtensionApi,
   runtimeGetURL,
   tabsCreate,
+  tabsGetCurrent,
 } from "../../platform/extensionApi.js";
 
 // Keep everything in dark mode for now.
@@ -428,10 +429,11 @@ function setApp(children) {
   }
   // Another screen than a request's own: the link the page opened with was
   // left, or paid, and goes from its address; and what a link or a QR code
-  // filled in goes with it, not the next Send's.
+  // filled in goes with it, not the next Send's. Not one that opened the app
+  // before it had a wallet, which waits through the setup's screens.
   if (!onLinksScreens()) {
     forgetRequestLink();
-    if (state.draft?.filledIn) state.draft = null;
+    if (state.draft?.filledIn && !(state.draft.linkSetup && ONBOARD_ROUTES.has(state.route))) state.draft = null;
   }
   systemBack.sync();
 }
@@ -767,13 +769,28 @@ const endedTxs = new Set();
 const heardTxs = new Map();
 const endedStatus = (status) => status === "executed" || status === "failed";
 
+// This page's tab, where it's in one: a request link handed to the wallet's
+// tab is for its page alone (openPaymentLink).
+let thisTab = null;
+if (isExtensionRuntime()) {
+  tabsGetCurrent()
+    .then((tab) => (thisTab = tab?.id ?? null))
+    .catch(() => {});
+}
+
 function installTxStatusListener() {
   if (txStatusListenerInstalled) return;
   txStatusListenerInstalled = true;
 
   try {
-    const onWalletMessage = (msg) => {
+    const onWalletMessage = (msg, _sender, sendResponse) => {
       try {
+        if (msg?.type === "DUSK_UI_OPEN_LINK") {
+          const mine = thisTab !== null && msg.tabId === thisTab;
+          if (mine && openPaymentLink(String(msg.link ?? ""), { handed: true })) sendResponse?.({ ok: true });
+          return;
+        }
+
         if (msg?.type === "DUSK_UI_LOCK_STATE") {
           if (msg.isUnlocked === false) {
             scheduleLockedRefresh();
@@ -821,8 +838,11 @@ function installTxStatusListener() {
           const sent = state.sent;
           // Handed over, it may have gone out from then on, whatever comes after.
           const handedOver = Boolean(msg.handedOver) && !sent?.handedOver;
-          if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && (sent.waits !== Boolean(msg.waits) || handedOver)) {
+          // Held for Send it too, its account having sent something else meanwhile.
+          const held = Boolean(msg.held);
+          if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && (sent.waits !== Boolean(msg.waits) || handedOver || Boolean(sent.held) !== held)) {
             sent.waits = Boolean(msg.waits);
+            sent.held = held;
             if (handedOver) sent.handedOver = true;
             if (state.route === "sent") {
               toaster.announce(sentAnnouncement(sent, state.overview));
@@ -872,6 +892,8 @@ function installTxStatusListener() {
         ).toLowerCase();
         const record = hash && Array.isArray(state.overview?.txs) ? state.overview.txs.find((t) => String(t?.hash ?? "") === hash) : null;
         if (!endedStatus(status) && (endedTxs.has(hash) || endedStatus(String(record?.status ?? "")))) return;
+        // A stake or an unstake with Sozu through: Rewards by year reads the history again, it with it.
+        if (hash && endedStatus(status) && !endedTxs.has(hash) && (record?.asset?.kind === "sozu" || (state.sent?.hash === hash && state.sent?.sozu))) readStakingAgain(state);
         if (hash && endedStatus(status)) endedTxs.add(hash);
         const news = !hash || heardTxs.get(hash) !== status;
         if (hash) heardTxs.set(hash, status);
@@ -984,9 +1006,12 @@ try {
 // A node can stop answering without an error, and between reads, minutes
 // apart, nothing else would find it silent: while an unlocked wallet shows and
 // the browser is online, the node is asked whether it answers, at once and
-// every 15 seconds. What came of it shows at once, without a read that may
-// hang; once it answers again, the balance is read again.
-const ASK_NODE_EVERY_MS = 15_000;
+// every 4 seconds, each ask given 6 (networkStatus.js NODE_ANSWER_MS), as the
+// web wallet asks: one that goes silent is said so within about 10 seconds
+// (Lena's and Amélie's: 17 to 21 s here, 6 to 9 there). What came of it shows
+// at once, without a read that may hang; once it answers again, the balance is
+// read again.
+const ASK_NODE_EVERY_MS = 4_000;
 let askNodeTimer = null;
 let askingNode = false;
 
@@ -1243,10 +1268,25 @@ function leave() {
 // switched since (another wallet, a restore). Sends left on their way are
 // looked up again, as they couldn't be while it was locked.
 let wasUnlocked = null;
+// How long a payment link opened while the wallet's locked waits behind the
+// lock (Sofía's: one opened long before, on a phone shared with another,
+// filled Send in as she unlocked from the app's icon, saying nothing of it).
+const LINK_WAITS_MS = 10 * 60_000;
 function returnAfterUnlock(ov) {
   const unlocked = Boolean(ov?.isUnlocked);
   const unlockedNow = unlocked && wasUnlocked === false;
   wasUnlocked = unlocked;
+  // A link that waited behind the lock, the wallet unlocked: past its time,
+  // Home, as usual, and the link's form goes; in time, it's taken, and stays
+  // the person's, whenever drawn again, with when it was opened for Send to
+  // say (Astra's: unlocked at minute 8 and edited, a redraw at minute 10
+  // threw it away).
+  if (unlocked && Number(state.draft?.linkAt) > 0 && !state.draft.linkTaken) {
+    if (Date.now() - Number(state.draft.linkAt) > LINK_WAITS_MS) {
+      state.draft = null;
+      if (state.route === "send" || state.route === "confirm") state.route = "home";
+    } else state.draft.linkTaken = true;
+  }
   const back = state.returnTo;
   if (back && unlocked) {
     state.returnTo = null;
@@ -1346,6 +1386,8 @@ const netMenu = createNetworkMenuController({
       });
 
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to switch network");
+      // Picked on the setup screen, before there's a wallet: Import wallet has it picked.
+      if (!state.overview?.hasVault) state.setupNetwork = preset.id;
 
       showToast(`Switched to ${preset.label}`);
       state.needsRefresh = true;
@@ -1442,7 +1484,7 @@ function backStep() {
 const appBack = isTauriRuntime() && isPhone();
 if (appBack) listenForBack(() => (backStep() ?? moveAppToBack)());
 const systemBack = appBack
-  ? { sync() {} }
+  ? { sync() {}, stepIn() {} }
   : installSystemBack({
       // Which screen, by its route and its title, and how many dialogs and menus are open.
       screenKey: () =>
@@ -1612,6 +1654,12 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   }
 
   if (!ov?.hasVault) {
+    // A payment link that opened the app before there's a wallet: it waits
+    // through the setup, however long, and the setup screen says so.
+    if (state.draft?.filledIn === "link" && state.draft.linkUrl && !state.draft.linkSetup) {
+      const { linkAt: _linkAt, ...waits } = state.draft;
+      state.draft = { ...waits, linkSetup: true };
+    }
     if (!ONBOARD_ROUTES.has(state.route)) {
       state.route = "onboard_welcome";
     }
@@ -1789,18 +1837,44 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
 // after the unlock, when the wallet is locked. Send shows at once, from what
 // the wallet last read: a phone just woken can take a minute to answer, and
 // the balance follows when it does.
-listenForLinks((url) => {
+//
+// In the extension, a request link the background hands the wallet's tab
+// open already (`handed`, background/requestLinks.js), rather than sending
+// it to Send's address: Send, filled in from it here as one opened with the
+// page is, with the way back its steps have, so the phone's Back asks before
+// it drops the payment (Amélie's, Chen's and Marek's, in Firefox for
+// Android: the tab sent to Send's address went back to Home with the
+// phone's Back, without a word).
+function openPaymentLink(url, { handed = false } = {}) {
   const draft = requestDraftOf(`?link=${encodeURIComponent(url)}`);
-  if (!draft) return;
+  if (!draft) return false;
   netMenu.close();
   acctMenu.close();
+  // Opened in the app while the wallet's locked, it waits behind the lock:
+  // when, for Send to say, and to be dropped after LINK_WAITS_MS. With no
+  // wallet here, it waits through the setup instead (`linkSetup`, as it's
+  // drawn), and the link as it came goes to the phone's browser if asked.
+  if (!handed) {
+    if (!state.overview?.isUnlocked) Object.assign(draft, { linkAt: Date.now() });
+    Object.assign(draft, { linkUrl: url });
+  }
+  // Handed to the tab: the request it was opened with goes from its address,
+  // or a reload, or Firefox bringing the tab back, would fill Send with that
+  // one (Astra's).
+  if (handed) forgetRequestLink();
   Object.assign(state, { draft, route: "send" });
   render()
     .then(() => {
+      // No press brought it: its steps back go up all the same.
+      if (handed) systemBack.stepIn();
       state.needsRefresh = true;
       return render({ forceRefresh: true });
     })
     .catch(() => {});
+  return true;
+}
+listenForLinks((url) => {
+  openPaymentLink(url);
 });
 
 // --- A notice tapped in the app ----------------------------------------------

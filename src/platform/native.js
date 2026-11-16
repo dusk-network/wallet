@@ -51,6 +51,23 @@ export async function openInBrowser(url) {
 }
 
 /**
+ * Hands an https `url` to the phone's browser, never to this app, which
+ * Android gives the web wallet's request links to (android/SharePlugin.kt's
+ * browse): whether it opened. False outside the app.
+ * @param {string} url
+ */
+export async function openInPhoneBrowser(url) {
+  if (!isTauriRuntime() || !/^https:\/\//.test(String(url ?? ""))) return false;
+  stepAway();
+  try {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return (await invoke("open_in_browser", { url: String(url) })) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Android's share sheet with `text`, and a picture beside it where there's one
  * (`image`, a PNG, shared as `name`). False outside the app, or where there's none.
  * @param {string} text

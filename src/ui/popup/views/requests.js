@@ -13,14 +13,14 @@ import { CLOCK_SKEW_MS, matchRequests, refundOf, sentAlready } from "@dusk-netwo
 import { amountForInput, formatDuskExact } from "../../../shared/amount.js";
 import { chainIdFromNodeUrl } from "../../../shared/chain.js";
 import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
-import { forgetRequest, keepRequestsPaid, listRequests } from "../../../shared/paymentRequests.js";
+import { forgetRequest, keepRequestsPaid, listRequests, sameRequest } from "../../../shared/paymentRequests.js";
 import { balance, balancesHidden } from "../../components/Balance.js";
 import { copyButton } from "../../components/CopyButton.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { h } from "../../lib/dom.js";
 import { activityKey, activityRows, activitySince, lookForPayments, selected } from "../activity.js";
-import { whenAtText } from "./txRow.js";
+import { onDayAtText, whenAtText } from "./txRow.js";
 import { inCurrencyLine } from "../../lib/inCurrency.js";
 
 /** How often the history is read again while a request shown waits. */
@@ -60,6 +60,68 @@ function keptRequests(ov, { state, actions }) {
 /** Kept a request just made: the list shows it on the next draw. */
 export function requestKept(state, list) {
   if (state.requests && Array.isArray(list)) Object.assign(state.requests, { list, loaded: true });
+}
+
+/** What a request's card says before one paid already is copied or shared again. */
+export const paidAlreadyText = (at) => `This request was paid already, ${onDayAtText(at)}.`;
+
+/**
+ * When the request kept that asks what `asked` does was paid, as the list
+ * last matched it or as it was kept paid; null where it wasn't, or there's
+ * none.
+ * @param {object} state - the popup's state
+ * @param {{ lux: bigint | string | null, memo: string, network: string, to: string }} asked
+ * @returns {number | null}
+ */
+export function paidAtOf(state, asked) {
+  const kept = sameRequest(state?.requests?.list, asked);
+  const at = kept ? (kept.paid?.at ?? state.requests.paidAt?.get(kept.id)) : null;
+  return Number.isFinite(at) ? at : null;
+}
+
+/**
+ * Asks before a request paid already is copied or shared again, on its own
+ * card, so nothing hides it: "This request was paid already, on <date>."
+ * with Copy anyway, Share anyway or Download anyway, and Cancel; only its
+ * anyway gives it out (Sofía's, Nandini's, Marek's and Chen's: Copy said only
+ * Copied, Share sent a fresh "asks you to pay" for an invoice paid twice, and
+ * in the app the one toast that said so hid under Android's clipboard preview).
+ * What's asked stays through a redraw (`holder.asking`).
+ * @param {object} holder - where the question asked is kept: state.requests, or Receive's form
+ * @param {string} key - whose question: a request's ID, or the form's
+ * @param {Record<string, { verb: string, go: () => void }>} acts - what each button gives out, by name
+ * @returns {{ el: HTMLElement, open: (act: string, at: number) => void }}
+ */
+export function paidAsk(holder, key, acts) {
+  const el = h("div", { class: "callout warn request-paid-ask", role: "alert", hidden: true });
+  const close = () => {
+    if (holder?.asking?.key === key) holder.asking = null;
+    el.hidden = true;
+    el.replaceChildren();
+  };
+  const open = (act, at) => {
+    const { verb, go } = acts[act] ?? {};
+    if (!go || !Number.isFinite(at)) return;
+    if (holder) holder.asking = { key, act, at };
+    el.replaceChildren(
+      h("p", { class: "request-paid-ask__text", text: paidAlreadyText(at) }),
+      h("div", { class: "request-paid-ask__actions" }, [
+        h("button", {
+          class: "btn-outline",
+          type: "button",
+          text: `${verb} anyway`,
+          onclick: () => {
+            close();
+            go();
+          },
+        }),
+        h("button", { class: "btn-outline", type: "button", text: "Cancel", onclick: close }),
+      ])
+    );
+    el.hidden = false;
+  };
+  if (holder?.asking?.key === key) open(holder.asking.act, holder.asking.at);
+  return { el, open };
 }
 
 // Reads the history again in 30 seconds, while Receive still shows: the sync's
@@ -243,6 +305,28 @@ function requestRow(request, match, { ov, hidden, address, state, actions, walle
   // What it asks comes to in your currency now, on mainnet, hidden with the balances.
   const inCurrency = inCurrencyLine(ov, "request-row__in-currency");
   inCurrency.set(hidden ? null : request.lux);
+  // Paid already: said with when beside its Copy and Share, which ask first on the card.
+  const paidAt = !earlier && match?.state === "paid" && Number.isFinite(match.at) ? match.at : null;
+  const what = `${request.lux === null ? "any amount" : hidden ? "a hidden amount" : `${formatDuskExact(request.lux)} DUSK`}${request.memo ? `, ${request.memo}` : ""}`;
+  const copyLink = linkOf(request)
+    ? copyButton({
+        value: () => linkOf(request),
+        label: `Copy the link of the request for ${what}`,
+        text: "Copy link",
+        className: "text-btn",
+        failText: "Copy failed",
+        onFail: actions?.showToast,
+        hold: () => {
+          if (paidAt === null) return false;
+          ask.open("copy", paidAt);
+          return true;
+        },
+      })
+    : null;
+  const ask = paidAsk(state.requests, request.id, {
+    copy: { verb: "Copy", go: () => copyLink?.pressAnyway() },
+    share: { verb: "Share", go: () => share?.(request) },
+  });
   return h("li", { class: "request-row" }, [
     h("div", { class: "request-row__head" }, [
       h("span", { class: "request-row__amount" }, request.lux === null ? ["Any amount"] : [balance(hidden, formatDuskExact(request.lux)), " DUSK"]),
@@ -257,29 +341,22 @@ function requestRow(request, match, { ov, hidden, address, state, actions, walle
     paymentList,
     h("div", { class: "request-row__actions" }, [
       ...payments.map(({ at, hash }) => h("button", { class: "text-btn chain-link", type: "button", text: "See payment", onclick: () => open(hash, at) })),
+      paidAt === null ? null : h("span", { class: "request-row__paid", text: `${again.length ? "Paid twice, first" : "Paid"} ${whenAtText(paidAt)}` }),
       // Its link to copy again, as the web wallet's list has it.
-      linkOf(request)
-        ? copyButton({
-            value: () => linkOf(request),
-            label: `Copy the link of the request for ${request.lux === null ? "any amount" : hidden ? "a hidden amount" : `${formatDuskExact(request.lux)} DUSK`}${request.memo ? `, ${request.memo}` : ""}`,
-            text: "Copy link",
-            className: "text-btn",
-            failText: "Copy failed",
-            onFail: actions?.showToast,
-          })
-        : null,
+      copyLink,
       // In the app, its own Share beside it: its words, its link and its QR code, as it was asked.
       share && linkOf(request)
         ? h("button", {
             class: "text-btn",
             type: "button",
             text: "Share",
-            "aria-label": `Share the request for ${request.lux === null ? "any amount" : hidden ? "a hidden amount" : `${formatDuskExact(request.lux)} DUSK`}${request.memo ? `, ${request.memo}` : ""}`,
-            onclick: () => share(request),
+            "aria-label": `Share the request for ${what}`,
+            onclick: () => (paidAt === null ? share(request) : ask.open("share", paidAt)),
           })
         : null,
       h("button", { class: "text-btn", type: "button", text: "Remove", "aria-label": `Remove the request${request.memo ? ` "${request.memo}"` : ""}`, onclick: remove }),
     ].filter(Boolean)),
+    ask.el,
   ]);
 }
 
@@ -305,6 +382,8 @@ export function requestsSection(ov, { state, actions, share = null } = {}) {
   const since = open.length ? Math.min(...open.map((request) => request.at)) - CLOCK_SKEW_MS : null;
   const rows = requestRows(ov, { state, actions }, kept, since);
   const matches = matchRequests(mine, rows);
+  // When each paid, as matched now: Receive's form asks before giving one out again too.
+  kept.paidAt = new Map([...matches].filter(([, match]) => match?.state === "paid" && Number.isFinite(match.at)).map(([id, match]) => [id, match.at]));
   const rowOf = (hash) => rows.find((row) => row.hash === hash);
   // A paid request's payment, past the page once it's kept paid: read back to its time.
   const rowBack = async (hash, at) => {

@@ -25,7 +25,7 @@ import {
   executionEventOk,
   waitForTxExecution,
 } from "../shared/txExecution.js";
-import { classifyTxPresence, finalizedTxMetadata, handedOverState } from "../shared/txLifecycle.js";
+import { accountNonce, accountNonceNow, classifyTxPresence, finalizedTxMetadata, handedOverState } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx } from "../shared/txReconcile.js";
 import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.js";
 import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
@@ -38,7 +38,7 @@ import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import { formatDusk } from "../shared/amount.js";
 import { shortAddress } from "../ui/lib/strings.js";
-import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingForNetwork, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, forgetWent, noteHandingOver, reviewedParams, sendHeld, sendsReadBegins, sendWhenReachable, stopWaitingSends, waitingForNetwork, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import {
@@ -69,6 +69,7 @@ import {
   resendSend,
   forgetHandedOver,
   sendUnderWay,
+  lastOwnNonce,
   setHandOverHook,
   selectAccountIndex,
   setShieldedCheckpointNow,
@@ -106,7 +107,7 @@ const noticeTokenOf = (hash, walletId) => noticeTokenFor(hash, String(walletId ?
 // What a payment's notice says of it, as Activity does: how much, but not
 // while balances are hidden, and to whom: the contact's name, a profile's of
 // this wallet, the .dusk name it was sent to, else its short address.
-async function paymentOf({ kind, to, amount, toName, walletId }) {
+async function paymentOf({ kind, to, amount, toName, walletId, memo }) {
   if (String(kind ?? "") !== TX_KIND.TRANSFER || !to) return {};
   const hidden = (await getSettings().catch(() => null))?.hideBalances === true;
   const address = String(to);
@@ -116,7 +117,7 @@ async function paymentOf({ kind, to, amount, toName, walletId }) {
   const own = isUnlocked() ? [getAccounts(), getAddresses()].map((list) => (Array.isArray(list) ? list.indexOf(address) : -1)).find((i) => i >= 0) : undefined;
   const label = own === undefined ? "" : String((await getAccountNames(String(walletId ?? getAccounts()[0] ?? "")).catch(() => ({})))?.[String(own)] ?? "").trim() || `Profile ${own + 1}`;
   const name = contacts.find((contact) => contact?.address === address)?.name || label || typedRecipientName(toName) || shortAddress(address);
-  return { amount: hidden || !amount ? "" : formatDusk(String(amount)), to: name };
+  return { amount: hidden || !amount ? "" : formatDusk(String(amount)), to: name, memo: String(memo ?? "") };
 }
 
 // A payment's arrival as a notice, in the app on a phone: once the person
@@ -194,6 +195,11 @@ const waitingHost = {
   check: (record) => handedOverState(record.nodeUrl, record),
   release: async (sendId) => forgetHandedOver({ sendId }),
   underWay: async (sendId) => sendUnderWay({ sendId })?.underWay === true,
+  // Whether the account sent something else while one waited: its nonce on
+  // the node now, and the last the wallet's own sends took.
+  nonceNow: (record) => accountNonceNow(record.nodeUrl, record.account),
+  chainNonce: (record) => accountNonce(record.nodeUrl, record.account),
+  ownNonce: async (record) => lastOwnNonce({ profileIndex: Number(record.profileIndex) || 0 }).nonce,
   // Handed to the node: kept as a sent one, from when it was made, and looked
   // up by its ID at once; `unclear`, as a send with no clear answer.
   follow: async ({ record, hash, unclear = false }) => {
@@ -584,8 +590,12 @@ export async function localSend(message) {
       // Recent activity (transaction list) scoped to the current node URL
       // and the wallet unlocked.
       let txs = [];
+      let txsRead = false;
+      // A payment gone out after this read began can't be among them (forgetWent).
+      const txsReadBegan = sendsReadBegins();
       try {
         txs = status.isUnlocked ? await listTxs({ nodeUrl: settings.nodeUrl, walletId: String(status.accounts?.[0] ?? "") }) : [];
+        txsRead = true;
       } catch {
         txs = [];
       }
@@ -656,6 +666,11 @@ export async function localSend(message) {
             { balance, shieldedBalance }
           ).catch(() => ({}))
         : {};
+      // A payment said Sent on Home after it waited goes once its block's in,
+      // by the sends read above, and the balance was read after them.
+      if (status.isUnlocked) {
+        await forgetWent({ walletId: String(status.accounts?.[0] ?? ""), nodeUrl: settings.nodeUrl }, txsRead ? txs : null, { balanceRead: Boolean(balance) && !balanceError, read: txsReadBegan }).catch(() => {});
+      }
       return {
         hasVault: Boolean(vault),
         isUnlocked: status.isUnlocked,
@@ -791,6 +806,11 @@ export async function localSend(message) {
     // whether it was called off before it went out.
     if (message?.type === "DUSK_UI_CANCEL_SEND") {
       return { ok: true, result: { cancelled: await cancelWaitingSend(String(message.sendId ?? ""), waitingHost) } };
+    }
+
+    // Send it too, on a payment held as its account sent something else while it waited.
+    if (message?.type === "DUSK_UI_SEND_HELD") {
+      return { ok: true, result: { sending: await sendHeld(String(message.sendId ?? ""), waitingHost) } };
     }
 
     // Don't send on a payment from Send that wasn't sent.

@@ -71,6 +71,16 @@ describe("shield and unshield", () => {
     ]);
   });
 
+  // Lena's and Chen's: opened with no signal, the shielded balance said 0 where it couldn't be read.
+  it("says no Available and nothing missing for an Unshield whose shielded balance can't be read now", () => {
+    const unread = { ...ov, shieldedBalance: { value: "0", spendable: "0" }, shieldedStale: true, shieldedError: "Failed to fetch" };
+    const state = { route: "convert", draft: { kind: TX_KIND.UNSHIELD } };
+    dom.document.body.replaceChildren(...convertFormView(unread, { state, actions: actions(state) }));
+    expect(isShown(body().querySelector(".amount-avail"))).toBe(false);
+    typeInto(body().querySelectorAll("input").find((i) => accessibleName(i) === "Amount"), "1");
+    expect(visibleText(body())).not.toMatch(/more DUSK|0 DUSK/);
+  });
+
   it("fills Max with the real amount, and says under the field what's wrong", () => {
     const state = { route: "convert", draft: { kind: TX_KIND.UNSHIELD } };
     draw(state);

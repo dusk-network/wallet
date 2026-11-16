@@ -84,6 +84,23 @@ describe("a field typed in on a phone", () => {
     expect(page.button.getBoundingClientRect().bottom).toBeLessThanOrEqual(434);
   });
 
+  // Marek's: back from the app switcher, the keyboard up again, the recovery-word box typed in sat half behind it and
+  // its chips under it, the page saying nothing of the keyboard as it came back.
+  it("puts the field typed in above the keyboard again as the page comes back from the app switcher", async () => {
+    const page = importTab();
+    await page.focus(page.confirm);
+    const html = page.dom.document.documentElement;
+    expect(page.confirm.getBoundingClientRect().bottom).toBeLessThanOrEqual(434);
+    // Away and back: the page scrolled back down meanwhile, as Firefox brought it back.
+    html.scrollTop = 0;
+    expect(page.confirm.getBoundingClientRect().bottom).toBeGreaterThan(434);
+    page.dom.document.visibilityState = "visible";
+    page.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    await settle();
+    expect(page.confirm.getBoundingClientRect().top).toBeGreaterThanOrEqual(12);
+    expect(page.confirm.getBoundingClientRect().bottom).toBeLessThanOrEqual(434);
+  });
+
   // Chen's and Marek's: "The same payment is waiting to go out…" said under the memo put Review under the keyboard, and
   // the note that the phrase is still on the clipboard showed under it as the words were pasted.
   it("puts a warning said as a field is typed in above the keyboard, with the button after it", async () => {

@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), resendSend: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), resendSend: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null, balanceRead: null }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -102,6 +102,8 @@ vi.mock("../shared/walletEngine.js", () => ({
   getCachedGasPrice: vi.fn(async () => ({ median: "1" })),
   // The node's balance where a test says it (`engine.balance`), else none to read, as with no signal.
   getPublicBalance: async () => {
+    // A read that takes a while, where a test holds it (`engine.balanceRead`).
+    await engine.balanceRead?.();
     if (!engine.balance) throw new TypeError("Failed to fetch");
     return { nonce: 4n, value: engine.balance };
   },
@@ -114,6 +116,8 @@ vi.mock("../shared/walletEngine.js", () => ({
   resendSend: engine.resendSend,
   forgetHandedOver: vi.fn(() => ({ forgotten: true })),
   sendUnderWay: vi.fn(() => ({ underWay: false })),
+  // The last nonce the wallet's own sends took: none here.
+  lastOwnNonce: vi.fn(() => ({ nonce: null })),
   // What's told of a payment that waited before it's handed over: the app's bus keeps it.
   setHandOverHook: (hook) => {
     engine.handOverHook = hook;
@@ -199,6 +203,7 @@ beforeEach(() => {
   engine.executed = null;
   engine.handedOver = new Set();
   engine.balance = null;
+  engine.balanceRead = null;
   statusChecks.nodeAnswers = true;
 });
 
@@ -558,15 +563,19 @@ describe("a payment from Send in the app, as Android ends it or the signal goes 
     vi.stubGlobal("window", { dispatchEvent: told });
     return () => told.mock.calls.map(([event]) => event.detail).filter((m) => m.type === "DUSK_UI_SEND_WAITING");
   };
-  // The node, as its GraphQL and its account status answer: what it has of the payment, and the account's nonce.
-  const node = { has: "nothing", nonce: 130 };
+  // The node, as its GraphQL and its account status answer: what it has of the payment, the account's nonce, and
+  // the account's other sends waiting in its mempool (`waiting`, their nonces).
+  const node = { has: "nothing", nonce: 130, waiting: [] };
   const stubNode = () =>
     vi.stubGlobal("fetch", async (input, init = {}) => {
       const url = String(input);
       const body = String(init.body ?? "");
       const json = (value) => ({ ok: true, status: 200, text: async () => JSON.stringify(value) });
       if (url.endsWith("/on/graphql/query") && body.includes("tx(hash")) return json({ tx: node.has === "chain" ? { id: HASH, err: null, blockHeight: 4848915 } : null });
-      if (url.endsWith("/on/graphql/query") && body.includes("mempoolTxs")) return json({ mempoolTxs: node.has === "mempool" ? [{ id: HASH }] : [] });
+      if (url.endsWith("/on/graphql/query") && body.includes("mempoolTxs")) {
+        const others = node.waiting.map((nonce) => ({ id: `${nonce}`.padStart(64, "e"), json: JSON.stringify({ type: "moonlight", sender: "account of wallet A", receiver: ACCOUNT, value: 10000000, nonce }) }));
+        return json({ mempoolTxs: [...(node.has === "mempool" ? [{ id: HASH }] : []), ...others] });
+      }
       if (/\/on\/account:[^/]+\/status$/.test(url)) return json({ balance: 481844605, nonce: node.nonce, next_nonce: node.nonce + 1 });
       throw new TypeError("Failed to fetch");
     });
@@ -581,6 +590,7 @@ describe("a payment from Send in the app, as Android ends it or the signal goes 
   beforeEach(() => {
     node.has = "nothing";
     node.nonce = 130;
+    node.waiting = [];
     stubNode();
   });
   afterEach(() => vi.useRealTimers());
@@ -622,8 +632,114 @@ describe("a payment from Send in the app, as Android ends it or the signal goes 
     expect(engine.resendSend).toHaveBeenCalledWith({ sendId: "send-0008" });
     expect(engine.sendTransaction).toHaveBeenCalledOnce();
     const after = await overview(localSend);
-    expect(after.waitingSends).toEqual([]);
+    // Said Sent on Home till its block's in.
+    expect(after.waitingSends).toEqual([expect.objectContaining({ sendId: "send-0008", waiting: false, went: expect.any(Number) })]);
     expect(after.txs).toEqual([expect.objectContaining({ hash: HASH, status: "submitted", memo: "Cendol" })]);
+  });
+
+  // Lena's: a payment that waited offline said "Sending: 0.01 DUSK…" on Home, then for 20 s there was no card, no
+  // payment and the old balance, till its block came in.
+  it("says a payment that went out after it waited Sent on Home till its block's in and the balance is read after", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    const heard = page();
+    engine.sendTransaction.mockRejectedValueOnce(Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } })).mockImplementationOnce(async ({ sendId }) => {
+      await engine.handOverHook({ sendId, hash: HASH, nonce: "131" });
+      return { hash: HASH, nonce: 131n };
+    });
+    statusChecks.nodeAnswers = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reviewed = { ...params, _approvalContext: { walletId: "account of wallet A", profileIndex: 0, account: "account of wallet A", nodeUrl } };
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0013", walletId: "account of wallet A", params: reviewed });
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0013", waits: true }));
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: HASH } });
+
+    // Gone out: Sent on Home, and among the sends, never in neither.
+    engine.balance = 1_000_000_000n;
+    let ov = await overview(localSend);
+    expect(ov.waitingSends).toEqual([expect.objectContaining({ sendId: "send-0013", hash: HASH, waiting: false, went: expect.any(Number) })]);
+    expect(ov.txs).toEqual([expect.objectContaining({ hash: HASH, status: "submitted" })]);
+    // In its block, the balance not read: Sent still. Read: gone from Home, Activity has it.
+    const { getTxEpoch, patchTxMeta } = await import("../shared/txStore.js");
+    await patchTxMeta(HASH, { status: "executed" }, { epoch: await getTxEpoch() });
+    engine.balance = null;
+    ov = await overview(localSend);
+    expect(ov.waitingSends).toEqual([expect.objectContaining({ sendId: "send-0013", went: expect.any(Number) })]);
+    engine.balance = 990_000_000n;
+    ov = await overview(localSend);
+    expect(ov.waitingSends).toEqual([]);
+    expect(ov.txs).toEqual([expect.objectContaining({ hash: HASH, status: "executed" })]);
+  });
+
+  // Lena's again: it went out as Home read the wallet, after the sends were read, and that read forgot it: no card,
+  // no payment and the old balance for 20 s.
+  it("says a payment that went out as Home read the wallet Sent, though the sends read before it don't have it", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    const heard = page();
+    engine.sendTransaction.mockRejectedValueOnce(Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } })).mockImplementationOnce(async ({ sendId }) => {
+      await engine.handOverHook({ sendId, hash: HASH, nonce: "131" });
+      return { hash: HASH, nonce: 131n };
+    });
+    statusChecks.nodeAnswers = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reviewed = { ...params, _approvalContext: { walletId: "account of wallet A", profileIndex: 0, account: "account of wallet A", nodeUrl } };
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0014", walletId: "account of wallet A", params: reviewed });
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0014", waits: true }));
+
+    // Home reads the wallet: the sends, then the balance, which takes a while; it goes out meanwhile.
+    engine.balance = 1_000_000_000n;
+    const asked = Promise.withResolvers();
+    const answer = Promise.withResolvers();
+    engine.balanceRead = () => {
+      asked.resolve();
+      return answer.promise;
+    };
+    const reading = overview(localSend);
+    await asked.promise;
+    engine.balanceRead = null;
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: HASH } });
+    answer.resolve();
+    const ov = await reading;
+    // In the one or the other, never in neither.
+    expect([ov.txs, ov.waitingSends]).toEqual([[], [expect.objectContaining({ sendId: "send-0014", hash: HASH, waiting: false, went: expect.any(Number) })]]);
+  });
+
+  // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
+  // its copy too once it had the network back, without asking.
+  it("holds a payment that waited where its account sent something else meanwhile, seen in the node's mempool, till Send it too", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { nodeUrl } = await (await import("../shared/settings.js")).getSettings();
+    const heard = page();
+    engine.sendTransaction.mockRejectedValueOnce(Object.assign(new TypeError("Failed to fetch"), { data: { sent: false } })).mockResolvedValueOnce({ hash: HASH, nonce: 132n });
+    statusChecks.nodeAnswers = false;
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const reviewed = { ...params, _approvalContext: { walletId: "account of wallet A", profileIndex: 0, account: "account of wallet A", nodeUrl } };
+    const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0012", walletId: "account of wallet A", seenNonce: "130", params: reviewed });
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0012", waits: true }));
+
+    // Her other phone's payment waits in the node's mempool as the network comes back.
+    node.waiting = [131];
+    statusChecks.nodeAnswers = true;
+    await vi.advanceTimersByTimeAsync(5_000);
+    await vi.waitFor(() => expect(heard()).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-0012", waits: false, held: true }));
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(engine.sendTransaction).toHaveBeenCalledOnce();
+    expect((await overview(localSend)).waitingSends).toEqual([expect.objectContaining({ sendId: "send-0012", memo: "Cendol", waiting: true, held: true })]);
+
+    // Send it too: out it goes once the chain has her other payment, never at its nonce (Astra's).
+    await expect(localSend({ type: "DUSK_UI_SEND_HELD", sendId: "send-0012" })).resolves.toEqual({ ok: true, result: { sending: true } });
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(engine.sendTransaction).toHaveBeenCalledOnce();
+    node.nonce = 131;
+    node.waiting = [];
+    await vi.advanceTimersByTimeAsync(5_000);
+    await expect(response).resolves.toMatchObject({ ok: true, result: { hash: HASH } });
+    expect(engine.sendTransaction).toHaveBeenCalledTimes(2);
   });
 
   // Astra's: a Testnet payment lost its answer, Mainnet was chosen meanwhile, and the payment the node had all the same
@@ -1298,10 +1414,10 @@ describe("arrival notices in the app on a phone", () => {
     vi.stubGlobal("document", { visibilityState: "hidden" });
     return phoneNotices.asked;
   };
-  const sendAndSettle = async (localSend, hash, { to = ACCOUNT, amount = "1", toName } = {}) => {
+  const sendAndSettle = async (localSend, hash, { to = ACCOUNT, amount = "1", toName, memo } = {}) => {
     engine.executed = Promise.withResolvers();
     engine.sendTransaction.mockResolvedValueOnce({ hash, nonce: 1n });
-    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to, amount }, ...(toName ? { toName } : {}) });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to, amount, ...(memo ? { memo } : {}) }, ...(toName ? { toName } : {}) });
     engine.executed.resolve({ data: { err: null } });
   };
   // What a send left behind, done: its watcher's steps, as many as it takes.
@@ -1386,7 +1502,7 @@ describe("arrival notices in the app on a phone", () => {
           wallet: "account of wallet A",
           nodeUrl,
           title: "A payment is waiting",
-          away: "It goes out when you open Dusk Wallet again.",
+          away: "It goes out when you open Dusk Wallet again. If Android closes the app first, you'll be asked to send it.",
           back: "Open Dusk Wallet to send it.",
         })
       );
@@ -1476,6 +1592,25 @@ describe("arrival notices in the app on a phone", () => {
     // The notice Android shows says which payment, and on a locked phone that hides it, only what came of it.
     expect([phoneNotices.watched[1].title, phoneNotices.watched[1].body, phoneNotices.watched[1].publicBody]).toEqual(["Your payment arrived", "0.03 DUSK to sofiadesign.dusk · Mainnet", "Mainnet"]);
     await vi.waitFor(() => expect(phoneNotices.settled).toContain("e2".repeat(32)));
+  });
+
+  // Sofía's: "Your payment arrived · 0.01 DUSK to Lena · Testnet", after Android had closed the app, without the memo
+  // that says which job it was.
+  it("names the payment's memo in its notice, the one Android shows once the app's closed too, never on a locked screen", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
+    await sendAndSettle(localSend, "e7".repeat(32), { amount: "10000000", toName: "lena.dusk", memo: "Metro sin cobertura 153" });
+    await settled("e7".repeat(32));
+    const watched = (hash) => phoneNotices.watched.find((w) => w.hash === hash);
+    await vi.waitFor(() => expect(watched("e7".repeat(32))).toBeTruthy());
+    expect([watched("e7".repeat(32)).body, watched("e7".repeat(32)).publicBody]).toEqual(["0.01 DUSK to lena.dusk · “Metro sin cobertura 153” · Mainnet", "Mainnet"]);
+    // A memo a notice can't show as it is: left to its details.
+    await sendAndSettle(localSend, "e8".repeat(32), { amount: "10000000", toName: "lena.dusk", memo: "Factura\u202e153" });
+    await settled("e8".repeat(32));
+    await vi.waitFor(() => expect(watched("e8".repeat(32))).toBeTruthy());
+    expect(watched("e8".repeat(32)).body).toBe("0.01 DUSK to lena.dusk · Mainnet");
+    await vi.waitFor(() => expect(phoneNotices.settled).toContain("e8".repeat(32)));
   });
 
   // Astra's: after a reset, Android kept looking for the old wallet's sends on its node, and told them.

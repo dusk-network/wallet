@@ -410,6 +410,42 @@ describe("after Confirm", () => {
     expect(button("Cancel")).toBeUndefined();
   });
 
+  // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
+  // its copy too once it had the network back, without asking.
+  it("sends its account's nonce as Review read it, and holds a payment whose account sent something else meanwhile, with Send it too and Don't send", async () => {
+    const state = reviewState();
+    const app = popup(state, overview({ balance: { value: dusk(2000), nonce: "41" } }));
+    await settle();
+    const sending = await app.confirm();
+    const [asked] = app.actions.send.mock.calls.find(([m]) => m.type === "DUSK_UI_SEND_TX");
+    expect(asked).toMatchObject({ seenNonce: "41" });
+
+    // The wallet says it's held (DUSK_UI_SEND_WAITING, held).
+    Object.assign(state.sent, { waits: false, held: true });
+    app.draw();
+    expect(steps()[0]).toEqual(["unknown", "Not sent yet", "Your account sent something else while this waited."]);
+    expect(body.querySelectorAll(".sent-actions button").map(visibleText)).toEqual(["Send it too", "Don't send", "Done"]);
+    expect(note()).toBeNull();
+
+    // Send it too: it goes on as one that waits for the network does.
+    app.actions.send.mockImplementation(async (message) => (message.type === "DUSK_UI_SEND_HELD" ? { ok: true, result: { sending: true } } : {}));
+    button("Send it too").click();
+    await settle();
+    expect(app.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SEND_HELD", sendId: state.sent.sendId });
+    expect(steps()[0]).toEqual(["current", "Sending", "The network isn't answering. Nothing has left your wallet yet. It goes out once the network answers."]);
+
+    // Held again, and Don't send: called off, not sent, no fee.
+    Object.assign(state.sent, { waits: false, held: true });
+    app.draw();
+    app.actions.send.mockImplementation(async (message) => (message.type === "DUSK_UI_CANCEL_SEND" ? { ok: true, result: { cancelled: true } } : {}));
+    button("Don't send").click();
+    await settle();
+    expect(app.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_CANCEL_SEND", sendId: state.sent.sendId });
+    sending.resolve({ error: { message: "You cancelled it, so nothing was sent.", data: { sent: false, cancelled: true } } });
+    await settle();
+    expect(steps()[0]).toEqual(["failed", "Not sent", "You cancelled it, so nothing was sent. No fee was charged."]);
+  });
+
   it("says a send other than a payment from Send can't reach the network offline, never that it waits", async () => {
     const state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountDusk: "2", amountLux: dusk(2) } };
     const app = popup(state, overview(), convertConfirmView);
@@ -765,7 +801,8 @@ describe("Tell me when it arrives, on a phone", () => {
     try {
       const waiting = { phase: "sending", hash: "", status: "", sendId: "send-0001", waits: true };
       const shown = await draw([null], { app: true, sent: waiting });
-      expect(shown.said()).toEqual(["If you leave Dusk Wallet, it goes out when you open it again."]);
+      // Sofía's: it said it would go, and after Android closed the app, Home said Not sent with Send it now.
+      expect(shown.said()).toEqual(["If you leave Dusk Wallet, it goes out when you open it again. If Android closes the app first, you'll be asked to send it."]);
       // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
       const locks = await draw([null], { app: true, sent: waiting, ov: { lockOnLeave: true } });
       expect(locks.said()).toEqual(["If you leave Dusk Wallet, it locks and this isn't sent."]);

@@ -22,7 +22,7 @@ import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { askNodeChainId, chainRefusal, listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem, isAllowedDappOrigin } from "../shared/securityPolicy.js";
-import { classifyTxPresence, handedOverState } from "../shared/txLifecycle.js";
+import { accountNonce, accountNonceNow, classifyTxPresence, handedOverState } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx, reconcileTxPresence } from "../shared/txReconcile.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
@@ -69,7 +69,7 @@ import {
 } from "../shared/txStore.js";
 import { sendingProfile, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
-import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, noteHandingOver, reviewedParams, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
+import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, forgetWent, noteHandingOver, reviewedParams, sendHeld, sendsReadBegins, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
 import { TX_KIND } from "../shared/constants.js";
 import { SEND_PASSWORD_COMMANDS, assertScreenWallet, engineContactsVault, handleUiCommand, sendParams } from "../wallet/uiCommands.js";
@@ -207,11 +207,12 @@ async function lastSend() {
   const [sent] = records.filter((tx) => Number(tx.submittedAt) >= since);
   const kept = await lastSendOf({ walletId, nodeUrl }).catch(() => null);
   const keptRecord = kept ? records.find((tx) => tx.hash === kept.hash) : null;
-  const waiting = (await waitingSendsOf({ walletId, nodeUrl }).catch(() => [])).filter((send) => Number(send.at) >= since).at(-1);
+  // Not one gone out after it waited: its record among the sends says it.
+  const waiting = (await waitingSendsOf({ walletId, nodeUrl }).catch(() => [])).filter((send) => !send.went && Number(send.at) >= since).at(-1);
   const last = [
     sent && { at: Number(sent.submittedAt), state: String(sent.status ?? "submitted") },
     kept && Number(kept.at) >= since && { at: Number(kept.at), state: String(keptRecord?.status ?? kept.state) },
-    waiting && { at: Number(waiting.at), state: waiting.unclear ? "unclear" : waiting.waiting ? "waiting" : "not_sent" },
+    waiting && { at: Number(waiting.at), state: waiting.held ? "held" : waiting.unclear ? "unclear" : waiting.waiting ? "waiting" : "not_sent" },
   ].filter(Boolean);
   return last.sort((a, b) => b.at - a.at)[0] ?? null;
 }
@@ -227,6 +228,11 @@ const waitingHost = {
   release: (sendId) => engineCall("dusk_forgetHandedOver", { sendId }),
   // Still being handed over by the engine, which goes on as the background starts again.
   underWay: async (sendId) => (await engineCall("dusk_sendUnderWay", { sendId }).catch(() => null))?.underWay === true,
+  // Whether the account sent something else while one waited: its nonce on
+  // the node now, and the last the wallet's own sends took.
+  nonceNow: (record) => accountNonceNow(record.nodeUrl, record.account),
+  chainNonce: (record) => accountNonce(record.nodeUrl, record.account),
+  ownNonce: async (record) => (await engineCall("dusk_lastOwnNonce", { profileIndex: Number(record.profileIndex) || 0 }))?.nonce ?? null,
   // Handed to the node: kept as a sent one, from when it was made, and looked
   // up by its ID at once; `unclear`, as a send with no clear answer.
   follow: async ({ record, hash, unclear = false }) => {
@@ -1406,8 +1412,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         // to provide MetaMask-like feedback instead of
         // ephemeral toasts.
         let txs = [];
+        let txsRead = false;
+        // A payment gone out after this read began can't be among them (forgetWent).
+        const txsReadBegan = sendsReadBegins();
         try {
           txs = status?.isUnlocked ? await listTxs({ nodeUrl: settings.nodeUrl, walletId }) : [];
+          txsRead = true;
         } catch {
           txs = [];
         }
@@ -1535,6 +1545,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             ).catch(() => ({}))
           : {};
 
+        // A payment said Sent on Home after it waited goes once its block's
+        // in, by the sends read above, and the balance was read after them.
+        if (status.isUnlocked) {
+          await forgetWent({ walletId: String(status.accounts?.[0] ?? ""), nodeUrl: settings.nodeUrl }, txsRead ? txs : null, { balanceRead: Boolean(balance) && !balanceError, read: txsReadBegan }).catch(() => {});
+        }
+
         sendResponse({
           hasVault: Boolean(vault),
           isUnlocked: status.isUnlocked,
@@ -1613,6 +1629,12 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
       // and "waiting" for the network, "not_sent", or its record's status.
       if (message?.type === "DUSK_UI_LAST_SEND") {
         sendResponse({ ok: true, result: await lastSend().catch(() => null) });
+        return;
+      }
+
+      // Send it too, on a payment held as its account sent something else while it waited.
+      if (message?.type === "DUSK_UI_SEND_HELD") {
+        sendResponse({ ok: true, result: { sending: await sendHeld(String(message.sendId ?? ""), waitingHost) } });
         return;
       }
 

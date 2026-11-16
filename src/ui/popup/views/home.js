@@ -7,14 +7,14 @@ import { activityRows } from "../activity.js";
 import { networkForNode } from "../../../shared/nodeNetwork.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { actionIcon, iconSvg } from "../../components/ActionIcon.js";
-import { balance, balancesHidden } from "../../components/Balance.js";
+import { balance, balancesHidden, shieldedLuxOf } from "../../components/Balance.js";
 import { keptSendDraft } from "../../lib/sendDraft.js";
 import { shortAddress } from "../../lib/strings.js";
 import { contactNameText } from "../../lib/contactNames.js";
-import { reviewContextOf, unsentOf, waitingOf } from "../../lib/waiting.js";
+import { reviewContextOf, unsentOf, waitingOf, wentOf } from "../../lib/waiting.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
-import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
+import { NOT_SENT_TEXT, SENT_MEANWHILE_TEXT } from "../../../shared/waitingSends.js";
 import { whenAtText } from "./txRow.js";
 import { UNCLEAR_TEXT, appLeaveText, reasonText } from "./sent.js";
 import { isTauriRuntime } from "../../../platform/runtime.js";
@@ -39,15 +39,12 @@ export function homeView(ov, { state, actions } = {}) {
   // and surface progress in the subtitle.
   const shieldedSync = ov?.shieldedSync || null;
   const shieldedError = ov?.shieldedError ? String(ov.shieldedError) : "";
-  const shieldRaw = ov?.shieldedBalance?.value ?? ov?.shieldedBalance;
   // Chen's and Lena's: "Shielded · Not synced 0 DUSK" after an import and each
-  // cold start, "Shielded · Sync failed 0 DUSK" opened with no signal. Till a
-  // sync has gone through, or while one fails, a 0 is no reading: a dash shows,
-  // and what it is; what notes were kept from before still show.
-  const syncState = shieldedSync?.state ?? null;
-  const shieldUnread = (syncState === "idle" || syncState === "syncing" || syncState === "error") && safeBigInt(shieldRaw ?? 0, 0n) <= 0n && !ov?.shieldedStale;
-  const shieldLux = shieldUnread ? null : shieldRaw;
-  const hasShieldValue = shieldLux !== undefined && shieldLux !== null;
+  // cold start, "Shielded · Sync failed 0 DUSK" and "Shielded · can't be read
+  // now 0 DUSK" opened with no signal. A 0 that's no reading now is a dash,
+  // with what it is, and no total; what notes were kept from before still show.
+  const shieldLux = shieldedLuxOf(ov);
+  const hasShieldValue = shieldLux !== null;
   // Always show the shielded row for Dusk. If values aren't available yet,
   // we show placeholders + sync state.
   const showShielded = true;
@@ -102,6 +99,8 @@ export function homeView(ov, { state, actions } = {}) {
   if (shieldedError && shieldedSync?.state !== "syncing" && !ov?.shieldedStale) {
     shieldStatus = offlineNow ? "can't be read now" : "Unavailable";
   }
+  // A dash says why there's no amount.
+  if (!hasShieldValue && !shieldStatus) shieldStatus = offlineNow ? "can't be read now" : shieldedError ? "Unavailable" : "reading…";
 
   // If everything is synced and error-free but we have locally reserved notes,
   // show a small hint.
@@ -327,7 +326,8 @@ function staleNote(ov, hasBalance) {
 
 /**
  * The payments from Send that wait for the network, each with what it pays,
- * to whom, its memo and when it was made, to tell them apart, and Cancel; and
+ * to whom, its memo and when it was made, to tell them apart, and Cancel;
+ * those that went out after they waited, as Sent till their block's in; and
  * those that stopped waiting without going out, said plainly, with Send it
  * now, which takes it straight to Review, and Don't send. None goes out by
  * itself once it's said not sent, and each is said until it's sent again and
@@ -337,7 +337,8 @@ function staleNote(ov, hasBalance) {
 function waitingSection(ov, { state, actions } = {}) {
   const waiting = waitingOf(ov);
   const unsent = unsentOf(ov);
-  if (!waiting.length && !unsent.length) return null;
+  const went = wentOf(ov);
+  if (!waiting.length && !unsent.length && !went.length) return null;
   const hidden = balancesHidden(ov);
   const contacts = Array.isArray(state?.addressBook?.items) ? state.addressBook.items : [];
   // To whom: a contact's name, your own profile's, the .dusk name it was sent to, or the address.
@@ -390,21 +391,42 @@ function waitingSection(ov, { state, actions } = {}) {
             : "It goes out once the network answers."
           : "";
   const titleOf = (send) => (sending(send) ? "Sending: " : send.unclear ? "Not confirmed: " : "Not sent yet: ");
+  // Its account sent something else while it waited (Chen's: one waiting on
+  // her first phone went out after she'd paid the same from her second): it
+  // goes only on Send it too.
+  const cancelled = (send, res) =>
+    actions?.showToast?.(
+      res?.result?.cancelled
+        ? { text: `Not sent: ${said(send)}. Nothing was sent and no fee was charged.`, tone: "ok" }
+        : res?.error
+          ? "Couldn't cancel it. Try again."
+          : "It went out already, so it can't be cancelled."
+    );
+  const heldBox = (send) =>
+    h("div", { class: "callout warn home-waiting home-waiting--held", role: "status" }, [
+      h("div", { class: "callout-title" }, ["Not sent yet: ", ...what(send)]),
+      madeLine(send),
+      h("p", { class: "muted home-waiting__note", text: SENT_MEANWHILE_TEXT }),
+      h("div", { class: "home-waiting__actions" }, [
+        button("Send it too", async () => {
+          const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_SEND_HELD", sendId: send.sendId })).catch(() => null);
+          if (!res?.result?.sending) actions?.showToast?.("Couldn't send it. Try again.");
+          refresh();
+        }),
+        button("Don't send", async () => {
+          cancelled(send, await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
+          refresh();
+        }),
+      ]),
+    ]);
   const waitingBox = (send) =>
-    h("div", { class: "callout home-waiting", role: "status" }, [
+    send.held ? heldBox(send) : h("div", { class: "callout home-waiting", role: "status" }, [
       h("div", { class: "callout-title" }, [titleOf(send), ...what(send)]),
       madeLine(send),
       waitingNote(send) ? h("p", { class: "muted home-waiting__note", text: waitingNote(send) }) : null,
       send.unclear ? null : h("div", { class: "home-waiting__actions" }, [
         button("Cancel", async () => {
-          const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null);
-          actions?.showToast?.(
-            res?.result?.cancelled
-              ? { text: `Not sent: ${said(send)}. Nothing was sent and no fee was charged.`, tone: "ok" }
-              : res?.error
-                ? "Couldn't cancel it. Try again."
-                : "It went out already, so it can't be cancelled."
-          );
+          cancelled(send, await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
           refresh();
         }),
       ]),
@@ -416,13 +438,14 @@ function waitingSection(ov, { state, actions } = {}) {
       madeLine(send),
       h("p", {
         class: "muted home-waiting__note",
-        text: NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
+        text: send.held ? SENT_MEANWHILE_TEXT : NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
       }),
       h("div", { class: "home-waiting__actions" }, [
         // Straight to Review, with what it pays: sent from there in its
-        // place, which it keeps till the payment's handed over.
+        // place, which it keeps till the payment's handed over. One held as
+        // its account sent something else, as it was held: Send it too.
         button(
-          "Send it now",
+          send.held ? "Send it too" : "Send it now",
           async () => {
             const lux = safeBigInt(send.lux, 0n);
             state.draft = {
@@ -439,7 +462,8 @@ function waitingSection(ov, { state, actions } = {}) {
             state.route = "confirm";
             actions?.render?.()?.catch?.(() => {});
           },
-          "btn-primary"
+          // Its account sent something else meanwhile: neither answer leads.
+          send.held ? "btn-outline" : "btn-primary"
         ),
         button("Don't send", async () => {
           await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: send.sendId })).catch(() => {});
@@ -448,7 +472,12 @@ function waitingSection(ov, { state, actions } = {}) {
       ]),
     ]);
 
-  return h("div", { class: "home-waiting-list" }, [...waiting.map(waitingBox), ...unsent.map(unsentBox)]);
+  // Gone out after it waited: Sent, till its block's in and the balance read
+  // since (Lena's: no card, no payment and the old balance for 20 s as it went).
+  const wentBox = (send) =>
+    h("div", { class: "callout home-waiting home-waiting--went", role: "status" }, [h("div", { class: "callout-title" }, ["Sent: ", ...what(send)]), madeLine(send)]);
+
+  return h("div", { class: "home-waiting-list" }, [...waiting.map(waitingBox), ...went.map(wentBox), ...unsent.map(unsentBox)]);
 }
 
 /**

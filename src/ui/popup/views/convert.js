@@ -14,7 +14,7 @@ import { guarded } from "../../lib/clickGuard.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
-import { balance, balancesHidden } from "../../components/Balance.js";
+import { balance, balancesHidden, shieldedLuxOf } from "../../components/Balance.js";
 import { fieldLabel, reviewActions, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
@@ -44,11 +44,10 @@ export function convertFormView(ov, { state, actions } = {}) {
   // What it can move: the public balance, or the shielded one that can be
   // spent now, less the fee.
   const pubLux = safeBigInt(ov?.balance?.value, 0n);
-  const shSpendLux =
-    ov?.shieldedBalance?.spendable != null
-      ? safeBigInt(ov.shieldedBalance.spendable, 0n)
-      : safeBigInt(ov?.shieldedBalance?.value, 0n);
-  const availRaw = kind === TX_KIND.SHIELD ? pubLux : shSpendLux;
+  // The shielded balance where it can be read, else unknown: no Available, never 0.
+  const shSpendLux = ov?.shieldedBalance?.spendable != null ? shieldedLuxOf(ov, "spendable") : shieldedLuxOf(ov);
+  const known = kind === TX_KIND.SHIELD || shSpendLux !== null;
+  const availRaw = kind === TX_KIND.SHIELD ? pubLux : (shSpendLux ?? 0n);
   const avail = availRaw > feeLux ? availRaw - feeLux : 0n;
 
   const syncDraft = () => {
@@ -96,7 +95,8 @@ export function convertFormView(ov, { state, actions } = {}) {
       field.setError("Enter an amount greater than 0.");
       return null;
     }
-    if (lux + feeLux > availRaw) {
+    // Not against a balance that can't be read now, as if it were 0.
+    if (known && lux + feeLux > availRaw) {
       field.setError(shortfallText({ missingLux: lux + feeLux - availRaw, shielded: kind === TX_KIND.UNSHIELD, hidden }));
       return null;
     }
@@ -118,7 +118,7 @@ export function convertFormView(ov, { state, actions } = {}) {
       field.input.focus();
     },
   });
-  const available = h("div", { class: "amount-avail" }, [
+  const available = h("div", { class: "amount-avail", hidden: !known }, [
     h("span", { class: "amount-avail__text" }, [
       feeLux > 0n ? "Available after fees " : "Available ",
       balance(hidden, formatDusk(avail)),
