@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runtimeGetURL, tabsCreate, tabsQuery, tabsRemove, tabsUpdate, windowsGet, windowsUpdate } from "../platform/extensionApi.js";
+import { runtimeGetURL, runtimeSendMessage, tabsCreate, tabsQuery, tabsRemove, tabsUpdate, windowsGet, windowsUpdate } from "../platform/extensionApi.js";
 import { loadVault } from "../shared/vault.js";
 import { handOverRequestLink, offersRequestLink, openRequestLink } from "./requestLinks.js";
 
 vi.mock("../platform/extensionApi.js", () => ({
   runtimeGetURL: vi.fn((path) => `chrome-extension://wallet/${path}`),
+  // No wallet page answers, unless a test has one take the link.
+  runtimeSendMessage: vi.fn(async () => undefined),
   tabsCreate: vi.fn(async () => ({})),
   // No wallet tab open, unless a test opens one.
   tabsQuery: vi.fn(async () => []),
@@ -50,6 +52,24 @@ describe("a request link from the web wallet's Send", () => {
     await expect(openRequestLink({ link: LINK }, onWalletPage)).resolves.toBe(true);
     expect(tabsUpdate).toHaveBeenCalledWith(7, { url: `chrome-extension://wallet/full.html?route=send&link=${encodeURIComponent(LINK)}`, active: true });
     expect(tabsCreate).not.toHaveBeenCalled();
+  });
+
+  // Amélie's, Chen's and Marek's, in Firefox for Android: the tab sent to Send's address, the
+  // phone's Back went to the page it showed before, Home, and the payment went without a word.
+  it("hands it to the page of the wallet's tab open already, whose address stays, where that page takes it", async () => {
+    tabsQuery.mockResolvedValueOnce([{ id: 3, url: LINK }, { id: 7, url: "chrome-extension://wallet/full.html" }]);
+    runtimeSendMessage.mockImplementationOnce(async (message) => (message.tabId === 7 ? { ok: true } : undefined));
+    await expect(openRequestLink({ link: LINK }, onWalletPage)).resolves.toBe(true);
+    expect(runtimeSendMessage).toHaveBeenCalledWith({ type: "DUSK_UI_OPEN_LINK", tabId: 7, link: LINK });
+    expect(tabsUpdate.mock.calls).toEqual([[7, { active: true }]]);
+    expect(tabsCreate).not.toHaveBeenCalled();
+
+    // A page that can't take it, as one still loading: the tab goes to Send's address.
+    vi.clearAllMocks();
+    tabsQuery.mockResolvedValueOnce([{ id: 7, url: "chrome-extension://wallet/full.html" }]);
+    runtimeSendMessage.mockRejectedValueOnce(new Error("Could not establish connection. Receiving end does not exist."));
+    await expect(openRequestLink({ link: LINK }, onWalletPage)).resolves.toBe(true);
+    expect(tabsUpdate.mock.calls).toEqual([[7, { url: `chrome-extension://wallet/full.html?route=send&link=${encodeURIComponent(LINK)}`, active: true }]]);
   });
 
   // Astra's: the wallet's tab in another window, maybe minimised, came forward there alone.

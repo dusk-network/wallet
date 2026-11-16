@@ -9,12 +9,14 @@ const WALLET_PAGES = ["full.html", "popup.html"];
 
 /**
  * @param {string} path - the page and its query, as "full.html?route=send"
- * @param {{ replacing?: number }} [opts] - a tab whose place the wallet's
- *   takes, as the web page that handed a link over: it goes once the
- *   wallet's tab shows it, and with none open, the wallet opens in it
+ * @param {{ replacing?: number, inPlace?: (tab: { id: number }) => Promise<boolean> }} [opts] - `replacing`: a
+ *   tab whose place the wallet's takes, as the web page that handed a link
+ *   over: it goes once the wallet's tab shows it, and with none open, the
+ *   wallet opens in it. `inPlace`: asked first of the wallet's tab open
+ *   already, whose page may take what's opened as it is, with no new address
  * @returns {Promise<{ id?: number } | null>} the tab it's in
  */
-export async function openWalletTab(path, { replacing } = {}) {
+export async function openWalletTab(path, { replacing, inPlace } = {}) {
   const url = runtimeGetURL(path);
   const pages = WALLET_PAGES.map((page) => runtimeGetURL(page));
   const tabs = (await tabsQuery({}).catch(() => [])) ?? [];
@@ -22,7 +24,8 @@ export async function openWalletTab(path, { replacing } = {}) {
   const replaces = Number.isInteger(replacing) ? replacing : undefined;
   if (open?.id !== undefined) {
     try {
-      await tabsUpdate(open.id, { url, active: true });
+      const taken = typeof inPlace === "function" ? await Promise.resolve().then(() => inPlace(open)).catch(() => false) : false;
+      await tabsUpdate(open.id, taken === true ? { active: true } : { url, active: true });
       // Its window too; a window that can't come forward leaves the tab as it is.
       await frontWindow(open.windowId).catch(() => {});
       if (replaces !== undefined && replaces !== open.id) await tabsRemove(replaces).catch(() => {});

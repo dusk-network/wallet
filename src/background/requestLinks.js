@@ -7,6 +7,7 @@
 import { makePaymentLink, readPaymentLink } from "@dusk-network/app-core/payment-links";
 
 import { openWalletTab } from "./walletTab.js";
+import { runtimeSendMessage } from "../platform/extensionApi.js";
 import { isPhone } from "../ui/lib/device.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { isLocalHttpHostname } from "../shared/securityPolicy.js";
@@ -52,9 +53,17 @@ export async function offersRequestLink(message, sender) {
 
 // The extension's Send, with the link filled in, in the wallet's tab. On a
 // phone, in place of the web page's tab that handed it over (`fromTab`):
-// both are called Dusk Wallet, and one more piled up with each link.
+// both are called Dusk Wallet, and one more piled up with each link. Where
+// the wallet's tab is open already, its page takes the link as it is and
+// steps to Send itself, with its way back (Amélie's, Chen's and Marek's, in
+// Firefox for Android: the tab sent to Send's address, the phone's Back went
+// to its page before, Home, and dropped the payment without asking); one
+// that doesn't answer is sent to the address, as before.
 const openSend = (link, fromTab) =>
-  openWalletTab(`full.html?route=send&link=${encodeURIComponent(link)}`, { replacing: isPhone() ? fromTab : undefined });
+  openWalletTab(`full.html?route=send&link=${encodeURIComponent(link)}`, {
+    replacing: isPhone() ? fromTab : undefined,
+    inPlace: async (tab) => (await runtimeSendMessage({ type: "DUSK_UI_OPEN_LINK", tabId: tab.id, link }).catch(() => null))?.ok === true,
+  });
 
 /**
  * Opens the extension's Send on a tab of its own, with the link filled in.

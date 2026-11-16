@@ -98,6 +98,10 @@ export function tabsGet(tabId) {
   return callApi(raw?.tabs?.get, [tabId], raw?.tabs);
 }
 
+export function tabsGetCurrent() {
+  return callApi(raw?.tabs?.getCurrent, [], raw?.tabs);
+}
+
 export function tabsUpdate(tabId, options) {
   return callApi(raw?.tabs?.update, [tabId, options], raw?.tabs);
 }

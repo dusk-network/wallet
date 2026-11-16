@@ -68,6 +68,7 @@ import {
   getExtensionApi,
   runtimeGetURL,
   tabsCreate,
+  tabsGetCurrent,
 } from "../../platform/extensionApi.js";
 
 // Keep everything in dark mode for now.
@@ -768,13 +769,28 @@ const endedTxs = new Set();
 const heardTxs = new Map();
 const endedStatus = (status) => status === "executed" || status === "failed";
 
+// This page's tab, where it's in one: a request link handed to the wallet's
+// tab is for its page alone (openPaymentLink).
+let thisTab = null;
+if (isExtensionRuntime()) {
+  tabsGetCurrent()
+    .then((tab) => (thisTab = tab?.id ?? null))
+    .catch(() => {});
+}
+
 function installTxStatusListener() {
   if (txStatusListenerInstalled) return;
   txStatusListenerInstalled = true;
 
   try {
-    const onWalletMessage = (msg) => {
+    const onWalletMessage = (msg, _sender, sendResponse) => {
       try {
+        if (msg?.type === "DUSK_UI_OPEN_LINK") {
+          const mine = thisTab !== null && msg.tabId === thisTab;
+          if (mine && openPaymentLink(String(msg.link ?? ""), { handed: true })) sendResponse?.({ ok: true });
+          return;
+        }
+
         if (msg?.type === "DUSK_UI_LOCK_STATE") {
           if (msg.isUnlocked === false) {
             scheduleLockedRefresh();
@@ -1468,7 +1484,7 @@ function backStep() {
 const appBack = isTauriRuntime() && isPhone();
 if (appBack) listenForBack(() => (backStep() ?? moveAppToBack)());
 const systemBack = appBack
-  ? { sync() {} }
+  ? { sync() {}, stepIn() {} }
   : installSystemBack({
       // Which screen, by its route and its title, and how many dialogs and menus are open.
       screenKey: () =>
@@ -1821,23 +1837,44 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
 // after the unlock, when the wallet is locked. Send shows at once, from what
 // the wallet last read: a phone just woken can take a minute to answer, and
 // the balance follows when it does.
-listenForLinks((url) => {
+//
+// In the extension, a request link the background hands the wallet's tab
+// open already (`handed`, background/requestLinks.js), rather than sending
+// it to Send's address: Send, filled in from it here as one opened with the
+// page is, with the way back its steps have, so the phone's Back asks before
+// it drops the payment (Amélie's, Chen's and Marek's, in Firefox for
+// Android: the tab sent to Send's address went back to Home with the
+// phone's Back, without a word).
+function openPaymentLink(url, { handed = false } = {}) {
   const draft = requestDraftOf(`?link=${encodeURIComponent(url)}`);
-  if (!draft) return;
+  if (!draft) return false;
   netMenu.close();
   acctMenu.close();
-  // Opened while the wallet's locked, it waits behind the lock: when, for
-  // Send to say, and to be dropped after LINK_WAITS_MS. With no wallet here,
-  // it waits through the setup instead (`linkSetup`, as it's drawn), and the
-  // link as it came goes to the phone's browser if asked.
-  if (!state.overview?.isUnlocked) Object.assign(draft, { linkAt: Date.now() });
-  Object.assign(state, { draft: { ...draft, linkUrl: url }, route: "send" });
+  // Opened in the app while the wallet's locked, it waits behind the lock:
+  // when, for Send to say, and to be dropped after LINK_WAITS_MS. With no
+  // wallet here, it waits through the setup instead (`linkSetup`, as it's
+  // drawn), and the link as it came goes to the phone's browser if asked.
+  if (!handed) {
+    if (!state.overview?.isUnlocked) Object.assign(draft, { linkAt: Date.now() });
+    Object.assign(draft, { linkUrl: url });
+  }
+  // Handed to the tab: the request it was opened with goes from its address,
+  // or a reload, or Firefox bringing the tab back, would fill Send with that
+  // one (Astra's).
+  if (handed) forgetRequestLink();
+  Object.assign(state, { draft, route: "send" });
   render()
     .then(() => {
+      // No press brought it: its steps back go up all the same.
+      if (handed) systemBack.stepIn();
       state.needsRefresh = true;
       return render({ forceRefresh: true });
     })
     .catch(() => {});
+  return true;
+}
+listenForLinks((url) => {
+  openPaymentLink(url);
 });
 
 // --- A notice tapped in the app ----------------------------------------------
