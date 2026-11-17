@@ -2609,6 +2609,24 @@ describe("a payment waiting to go out, as the network didn't answer", () => {
     typeInto(other.to, ALICE.account);
     expect(other.balanceLine()).toBe("Available after fees 177.984 DUSK");
   });
+
+  // Astra's: Send it too opened Review for the held payment, which still counted as waiting till this one went in
+  // its place: Review took its amount and fee twice, so 0.013 with its 0.0025 fee couldn't go from 0.02, and it said
+  // the same payment waited, to be sent again.
+  it("leaves the held payment a Review sends in its place out of what it takes, and says nothing of it as the same", () => {
+    const ov = overview({ balance: { value: "20000000" }, waitingSends: [waiting({ waits: false, held: true })] });
+    // As Send it too opens it (waiting.js againDraft): for this wallet, profile and network.
+    const inPlace = draft({ replaces: "s1", reviewedFor: `${ov.accounts[0]} 0 ${ov.nodeUrl}` });
+    mount({ route: "confirm", addressBook: contacts, draft: inPlace }, ov);
+    const confirm = dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    expect([Boolean(confirm), confirm?.disabled, text(".review-again")]).toEqual([true, false, ""]);
+    // Back on the form it came from: Available as the balance allows, the held one left out.
+    const form = mount({ route: "send", addressBook: contacts, draft: inPlace }, ov);
+    expect([form.balanceLine(), text(".send-again")]).toEqual(["Available after fees 0.0175 DUSK", ""]);
+    // Any other payment of the account's: as before.
+    mount({ route: "confirm", addressBook: contacts, draft: draft() }, ov);
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm")).toBeUndefined();
+  });
 });
 
 describe("a payment made already", () => {

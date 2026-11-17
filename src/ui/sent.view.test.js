@@ -389,7 +389,8 @@ describe("after Confirm", () => {
     expect(app.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_CANCEL_SEND", sendId: state.sent.sendId });
     sending.resolve({ error: { message: "You cancelled it, so nothing was sent.", data: { sent: false, cancelled: true } } });
     await settle();
-    expect(steps()[0]).toEqual(["failed", "Not sent", "You cancelled it, so nothing was sent. No fee was charged."]);
+    // Chosen, so said plainly, in no colour (Chen's: a red Send failed).
+    expect(steps()[0]).toEqual(["upcoming", "Not sent", "Nothing left your wallet."]);
     expect(rows().at(-1)).toBe("Network feeNone charged");
   });
 
@@ -411,31 +412,41 @@ describe("after Confirm", () => {
   });
 
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
-  // its copy too once it had the network back, without asking.
+  // its copy too once it had the network back, without asking. Then Chen's again, in the app: Send it too paid at
+  // once, Done was the biggest button, and Don't send said a red Send failed; and Marek's, Lena's: it never said what.
   it("sends its account's nonce as Review read it, and holds a payment whose account sent something else meanwhile, with Send it too and Don't send", async () => {
     const state = reviewState();
-    const app = popup(state, overview({ balance: { value: dusk(2000), nonce: "41" } }));
+    const ov = overview({ balance: { value: dusk(2000), nonce: "41" } });
+    const app = popup(state, ov);
     await settle();
     const sending = await app.confirm();
     const [asked] = app.actions.send.mock.calls.find(([m]) => m.type === "DUSK_UI_SEND_TX");
     expect(asked).toMatchObject({ seenNonce: "41" });
 
-    // The wallet says it's held (DUSK_UI_SEND_WAITING, held).
+    // The wallet says it's held (DUSK_UI_SEND_WAITING, held): its two answers first, Done after them, smaller.
     Object.assign(state.sent, { waits: false, held: true });
     app.draw();
     expect(steps()[0]).toEqual(["unknown", "Not sent yet", "Your account sent something else while this waited."]);
-    expect(body.querySelectorAll(".sent-actions button").map(visibleText)).toEqual(["Send it too", "Don't send", "Done"]);
+    const actionsShown = () => body.querySelectorAll(".sent-actions button").map((b) => [visibleText(b), b.className.split(" ")[0]]);
     expect(note()).toBeNull();
 
-    // Send it too: it goes on as one that waits for the network does.
-    app.actions.send.mockImplementation(async (message) => (message.type === "DUSK_UI_SEND_HELD" ? { ok: true, result: { sending: true } } : {}));
+    // What its account sent meanwhile, as the node named it: this same payment, Don't send leading.
+    const held = { sendId: state.sent.sendId, to: OTHER, lux: dusk(1500), memo: "Lunch", profileIndex: 0, privacy: "public", waiting: true, held: true };
+    ov.waitingSends = [{ ...held, meanwhile: [{ hash: "ef".repeat(32), to: OTHER, lux: dusk(1500), memo: "Lunch", at: Date.now() }] }];
+    app.draw();
+    expect(steps()[0][2]).toMatch(/^Your account sent 1,?500 DUSK to .+ at \d\d:\d\d with the memo “Lunch” while this waited\. That looks like this same payment\.$/);
+    expect(actionsShown()).toEqual([["Send it too", "btn-outline"], ["Don't send", "btn-primary"], ["Done", "btn-outline"]]);
+
+    // Send it too: its Review, in its place; nothing goes before Confirm there.
+    const sent = state.sent;
     button("Send it too").click();
     await settle();
-    expect(app.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SEND_HELD", sendId: state.sent.sendId });
-    expect(steps()[0]).toEqual(["current", "Sending", "The network isn't answering. Nothing has left your wallet yet. It goes out once the network answers."]);
+    expect([state.route, state.sent]).toEqual(["confirm", null]);
+    expect(state.draft).toMatchObject({ to: OTHER, amountLux: dusk(1500), memo: "Lunch", replaces: sent.sendId });
+    expect(app.actions.send.mock.calls.map(([m]) => m.type)).not.toContain("DUSK_UI_SEND_HELD");
 
-    // Held again, and Don't send: called off, not sent, no fee.
-    Object.assign(state.sent, { waits: false, held: true });
+    // Held again, and Don't send: called off, not sent, said plainly.
+    Object.assign(state, { route: "sent", sent });
     app.draw();
     app.actions.send.mockImplementation(async (message) => (message.type === "DUSK_UI_CANCEL_SEND" ? { ok: true, result: { cancelled: true } } : {}));
     button("Don't send").click();
@@ -443,7 +454,7 @@ describe("after Confirm", () => {
     expect(app.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_CANCEL_SEND", sendId: state.sent.sendId });
     sending.resolve({ error: { message: "You cancelled it, so nothing was sent.", data: { sent: false, cancelled: true } } });
     await settle();
-    expect(steps()[0]).toEqual(["failed", "Not sent", "You cancelled it, so nothing was sent. No fee was charged."]);
+    expect(steps()[0]).toEqual(["upcoming", "Not sent", "Nothing left your wallet."]);
   });
 
   it("says a send other than a payment from Send can't reach the network offline, never that it waits", async () => {

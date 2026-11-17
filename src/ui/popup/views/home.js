@@ -1,4 +1,4 @@
-import { formatDusk, formatDuskExact, formatLuxForInput, groupThousands, safeBigInt } from "../../../shared/amount.js";
+import { formatDusk, formatDuskExact, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { h } from "../../lib/dom.js";
 import { assetsSectionsView } from "./assets.js";
@@ -11,12 +11,12 @@ import { balance, balancesHidden, shieldedLuxOf } from "../../components/Balance
 import { keptSendDraft } from "../../lib/sendDraft.js";
 import { shortAddress } from "../../lib/strings.js";
 import { contactNameText } from "../../lib/contactNames.js";
-import { reviewContextOf, unsentOf, waitingOf, wentOf } from "../../lib/waiting.js";
+import { againDraft, sameSentMeanwhile, sentMeanwhileText, unsentOf, waitingOf, wentOf } from "../../lib/waiting.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
-import { NOT_SENT_TEXT, SENT_MEANWHILE_TEXT } from "../../../shared/waitingSends.js";
+import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
 import { whenAtText } from "./txRow.js";
-import { UNCLEAR_TEXT, appLeaveText, reasonText } from "./sent.js";
+import { NOT_SENT_CHOSEN_TEXT, UNCLEAR_TEXT, appLeaveText, reasonText } from "./sent.js";
 import { isTauriRuntime } from "../../../platform/runtime.js";
 import { isPhone } from "../../lib/device.js";
 
@@ -360,7 +360,6 @@ function waitingSection(ov, { state, actions } = {}) {
     state.needsRefresh = true;
     actions?.render?.({ forceRefresh: true })?.catch?.(() => {});
   };
-  const said = (send) => `${hidden ? "••••" : formatDuskExact(send.lux)} DUSK to ${toText(send)}`;
   const button = (text, onclick, className = "btn-outline") =>
     h("button", {
       class: `${className} home-waiting__btn`,
@@ -391,32 +390,43 @@ function waitingSection(ov, { state, actions } = {}) {
             : "It goes out once the network answers."
           : "";
   const titleOf = (send) => (sending(send) ? "Sending: " : send.unclear ? "Not confirmed: " : "Not sent yet: ");
-  // Its account sent something else while it waited (Chen's: one waiting on
-  // her first phone went out after she'd paid the same from her second): it
-  // goes only on Send it too.
-  const cancelled = (send, res) =>
+  // Called off, in plain words and no colour: the person chose it (Chen's:
+  // a red Send failed for Don't send).
+  const cancelled = (res) =>
     actions?.showToast?.(
       res?.result?.cancelled
-        ? { text: `Not sent: ${said(send)}. Nothing was sent and no fee was charged.`, tone: "ok" }
+        ? NOT_SENT_CHOSEN_TEXT
         : res?.error
           ? "Couldn't cancel it. Try again."
           : "It went out already, so it can't be cancelled."
     );
+  // Its account sent something else while it waited (Chen's: one waiting on
+  // her first phone went out after she'd paid the same from her second): it
+  // goes only on Send it too, which opens its Review, as Send it now does,
+  // never paying at once (Chen's: it paid twice before she'd looked). What
+  // the account sent is named from the chain, and where it's this same
+  // payment, Don't send leads.
+  const meanwhile = (send) => sentMeanwhileText(send, { toText: (address) => toText({ to: address }), whenText: whenAtText, hidden });
+  const sendItToo = (send) => () => {
+    state.draft = againDraft(send, ov, { hidden });
+    state.route = "confirm";
+    actions?.render?.()?.catch?.(() => {});
+  };
   const heldBox = (send) =>
     h("div", { class: "callout warn home-waiting home-waiting--held", role: "status" }, [
       h("div", { class: "callout-title" }, ["Not sent yet: ", ...what(send)]),
       madeLine(send),
-      h("p", { class: "muted home-waiting__note", text: SENT_MEANWHILE_TEXT }),
+      h("p", { class: "muted home-waiting__note", text: meanwhile(send) }),
       h("div", { class: "home-waiting__actions" }, [
-        button("Send it too", async () => {
-          const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_SEND_HELD", sendId: send.sendId })).catch(() => null);
-          if (!res?.result?.sending) actions?.showToast?.("Couldn't send it. Try again.");
-          refresh();
-        }),
-        button("Don't send", async () => {
-          cancelled(send, await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
-          refresh();
-        }),
+        button("Send it too", sendItToo(send), sameSentMeanwhile(send) ? "btn-outline" : "btn-primary"),
+        button(
+          "Don't send",
+          async () => {
+            cancelled(await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
+            refresh();
+          },
+          sameSentMeanwhile(send) ? "btn-primary" : "btn-outline"
+        ),
       ]),
     ]);
   const waitingBox = (send) =>
@@ -426,7 +436,7 @@ function waitingSection(ov, { state, actions } = {}) {
       waitingNote(send) ? h("p", { class: "muted home-waiting__note", text: waitingNote(send) }) : null,
       send.unclear ? null : h("div", { class: "home-waiting__actions" }, [
         button("Cancel", async () => {
-          cancelled(send, await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
+          cancelled(await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
           refresh();
         }),
       ]),
@@ -438,7 +448,7 @@ function waitingSection(ov, { state, actions } = {}) {
       madeLine(send),
       h("p", {
         class: "muted home-waiting__note",
-        text: send.held ? SENT_MEANWHILE_TEXT : NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
+        text: send.held ? meanwhile(send) : NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
       }),
       h("div", { class: "home-waiting__actions" }, [
         // Straight to Review, with what it pays: sent from there in its
@@ -446,29 +456,19 @@ function waitingSection(ov, { state, actions } = {}) {
         // its account sent something else, as it was held: Send it too.
         button(
           send.held ? "Send it too" : "Send it now",
-          async () => {
-            const lux = safeBigInt(send.lux, 0n);
-            state.draft = {
-              to: String(send.to ?? ""),
-              privacy: send.privacy === "shielded" ? "shielded" : "public",
-              amountLux: lux.toString(),
-              amountDusk: formatLuxForInput(lux),
-              amountMasked: hidden,
-              memo: String(send.memo ?? ""),
-              replaces: String(send.sendId ?? ""),
-              // From the wallet, profile and network it was made on, as Home lists it: Review refuses it from any other.
-              reviewedFor: reviewContextOf(ov),
-            };
-            state.route = "confirm";
-            actions?.render?.()?.catch?.(() => {});
-          },
-          // Its account sent something else meanwhile: neither answer leads.
-          send.held ? "btn-outline" : "btn-primary"
+          sendItToo(send),
+          // Its account sent this same payment meanwhile: Don't send leads.
+          send.held && sameSentMeanwhile(send) ? "btn-outline" : "btn-primary"
         ),
-        button("Don't send", async () => {
-          await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: send.sendId })).catch(() => {});
-          refresh();
-        }),
+        button(
+          "Don't send",
+          async () => {
+            const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_UNSENT", sendId: send.sendId })).catch(() => null);
+            if (res?.result?.dropped) actions?.showToast?.(NOT_SENT_CHOSEN_TEXT);
+            refresh();
+          },
+          send.held && sameSentMeanwhile(send) ? "btn-primary" : "btn-outline"
+        ),
       ]),
     ]);
 

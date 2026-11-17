@@ -45,6 +45,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Opened the payment's Review with Send it too, on a payment held as its account sent something else while it waited, rather than sending it at once, and made Send it too and Don't send the main buttons of its screen; Don't send and Cancel say Not sent. Nothing left your wallet., in no colour.
+- Named what the account sent while a held payment waited, from the chain: how much, to whom, its memo and when, saying where it looks like this same payment, and read the history again as the hold comes.
 - Hid recovery words shown in clear again the moment the page is hidden or loses the focus, on Import, Check your recovery words, a new wallet's words and the recovery phrase, until they're shown again; in Firefox for Android they show only while Hold to show words is held.
 - Kept a payment a link filled in, and a Send or a request being typed, through a reload of the wallet's tab, the phone's Back still asking Leave this payment?; and stopped a pull down at the top of the wallet's pages reloading them in Firefox for Android.
 - Held a payment that waited for the network where its account sent something else meanwhile, saying so with Send it too and Don't send, rather than sending it by itself.

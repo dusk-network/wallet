@@ -22,7 +22,7 @@ import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { askNodeChainId, chainRefusal, listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem, isAllowedDappOrigin } from "../shared/securityPolicy.js";
-import { accountNonce, accountNonceNow, classifyTxPresence, handedOverState } from "../shared/txLifecycle.js";
+import { accountNonce, accountNonceNow, classifyTxPresence, handedOverState, sentMeanwhileOf } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx, reconcileTxPresence } from "../shared/txReconcile.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
@@ -232,6 +232,8 @@ const waitingHost = {
   // Whether the account sent something else while one waited: its nonce on
   // the node now, and the last the wallet's own sends took.
   nonceNow: (record) => accountNonceNow(record.nodeUrl, record.account),
+  // What the account sent while one waited, as the node says it, for its hold to name.
+  meanwhile: (record, range) => sentMeanwhileOf(record.nodeUrl, { account: record.account, ...range, at: record.at }),
   chainNonce: (record) => accountNonce(record.nodeUrl, record.account),
   ownNonce: async (record) => (await engineCall("dusk_lastOwnNonce", { profileIndex: Number(record.profileIndex) || 0 }))?.nonce ?? null,
   // Handed to the node: kept as a sent one, from when it was made, and looked

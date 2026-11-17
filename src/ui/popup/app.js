@@ -850,7 +850,12 @@ function installTxStatusListener() {
             }
           }
           state.needsRefresh = true;
-          if (state.route === "home") render({ forceRefresh: true }).catch(() => {});
+          // Held, its account having sent something else meanwhile: the
+          // history's read again, so Activity lists what it sent (Lena's: it
+          // came 1 to 3 minutes after the hold), and the hold is drawn again
+          // with what the node named of it.
+          if (held) lookForPayments(state.overview, { state, render });
+          if (state.route === "home" || (held && state.route === "sent" && sent?.sendId === msg.sendId)) render({ forceRefresh: true }).catch(() => {});
           return;
         }
 

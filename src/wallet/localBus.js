@@ -25,7 +25,7 @@ import {
   executionEventOk,
   waitForTxExecution,
 } from "../shared/txExecution.js";
-import { accountNonce, accountNonceNow, classifyTxPresence, finalizedTxMetadata, handedOverState } from "../shared/txLifecycle.js";
+import { accountNonce, accountNonceNow, classifyTxPresence, finalizedTxMetadata, handedOverState, sentMeanwhileOf } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx } from "../shared/txReconcile.js";
 import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.js";
 import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
@@ -334,6 +334,8 @@ const waitingHost = {
   // Whether the account sent something else while one waited: its nonce on
   // the node now, and the last the wallet's own sends took.
   nonceNow: (record) => accountNonceNow(record.nodeUrl, record.account),
+  // What the account sent while one waited, as the node says it, for its hold to name.
+  meanwhile: (record, range) => sentMeanwhileOf(record.nodeUrl, { account: record.account, ...range, at: record.at }),
   chainNonce: (record) => accountNonce(record.nodeUrl, record.account),
   ownNonce: async (record) => lastOwnNonce({ profileIndex: Number(record.profileIndex) || 0 }).nonce,
   // Handed to the node: kept as a sent one, from when it was made, and looked

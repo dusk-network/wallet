@@ -2076,3 +2076,29 @@ describe("a field typed in while the wallet draws its screen again", () => {
     expect(t.app.contains(field)).toBe(false);
   });
 });
+
+// Lena's: held as her account sent something else meanwhile, Activity didn't list what it sent for 1 to 3 minutes.
+describe("a payment held as its account sent something else while it waited", () => {
+  it("has the account's history read again as the hold comes, so Activity can list what it sent", async () => {
+    // The archive, asked where the account's history stands, as each read of it begins.
+    const asked = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      if (String(init?.body ?? "").includes("lastBlockPair")) asked.push(String(url));
+      return new Response(JSON.stringify({}), { status: 200 });
+    }));
+    // The history kept on this device.
+    const { IDBFactory, IDBKeyRange } = await import("fake-indexeddb");
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } });
+    await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(t.state.activity.syncing).toBeFalsy());
+    await flush();
+    asked.length = 0;
+    t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: true });
+    await flush();
+    expect(asked).toEqual([]);
+    t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
+    await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0));
+  });
+});

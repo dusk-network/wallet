@@ -348,7 +348,8 @@ describe("payments from Send waiting for the network, on Home", () => {
     document.body.querySelectorAll(".home-waiting button")[1].click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     expect(sent).toEqual([{ type: "DUSK_UI_CANCEL_SEND", sendId: "s2" }]);
-    expect(actions.showToast).toHaveBeenCalledWith({ text: "Not sent: 0.01 DUSK to Lucas (petit-fils). Nothing was sent and no fee was charged.", tone: "ok" });
+    // Chen's: a red Send failed for what she chose. In plain words, in no colour.
+    expect(actions.showToast).toHaveBeenCalledWith("Not sent. Nothing left your wallet.");
     expect(actions.render).toHaveBeenCalledWith({ forceRefresh: true });
 
     // Hidden balances hide what it pays; another profile's aren't this one's to list.
@@ -438,9 +439,37 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
   });
 
+  // Marek's, Lena's, Chen's: "something else" was the very same payment, from another device, and nothing said what.
+  it("names what its account sent while a held payment waited, and says so where it's this same payment, Don't send leading", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(2, 40));
+    const { document } = installFakeDom();
+    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true, result: {} })) };
+    const OWN_2 = "own-second-account-24ZKdvP2";
+    const other = { hash: "ab".repeat(32), to: OWN_2, lux: "1000000", memo: "", at: at(2, 36) };
+    const same = { hash: "cd".repeat(32), to: LUCAS, lux: "10000000", memo: "Hors ligne un", at: at(2, 37) };
+    const shown = (meanwhile) => {
+      document.body.replaceChildren(...homeView(ov([send({ waits: false, held: true, meanwhile })], { accounts: ["mine", OWN_2] }), { state, actions }));
+      const box = document.body.querySelector(".home-waiting--held");
+      return [visibleText(box.querySelector(".home-waiting__note")), box.querySelectorAll("button").map((b) => [b.textContent, b.className.split(" ")[0]])];
+    };
+    expect(shown([other])).toEqual([
+      "Your account sent 0.001 DUSK to your Profile 2 at 02:36 while this waited.",
+      [["Send it too", "btn-primary"], ["Don't send", "btn-outline"]],
+    ]);
+    expect(shown([same, other])).toEqual([
+      "Your account sent 0.01 DUSK to Lucas (petit-fils) at 02:37 with the memo “Hors ligne un”, and 1 more, while this waited. That looks like this same payment.",
+      [["Send it too", "btn-outline"], ["Don't send", "btn-primary"]],
+    ]);
+    // Nothing named: the plain sentence.
+    expect(shown(undefined)[0]).toBe("Your account sent something else while this waited.");
+  });
+
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
-  // its copy too once it had the network back, without asking.
-  it("says one held as its account sent something else while it waited, with what it pays, Send it too and Don't send", async () => {
+  // its copy too once it had the network back, without asking. Then Chen's again: Send it too paid at once, with no
+  // Review; Don't send said a red Send failed.
+  it("says one held as its account sent something else while it waited, with what it pays, Send it too through Review and Don't send", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -462,17 +491,19 @@ describe("payments from Send waiting for the network, on Home", () => {
       "Not sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
     ]);
 
-    // Send it too: it goes as it would have.
+    // Send it too: its Review, in its place; nothing goes before Confirm there.
     const buttons = () => document.body.querySelectorAll(".home-waiting button");
     buttons()[0].click();
-    await vi.waitFor(() => expect(actions.render).toHaveBeenCalledWith({ forceRefresh: true }));
-    expect(sent).toEqual([{ type: "DUSK_UI_SEND_HELD", sendId: "s1" }]);
-    expect(actions.showToast).not.toHaveBeenCalled();
-    // Don't send: called off, and said.
+    await vi.waitFor(() => expect(state.route).toBe("confirm"));
+    expect(state.draft).toMatchObject({ to: LUCAS, amountLux: "10000000", memo: "Hors ligne un", replaces: "s1" });
+    expect(sent).toEqual([]);
+    // Don't send: called off, and said plainly.
+    state.route = "home";
+    document.body.replaceChildren(...homeView(ov([held, stopped]), { state, actions }));
     buttons()[1].click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     expect(sent.at(-1)).toEqual({ type: "DUSK_UI_CANCEL_SEND", sendId: "s1" });
-    expect(actions.showToast).toHaveBeenCalledWith({ text: "Not sent: 0.01 DUSK to Lucas (petit-fils). Nothing was sent and no fee was charged.", tone: "ok" });
+    expect(actions.showToast).toHaveBeenCalledWith("Not sent. Nothing left your wallet.");
     // One the wallet stopped as it waited for the answer: Send it too opens Review, as Send it now does.
     buttons()[2].click();
     await vi.waitFor(() => expect(state.route).toBe("confirm"));

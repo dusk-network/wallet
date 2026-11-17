@@ -231,8 +231,9 @@ export function sendFormView(ov, { state, actions } = {}) {
   const clamp0 = (v) => (v > 0n ? v : 0n);
 
   // What payments waiting to go out will take, which Max and Available leave out.
-  const waitingPublicLux = waitingLux(ov, "public");
-  const waitingShieldedLux = waitingLux(ov, "shielded");
+  const instead = String(draft.replaces ?? "");
+  const waitingPublicLux = waitingLux(ov, "public", { except: instead });
+  const waitingShieldedLux = waitingLux(ov, "shielded", { except: instead });
 
   function getMaxAmountLux() {
     if (detectedRecipientType === "address") {
@@ -997,7 +998,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
     const payment = lux ? { lux: BigInt(lux), memo: String(memo.value ?? ""), to: recipient } : null;
     // The same payment waiting to go out, else made already.
-    const waiting = payment ? sameWaiting(ov, payment) : undefined;
+    const waiting = payment ? sameWaiting(ov, payment, { except: instead }) : undefined;
     const made = payment && !waiting ? sentAlready(activityRows(ov, state), payment) : null;
     const name = ownProfileName(ov, recipient) || contactNameText(contactsIndex?.get(recipient.toLowerCase())?.name) || waiting?.toName || "";
     const words = waiting
@@ -1432,7 +1433,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // made already: moments ago, or with this memo whenever, as a request paid
   // once. Said, not stopped: it can be meant.
   const payment = { lux: safeBigInt(d.amountLux, 0n), memo: String(d.memo ?? ""), to: toAddr };
-  const waitingTwin = sameWaiting(ov, payment);
+  const waitingTwin = sameWaiting(ov, payment, { except: String(d.replaces ?? "") });
   const madeAgain = waitingTwin ? null : sentAlready(activityRows(ov, state), payment);
   const repeat = Boolean(waitingTwin || (madeAgain && madeAgain.time !== null));
   // Another profile of this wallet's by its own name, as the form says it: "to Profile 1".
@@ -1537,7 +1538,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const paying = privacy === "shielded" ? ov?.shieldedBalance?.spendable : ov?.balance?.value;
   const pay = payGuard({
     editor: gasEditor,
-    availableLux: paying != null ? safeBigInt(paying, 0n) - waitingLux(ov, privacy) : null,
+    availableLux: paying != null ? safeBigInt(paying, 0n) - waitingLux(ov, privacy, { except: String(d.replaces ?? "") }) : null,
     sendsLux: safeBigInt(d.amountLux, 0n),
     shielded: privacy === "shielded",
     hidden: balancesHidden(ov),

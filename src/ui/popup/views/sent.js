@@ -16,7 +16,10 @@ import { askSendPassword } from "../../components/SendPasswordDialog.js";
 import { SEND_PASSWORD_WAITS } from "../../../shared/errors.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { connectionLost, sendRefused, sentOf } from "../../../shared/sendOutcome.js";
-import { SENT_MEANWHILE_TEXT } from "../../../shared/waitingSends.js";
+import { SEND_CANCELLED_TEXT } from "../../../shared/waitingSends.js";
+import { againDraft, sameSentMeanwhile, sentMeanwhileText } from "../../lib/waiting.js";
+import { ownProfileName } from "../../components/ProfileName.js";
+import { whenAtText } from "./txRow.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
 // with a toast: Sending while the wallet signs it and hands it to the network,
@@ -53,6 +56,24 @@ const waitingText = () =>
 
 /** What's said of a payment from Send handed to the network without a clear answer: it's looked up, and sent once if it didn't go. */
 export const UNCLEAR_TEXT = "It may have gone out already. If it didn't, it goes out once the network answers.";
+
+/** What's said of a payment the person chose not to send, in no colour: nothing left (Chen's: a red Send failed). */
+export const NOT_SENT_CHOSEN_TEXT = "Not sent. Nothing left your wallet.";
+
+// A payment held for Send it too, as the overview keeps it, with what its
+// account sent meanwhile; and that said, the recipient named as the Sent
+// screen names this one's, a profile of the wallet's by its name.
+const heldRecordOf = (sent, ov) => (Array.isArray(ov?.waitingSends) ? ov.waitingSends : []).find((send) => send?.sendId === sent?.sendId) ?? null;
+function heldText(sent, ov) {
+  const record = heldRecordOf(sent, ov);
+  const to = sent?.to && typeof sent.to === "object" ? sent.to : null;
+  const toText = (address) => {
+    if (to && address === to.address) return to.name || to.short || shortAddress(address);
+    const own = ownProfileName(ov, address);
+    return own ? `your ${own}` : shortAddress(address);
+  };
+  return sentMeanwhileText(record, { toText, whenText: whenAtText, hidden: balancesHidden(ov) });
+}
 
 /**
  * In the app on a phone, what leaving it does to a payment waiting for the
@@ -144,6 +165,14 @@ export function sentSteps(sent, ov) {
           : `Fee charged: up to ${formatFee(capLux, { max: true })} DUSK.`;
 
   if (phase === "not_sent") {
+    // Called off by the person: said plainly, in no colour.
+    if (String(error ?? "") === SEND_CANCELLED_TEXT) {
+      return [
+        { label: "Not sent", state: "upcoming", sub: "Nothing left your wallet." },
+        { label: "Sent to the network", state: "upcoming", sub: "" },
+        { label: "Completed", state: "upcoming", sub: "" },
+      ];
+    }
     return [
       { label: "Not sent", state: "failed", sub: [reasonText(error), "No fee was charged."].filter(Boolean).join(" ") },
       { label: "Sent to the network", state: "upcoming", sub: "" },
@@ -166,7 +195,7 @@ export function sentSteps(sent, ov) {
   if (phase === "sending" && sent?.held) {
     // Its account sent something else while it waited: it goes only on Send it too.
     return [
-      { label: "Not sent yet", state: "unknown", sub: SENT_MEANWHILE_TEXT },
+      { label: "Not sent yet", state: "unknown", sub: heldText(sent, ov) },
       { label: "Sent to the network", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
@@ -451,12 +480,19 @@ export async function sendFromReview({ state, actions, message, summary, backRou
       // The screen catches up on the next draw.
     }
   } else if (sent.phase === "not_sent") {
-    // Left before the network answered: the refusal still has to be said.
+    // Left before the network answered: the refusal still has to be said; one
+    // called off, plainly, and one sent again in its place, not at all.
     const reason = reasonText(sent.error);
-    actions?.showToast?.({
-      text: `${sent.title || "Transaction"} failed. ${reason ? `${reason} ` : ""}No fee was charged.`,
-      tone: "bad",
-    });
+    if (res?.error?.data?.inPlace) {
+      // Sent from its Review in its place.
+    } else if (res?.error?.data?.cancelled) {
+      actions?.showToast?.(NOT_SENT_CHOSEN_TEXT);
+    } else {
+      actions?.showToast?.({
+        text: `${sent.title || "Transaction"} failed. ${reason ? `${reason} ` : ""}No fee was charged.`,
+        tone: "bad",
+      });
+    }
   } else if (sent.phase === "unconfirmed") {
     actions?.showToast?.({
       text: `${sent.title || "Transaction"} may not have gone through. Check Activity before you send it again.`,
@@ -670,7 +706,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
   const notSent = phase === "not_sent" && Boolean(sent.backRoute);
   const unconfirmed = phase === "unconfirmed" && Boolean(sent.backRoute);
   const done = h("button", {
-    class: notSent ? "btn-outline sent-secondary" : "btn-primary",
+    class: notSent || (phase === "sending" && sent.sendId && sent.held) ? "btn-outline sent-secondary" : "btn-primary",
     type: "button",
     text: "Done",
     onclick: () => {
@@ -714,31 +750,31 @@ export function sentView(ov, { state, actions, sozu } = {}) {
           },
         })
       : null;
-  // Held, its account having sent something else while it waited: Send it
-  // too sends it as it would have gone, Don't send calls it off.
+  // Held, its account having sent something else while it waited: the two
+  // answers are the screen's, first and full size, Done after them (Chen's:
+  // Done was the biggest). Send it too opens its Review, as Send it now does
+  // (Chen's: it paid at once); Don't send calls it off. Where what was sent
+  // meanwhile is this same payment, Don't send leads.
   const held = phase === "sending" && sent.sendId && sent.held;
+  const heldRecord = held ? heldRecordOf(sent, ov) : null;
+  const same = held && sameSentMeanwhile(heldRecord);
   const heldActions = held
     ? [
         h("button", {
-          class: "btn-outline sent-secondary",
+          class: same ? "btn-outline" : "btn-primary",
           type: "button",
           text: "Send it too",
-          onclick: async (event) => {
-            const button = event?.currentTarget;
-            if (button) button.disabled = true;
-            const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_SEND_HELD", sendId: sent.sendId })).catch(() => null);
-            if (res?.result?.sending) {
-              sent.held = false;
-              sent.waits = true;
-              if (state.sent === sent && state.route === "sent") actions?.render?.({ cached: true })?.catch?.(() => {});
-              return;
-            }
-            if (button) button.disabled = false;
-            actions?.showToast?.("Couldn't send it. Try again.");
+          disabled: !heldRecord,
+          onclick: () => {
+            if (!heldRecord) return;
+            state.draft = againDraft(heldRecord, ov, { hidden: balancesHidden(ov) });
+            state.sent = null;
+            state.route = "confirm";
+            actions?.render?.()?.catch?.(() => {});
           },
         }),
         h("button", {
-          class: "btn-outline sent-secondary",
+          class: same ? "btn-primary" : "btn-outline",
           type: "button",
           text: "Don't send",
           onclick: async (event) => {

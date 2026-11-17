@@ -195,3 +195,50 @@ describe("txLifecycle reconciliation", () => {
     });
   });
 });
+
+// Marek's, Lena's, Chen's: a payment held as its account sent something else meanwhile said "something else" of the
+// very same payment, sent from another device, and named nothing.
+describe("what an account sent while a payment of its waited", () => {
+  const ACCOUNT = "chen-account";
+  const TO = "lucas-account";
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+  // The node: its mempool, its tip, the account's history, and each transaction, by the query asked.
+  function node({ mempool = [], history = [], txs = {} }) {
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      const body = String(init?.body ?? "");
+      const json = (value) => ({ ok: true, text: async () => JSON.stringify(value) });
+      if (body.includes("mempoolTxs")) return json({ mempoolTxs: mempool });
+      if (body.includes("lastBlockPair")) return json({ pair: { json: { last_block: [5000, "x"] } } });
+      if (body.includes("moonlightHistory")) return json({ h: { json: history } });
+      return json(Object.fromEntries(Object.keys(txs).map((hash, i) => [`t${i}`, body.includes(hash) ? txs[hash] : null])));
+    });
+  }
+  const hex = (text) => Buffer.from(text, "utf8").toString("hex");
+
+  it("names each one after the nonce known last, from the chain or the node's mempool, with its memo and when", async () => {
+    const onChain = "a1".repeat(32);
+    const waiting = "b2".repeat(32);
+    node({
+      mempool: [{ id: waiting, memo: hex("lunch"), json: JSON.stringify({ type: "moonlight", sender: ACCOUNT, receiver: TO, value: 500000000, nonce: 43 }) }],
+      history: [{ block_height: 4999, origin: onChain, events: [{ target: "0100000000000000000000000000000000000000000000000000000000000000", topic: "moonlight", data: { sender: ACCOUNT, receiver: TO, value: "10000000", memo: hex("night shift 9"), refund_info: null } }] }],
+      txs: { [onChain]: { blockTimestamp: 1794900000, tx: { json: JSON.stringify({ type: "moonlight", sender: ACCOUNT, receiver: TO, value: 10000000, nonce: 42 }) } } },
+    });
+    const { sentMeanwhileOf } = await import("./txLifecycle.js");
+    await expect(sentMeanwhileOf("https://node.example", { account: ACCOUNT, after: 41n, upTo: 43n, at: Date.now() - 60_000 })).resolves.toEqual([
+      { hash: onChain, to: TO, lux: "10000000", memo: "night shift 9", at: 1794900000000 },
+      { hash: waiting, to: TO, lux: "500000000", memo: "lunch", at: null },
+    ]);
+  });
+
+  it("names none where nothing came after the nonce known last, or the node can't say", async () => {
+    const { sentMeanwhileOf } = await import("./txLifecycle.js");
+    await expect(sentMeanwhileOf("https://node.example", { account: ACCOUNT, after: 42n, upTo: 42n })).resolves.toEqual([]);
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    await expect(sentMeanwhileOf("https://node.example", { account: ACCOUNT, after: 41n, upTo: 42n })).resolves.toEqual([]);
+  });
+});

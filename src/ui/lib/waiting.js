@@ -3,7 +3,8 @@
 // the profile shown: what Home lists, what Send's Available and Max leave
 // out, and what Review says is waiting already.
 
-import { safeBigInt } from "../../shared/amount.js";
+import { formatDuskExact, formatLuxForInput, safeBigInt } from "../../shared/amount.js";
+import { SENT_MEANWHILE_TEXT } from "../../shared/waitingSends.js";
 
 /**
  * Who pays and on which network, as a Review was asked for: the wallet, the
@@ -33,27 +34,101 @@ export const wentOf = (ov) => ofProfile(ov).filter((send) => !send.waiting && se
 
 /**
  * What the payments waiting to go out from the profile's public or shielded
- * balance take from it: each one's amount, and the most its fee costs.
+ * balance take from it: each one's amount, and the most its fee costs. Not
+ * the one a Review sends in its place (`except`, its draft's `replaces`),
+ * which waits only till that one goes (Astra's: Review took the held
+ * payment's amount and fee as well as its own).
  * @param {object} ov
  * @param {"public" | "shielded"} privacy
+ * @param {{ except?: string }} [opts]
  * @returns {bigint}
  */
-export function waitingLux(ov, privacy) {
+export function waitingLux(ov, privacy, { except = "" } = {}) {
   return waitingOf(ov)
-    .filter((send) => (send.privacy === "shielded" ? "shielded" : "public") === privacy)
+    .filter((send) => (send.privacy === "shielded" ? "shielded" : "public") === privacy && !(except && send.sendId === except))
     .reduce((sum, send) => sum + safeBigInt(send.lux, 0n) + safeBigInt(send.feeLux, 0n), 0n);
 }
 
 /**
  * The payment waiting to go out that's the same as this one: the same
- * recipient, amount and memo. The oldest, or undefined.
+ * recipient, amount and memo. The oldest, or undefined. Never the one a
+ * Review sends in its place (`except`).
  * @param {object} ov
  * @param {{ to: string, lux: bigint, memo?: string }} payment
+ * @param {{ except?: string }} [opts]
  */
-export function sameWaiting(ov, { to, lux, memo = "" }) {
+export function sameWaiting(ov, { to, lux, memo = "" }, { except = "" } = {}) {
   const recipient = String(to ?? "").trim();
   const text = String(memo ?? "").trim();
   return waitingOf(ov).find(
-    (send) => send.to === recipient && safeBigInt(send.lux, -1n) === lux && String(send.memo ?? "").trim() === text
+    (send) => !(except && send.sendId === except) && send.to === recipient && safeBigInt(send.lux, -1n) === lux && String(send.memo ?? "").trim() === text
   );
+}
+
+/**
+ * Send's draft of a payment kept here, for its Review: what it pays, to
+ * whom, with what memo, from the wallet, profile and network it was made on,
+ * in the place of the one Home or Sent said wasn't sent, or held for Send it
+ * too (`replaces`), which it takes once it's sent from there.
+ * @param {object} send - one of the overview's waitingSends
+ * @param {object} ov
+ * @param {{ hidden?: boolean }} [opts] - its amount hidden, as balances are
+ */
+export function againDraft(send, ov, { hidden = false } = {}) {
+  const lux = safeBigInt(send?.lux, 0n);
+  return {
+    to: String(send?.to ?? ""),
+    privacy: send?.privacy === "shielded" ? "shielded" : "public",
+    amountLux: lux.toString(),
+    amountDusk: formatLuxForInput(lux),
+    amountMasked: hidden,
+    memo: String(send?.memo ?? ""),
+    replaces: String(send?.sendId ?? ""),
+    // From the wallet, profile and network it was made on, as Home lists it: Review refuses it from any other.
+    reviewedFor: reviewContextOf(ov),
+  };
+}
+
+// A memo said in a sentence: none that holds a control or direction character.
+const sayable = (memo) => {
+  const text = String(memo ?? "").trim();
+  return text && !/[\u0000-\u001f\u007f-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/.test(text) ? text : "";
+};
+
+/**
+ * Whether what the account sent meanwhile is this very payment: to the same
+ * recipient, the same amount, the same memo.
+ * @param {object} send - a held payment, with what was sent meanwhile (`meanwhile`)
+ */
+export function sameSentMeanwhile(send) {
+  const memo = String(send?.memo ?? "").trim();
+  return (Array.isArray(send?.meanwhile) ? send.meanwhile : []).some(
+    (other) =>
+      String(other?.to ?? "").toLowerCase() === String(send?.to ?? "").toLowerCase() &&
+      safeBigInt(other?.lux, -1n) === safeBigInt(send?.lux, -2n) &&
+      String(other?.memo ?? "").trim() === memo
+  );
+}
+
+/**
+ * What a payment held for Send it too says of what its account sent while it
+ * waited, from the chain: "Your account sent 0.001 DUSK to your Profile 2 at
+ * 10:02 while this waited." with its memo, and "That looks like this same
+ * payment." where it's this one (Marek's, Lena's, Chen's: "something else"
+ * was the very same payment, from another device). The plain sentence where
+ * the node named nothing.
+ * @param {object} send - a held payment, with `meanwhile`
+ * @param {{ toText: (address: string) => string, whenText: (at: number) => string, hidden?: boolean }} words
+ * @returns {string}
+ */
+export function sentMeanwhileText(send, { toText, whenText, hidden = false }) {
+  const sent = Array.isArray(send?.meanwhile) ? send.meanwhile : [];
+  if (!sent.length) return SENT_MEANWHILE_TEXT;
+  const [first] = sent;
+  const amount = hidden ? "••••" : formatDuskExact(String(first.lux ?? "0"));
+  const when = Number(first.at) > 0 ? ` ${whenText(Number(first.at))}` : "";
+  const memo = sayable(first.memo);
+  const more = sent.length > 1 ? `, and ${sent.length - 1} more,` : "";
+  const what = `Your account sent ${amount} DUSK to ${toText(String(first.to ?? ""))}${when}${memo ? ` with the memo “${memo}”` : ""}${more} while this waited.`;
+  return sameSentMeanwhile(send) ? `${what} That looks like this same payment.` : what;
 }
