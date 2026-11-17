@@ -280,6 +280,11 @@ describe("profile names", () => {
         await name(2, `sofiadesign${point}dusk`);
         expect([shownError(2), question(2)], point).toEqual(["That looks like sofiadesign.dusk, which belongs to another account. Choose another name.", []]);
       }
+      // R12, Marek's, the round after that again: a dot above, a Braille dot, and a middle dot with a space went by.
+      for (const typed of ["sofiadesign\u02d9dusk", "sofiadesign\u2804dusk", "sofiadesign\u00b7 dusk", "sofiadesign \u00b7 dusk"]) {
+        await name(2, typed);
+        expect([shownError(2), question(2)], typed).toEqual(["That looks like sofiadesign.dusk, which belongs to another account. Choose another name.", []]);
+      }
       expect(setAccountName).not.toHaveBeenCalled();
       // This profile's own: saved, nothing asked.
       await name(2, "mine.dusk");

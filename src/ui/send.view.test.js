@@ -572,6 +572,23 @@ describe("what the To field says about what's typed", () => {
     expect(form.review.disabled).toBe(false);
   });
 
+  // R12, Sofía's, Lena's, Nandini's: a .dusk name with a dot-like point in To got "? Unknown" in the extension, which
+  // in its font read like her own name; never which name it looked like.
+  it("says a .dusk name written with another point or a look-alike letter looks like the real one, at once, and Review stays off", () => {
+    const form = mount(newState());
+    for (const typed of ["sofiadesign\u00b7dusk", "sofiadesign\uff0edusk", "sofiadesign\u3002dusk", "sofiadesign\u2027dusk", "sofiadesign\u02d9dusk", "sofiadesign \u00b7 dusk", "\u0455ofiadesign.dusk"]) {
+      typeInto(form.to, typed);
+      expect([visibleText(form.nameBox()), form.pill(), form.review.disabled], typed).toEqual([
+        "That looks like sofiadesign.dusk, but it isn't. Check it, or paste it again.",
+        "",
+        true,
+      ]);
+    }
+    // The name itself: looked up, as ever.
+    typeInto(form.to, "sofiadesign.dusk");
+    expect(visibleText(form.nameBox())).not.toContain("That looks like");
+  });
+
   it("says the same of what's too long to be a name and is no address either", () => {
     const form = mount(newState());
     for (const typo of [`${ALICE.account}x`, ALICE.account.slice(0, 70), `${ALICE.account.slice(0, 60)}0${ALICE.account.slice(61)}`]) {

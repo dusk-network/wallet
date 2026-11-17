@@ -39,6 +39,7 @@ import {
 
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { asDuskName, closeDuskName, isDuskName } from "@duskdomains/sdk/names";
+import { duskNameLookAlike } from "@dusk-network/app-core/names";
 import {
   duskNameErrorText,
   duskNameRecipient,
@@ -891,6 +892,22 @@ export function sendFormView(ov, { state, actions } = {}) {
         className: "recipient-type-badge",
       });
       detectedRecipientType = null;
+      updateContactMatch("", null);
+      updateAmountHelpers();
+      return;
+    }
+
+    // A .dusk name written with another point, a look-alike letter or
+    // something unseen: said as the name it looks like, at once, as it's
+    // typed, with no Review (Sofía's, Lena's, Nandini's: "? Unknown", or
+    // "Not a valid address" once the box was left). A name with a full stop
+    // after it, as a sentence ends, is offered as the name below instead.
+    const alike = duskNamesNetwork(ov?.nodeUrl) && asDuskName(v) ? null : duskNameLookAlike(v);
+    if (alike) {
+      hideRecipientBadge(toTypePill);
+      showNameBox([h("div", { class: "err", text: alike.words })]);
+      detectedRecipientType = null;
+      reviewOff(true);
       updateContactMatch("", null);
       updateAmountHelpers();
       return;
