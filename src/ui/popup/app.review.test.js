@@ -634,7 +634,13 @@ describe("a request's Send", () => {
     const question = () => t.dom.document.querySelector("[role=alertdialog]");
     history.back();
     await flush();
-    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.StayLeave");
+    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.LeaveStay");
+    // Amélie's and Chen's: Leave was the wide pink button under the thumb. Stay is the main one, with the focus.
+    expect([...question().querySelectorAll("button")].map((b) => [b.textContent, b.className])).toEqual([
+      ["Leave", "btn-outline"],
+      ["Stay", "btn-primary"],
+    ]);
+    expect(t.dom.document.activeElement.textContent).toBe("Stay");
     // The question's own Back is Stay: the payment stays.
     history.back();
     await flush();
@@ -1890,7 +1896,7 @@ describe("the phone's Back in the app, as Android hands it over", () => {
       await flush();
     };
     await back();
-    expect([t.state.route, visibleText(question())]).toEqual(["send", "Leave this payment?This clears the payment the link filled in.StayLeave"]);
+    expect([t.state.route, visibleText(question())]).toEqual(["send", "Leave this payment?This clears the payment the link filled in.LeaveStay"]);
     // Back on the question: Stay.
     await back();
     expect([question(), t.state.route, ...values()]).toEqual([null, "send", B, "0.04", "laksa"]);
@@ -1936,7 +1942,7 @@ describe("a request link handed to the wallet's tab open already", () => {
 
     history.back();
     await flush();
-    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.StayLeave");
+    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.LeaveStay");
     // The question's own Back is Stay.
     history.back();
     await flush();
@@ -2008,7 +2014,7 @@ describe("a wallet tab that reloads", () => {
     expect(t.app.textContent).toContain("Filled in from the link");
     tab.history.back();
     await flush();
-    expect(visibleText(question(t))).toBe("Leave this payment?This clears the payment the link filled in.StayLeave");
+    expect(visibleText(question(t))).toBe("Leave this payment?This clears the payment the link filled in.LeaveStay");
     // The question's own Back is Stay.
     tab.history.back();
     await flush();

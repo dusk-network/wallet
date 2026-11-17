@@ -2406,7 +2406,14 @@ describe("a request link", () => {
     typeInto(form.to, BOB.account);
     // Back asks first, the scan's: Leave goes.
     dom.document.body.querySelector(".subnav-back").click();
-    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears the payment the QR code filled in.StayLeave");
+    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears the payment the QR code filled in.LeaveStay");
+    // Amélie's and Chen's: Leave was the wide pink button under the thumb. Stay is the main one there, with the
+    // focus, and Leave the quiet one before it.
+    expect(dom.document.body.querySelectorAll("[role=alertdialog] button").map((b) => [b.textContent, b.className])).toEqual([
+      ["Leave", "btn-outline"],
+      ["Stay", "btn-primary"],
+    ]);
+    expect(dom.document.activeElement.textContent).toBe("Stay");
     dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
     await settle();
     expect(state.route).toBe("home");

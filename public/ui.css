@@ -4101,6 +4101,8 @@ body[data-runtime="tauri"] .qrscan-overlay {
   font-weight: 500;
 }
 
+/* Their two buttons: the quiet one, then the main one, twice as wide, where
+   the thumb is. */
 .send-password__actions,
 .wallet-dialog__actions {
   display: grid;

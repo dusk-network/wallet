@@ -223,7 +223,14 @@ describe("setting up and unlocking", () => {
     }
     body = show(onboardingCreateConfirmView({ state, actions: acts }));
     expect(names()).toEqual(places.map((p) => `Word ${p}`));
-    expect(body.querySelectorAll("button").filter(isShown).map((b) => b.textContent)).toEqual(["← Back", "Check", "Skip for now"]);
+    // Check the main button, and Skip for now never: the outline one under it (Amélie's, in the web wallet: Skip
+    // for now was the big black button, after a wrong answer too).
+    const asking = [
+      ["← Back", expect.any(String)],
+      ["Check", "btn-primary btn-full"],
+      ["Skip for now", "btn-outline btn-full"],
+    ];
+    expect(body.querySelectorAll("button").filter(isShown).map((b) => [b.textContent, b.className])).toEqual(asking);
 
     // Lena's: nothing checked, and nothing said, till every box holds a word.
     expect(button(body, "Check").disabled).toBe(true);
@@ -246,11 +253,12 @@ describe("setting up and unlocking", () => {
       ]);
       expect([body.querySelector(".srp-grid"), wordBoxes(body)]).toEqual([null, []]);
       expect([state.route, state.onboard.reveal, acts.send.mock.calls]).toEqual(["onboard_create_confirm", false, []]);
-      // Try again: the same three, empty, the first to type in.
+      // Try again: the same three, empty, the first to type in, Skip for now back under Check.
       button(body, "Try again").click();
       expect(names()).toEqual(places.map((p) => `Word ${p}`));
       expect(wordBoxes(body).map((i) => i.value)).toEqual(["", "", ""]);
       expect(dom.document.activeElement).toBe(wordBoxes(body)[0]);
+      expect(body.querySelectorAll("button").filter(isShown).map((b) => [b.textContent, b.className])).toEqual(asking);
     }
 
     // Show my recovery words, apart: back to the words, hidden till Reveal, with nothing said over them.
@@ -476,7 +484,14 @@ describe("setting up and unlocking", () => {
     button(body, "← Back").click();
     await settle();
     const dialog = body.querySelector("[role=alertdialog]");
-    expect(visibleText(dialog)).toBe("Go back?This clears the recovery phrase and password you typed.CancelGo back");
+    expect(visibleText(dialog)).toBe("Go back?This clears the recovery phrase and password you typed.Go backCancel");
+    // As Leave this payment? (Amélie's and Chen's): what keeps the words is the main button, the wide one under
+    // the thumb, with the focus; Go back the quiet one before it.
+    expect(dialog.querySelectorAll("button").map((b) => [b.textContent, b.className])).toEqual([
+      ["Go back", "btn-outline"],
+      ["Cancel", "btn-primary"],
+    ]);
+    expect(dom.document.activeElement).toBe(button(dialog, "Cancel"));
     button(dialog, "Cancel").click();
     await settle();
     expect(state.route).toBe("onboard_import");
@@ -968,6 +983,11 @@ describe("fingerprint unlock", () => {
     await vi.waitFor(() => expect(dom.document.body.querySelector("[role=alertdialog]")).toBeTruthy());
     expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_UNLOCK", password: "typed password" });
     expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toContain("Turn fingerprint unlock on again?");
+    // An offer, which throws nothing away: Turn on stays its main button.
+    expect(dom.document.body.querySelectorAll("[role=alertdialog] button").map((b) => [b.textContent, b.className])).toEqual([
+      ["Cancel", "btn-outline"],
+      ["Turn on", "btn-primary"],
+    ]);
     button(dom.document.body, "Turn on").click();
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "typed password"]));
   });
