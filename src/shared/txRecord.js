@@ -75,6 +75,21 @@ export function unclearTxMeta(params, sent, extras = {}) {
 }
 
 /**
+ * What the record of a public send handed over without a clear answer keeps
+ * of it as it was signed (the engine's handedOverTx): its account, its nonce
+ * and its bytes, by which the node is asked whether it ever had it, and with
+ * which Send it now sends the very same transaction again. Nothing for one
+ * not kept so.
+ * @param {{ hex?: string, nonce?: string, account?: string } | null | undefined} signed
+ */
+export function signedTxFields(signed) {
+  const hex = String(signed?.hex ?? "");
+  const nonce = String(signed?.nonce ?? "");
+  const account = String(signed?.account ?? "");
+  return /^[0-9a-f]+$/i.test(hex) && /^\d+$/.test(nonce) && account ? { account, nonce, signedTx: hex } : {};
+}
+
+/**
  * The profile that pays a wallet's own send: the one it names, as a stake's
  * own may not be the one selected, else the one selected.
  * @param {object} params

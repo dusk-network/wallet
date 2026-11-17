@@ -165,6 +165,25 @@ describe("txStore", () => {
     expect(meta.removedAt).toBeUndefined();
   });
 
+  // Astra's, the second time: Don't send answered as the node was asked of it, and its answer, in its block, was
+  // written over a record now marked Don't send, as the wallet had it before: it stayed out of every list, and nothing
+  // said it went after all. The record as it is when the outcome's written decides.
+  it("says one chosen not to be sent went after all as its outcome is written, and never marks one that went", async () => {
+    const { getTxMeta, patchTxMeta, putTxMeta } = await import("./txStore.js");
+    await putTxMeta("hash-chosen", { status: "unsent", nonce: "4", account: "acct", submittedAt: 1 });
+    await patchTxMeta("hash-chosen", { dontSendAt: 5, signedTx: undefined });
+    const stored = await patchTxMeta("hash-chosen", { status: "executed", executedAt: 9 });
+    expect(stored).toMatchObject({ status: "executed", wentAfterAll: expect.any(Number) });
+    const meta = await getTxMeta("hash-chosen");
+    expect(meta).toMatchObject({ status: "executed", wentAfterAll: expect.any(Number) });
+    expect(meta.dontSendAt).toBeUndefined();
+
+    // Don't send on one that went meanwhile: nothing of it is kept.
+    await putTxMeta("hash-went", { status: "executed", executedAt: 9, submittedAt: 1 });
+    await patchTxMeta("hash-went", { dontSendAt: 10, signedTx: undefined });
+    expect((await getTxMeta("hash-went")).dontSendAt).toBeUndefined();
+  });
+
   it("drops what work begun before a reset writes after it", async () => {
     const { clearTxs, getTxEpoch, listTxs, patchTxMeta, putTxMeta } = await import("./txStore.js");
     const before = await getTxEpoch();

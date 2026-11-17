@@ -936,6 +936,40 @@ describe("coming back to the wallet during a payment", () => {
     }
   });
 
+  // Astra's, as the web wallet does it: Don't send, on one whose hand-over had no clear answer, forgot it, saying
+  // nothing left the wallet, though it might still arrive. It's followed by its ID while the wallet shows, whatever
+  // its age, and listed nowhere meanwhile; once it went after all, it's listed as Sent, and said so.
+  it("follows a send chosen not to be sent, listing it nowhere, and says so once it went after all", async () => {
+    const HASH = "9e".repeat(32);
+    let arrived = false;
+    const record = { hash: HASH, kind: "transfer", privacy: "public", to: TO, amount: "10000000", status: "unsent", dontSendAt: Date.now() - 60_000, submittedAt: Date.now() - 2 * 60 * 60_000, account: A, nonce: "7", nodeUrl: "https://testnet.nodes.dusk.network", walletId: A, profileIndex: 0, source: "sent", origin: "Wallet" };
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, async (message, t) => {
+      if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+        if (!arrived) return { ok: true, result: { status: "unsent" } };
+        t.open = { ...t.open, txs: [{ ...record, status: "executed", dontSendAt: undefined, wentAfterAll: Date.now() }] };
+        return { ok: true, result: { status: "executed", wentAfterAll: true } };
+      }
+      return undefined;
+    });
+    const toast = () => t.dom.document.body.querySelector(".toast")?.textContent ?? "";
+    const back = async () => {
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+    t.open = { ...t.open, txs: [record] };
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect(t.app.textContent).not.toContain("Not sent yet");
+    await back();
+    expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
+    expect(toast()).not.toContain("after all");
+    arrived = true;
+    await back();
+    expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH, HASH]);
+    await vi.waitFor(() => expect(toast()).toContain("A payment you chose not to send went out after all."));
+  });
+
   it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
     const HASH = "9f".repeat(32);
     const t = await popupOn(

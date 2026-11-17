@@ -34,7 +34,11 @@ export async function getTxEpoch() {
  * @property {string=} gasPrice
  * @property {any=} asset Optional UI hint for Activity labeling (e.g. DRC20/DRC721 summary).
  * @property {number} submittedAt
- * @property {"submitted"|"mempool"|"executed"|"failed"|"removed"|"unknown"} status
+ * @property {"submitted"|"mempool"|"executed"|"failed"|"removed"|"unknown"|"unsent"|"not_sent"} status
+ *   `unsent`: handed over, the node never had it, its nonce free; `not_sent`: another took its nonce
+ * @property {string=} account A public send's account, kept with its nonce while it may go as signed.
+ * @property {string=} nonce
+ * @property {string=} signedTx A public send handed over without a clear answer, as it was signed (hex), sent again as it is with Send it now.
  * @property {string=} error
  * @property {"public"|"shielded"=} privacy
  * @property {string[]=} pendingNullifiers
@@ -138,10 +142,12 @@ export function onTxSettled(fn) {
  * @param {string} hash
  * @param {Partial<TxMeta>} patch
  * @param {{ epoch?: number }} [opts] - `epoch`: getTxEpoch when the work began
+ * @returns {Promise<TxMeta | null | undefined>} the record as written; nothing where nothing was
  */
 export async function patchTxMeta(hash, patch, { epoch } = {}) {
   if (!hash) return;
   let settled = null;
+  let written = null;
   await mutate(async () => {
     if (await stale(epoch)) return;
     const current = await getAll();
@@ -149,17 +155,36 @@ export async function patchTxMeta(hash, patch, { epoch } = {}) {
     const prev = current[hash] ?? {};
     const terminal = prev.status === "executed" || prev.status === "failed";
     const weaker = patch.status && patch.status !== "executed" && patch.status !== "failed";
-    const clearsRemoval = patch.status && patch.status !== "unknown" && patch.status !== "removed";
-    const nextPatch = clearsRemoval
+    const clearsRemoval = patch.status && !["unknown", "removed", "unsent", "not_sent"].includes(patch.status);
+    let nextPatch = clearsRemoval
       ? { ...patch, recoveryReason: undefined, removedAt: undefined }
       : patch;
+    // Don't send never marks one that went already.
+    if (terminal && "dontSendAt" in nextPatch) {
+      const { dontSendAt: _late, ...rest } = nextPatch;
+      nextPatch = rest;
+    }
     current[hash] = terminal && weaker
       ? { ...prev, lastCheckedAt: patch.lastCheckedAt ?? prev.lastCheckedAt }
       : { ...prev, ...nextPatch };
+    // A send kept as it was signed, to go again as it is (txRecord.js
+    // signedTxFields), keeps it only while it may still go so.
+    if (current[hash].signedTx && !["unknown", "unsent"].includes(current[hash].status)) delete current[hash].signedTx;
+    const settles = !terminal && (current[hash].status === "executed" || current[hash].status === "failed");
+    // One chosen not to be sent (Don't send, `dontSendAt`) whose outcome comes
+    // now went after all: listed again, as Sent, and said so (`wentAfterAll`),
+    // as the record is when its outcome's written, whatever was read before
+    // (Astra's: Don't send as it was looked up, and its block's answer kept it
+    // out of every list with nothing said).
+    if (settles && current[hash].dontSendAt) {
+      delete current[hash].dontSendAt;
+      current[hash].wentAfterAll = Date.now();
+    }
     await setAll(prune(current, hash));
-    if (!terminal && (current[hash].status === "executed" || current[hash].status === "failed")) settled = current[hash];
+    written = current[hash];
+    if (settles) settled = current[hash];
   });
-  if (!settled) return;
+  if (!settled) return written;
   for (const fn of settledListeners) {
     try {
       fn(hash, settled);
@@ -167,6 +192,7 @@ export async function patchTxMeta(hash, patch, { epoch } = {}) {
       // One listener's trouble is its own.
     }
   }
+  return written;
 }
 
 /**

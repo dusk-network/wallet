@@ -321,8 +321,8 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   const final = tx?.source !== "sent";
   const tone = txStatusTone(status, { final });
   const failed = tx?.status === "failed";
-  // Failed, or dropped before it ran: the amount stayed in the wallet.
-  const unsent = failed || Boolean(tx?.dropped);
+  // Failed, dropped before it ran, or never reached the network: the amount stayed in the wallet.
+  const unsent = failed || Boolean(tx?.dropped) || status === "unsent" || status === "not_sent";
   const amount = d.amount && unsent ? { ...d.amount, sign: "", muted: true } : d.amount;
   // A deposit to DuskEVM that arrived there: its transaction there, and when (bridgeArrival.js).
   const payout = unsent ? null : payoutOf(tx);

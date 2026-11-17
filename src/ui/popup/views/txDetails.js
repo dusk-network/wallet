@@ -23,10 +23,11 @@ import { profileNameEl } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { stDuskLines, txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
 import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, theirMemo, txIconSvg } from "./txRow.js";
-import { reasonText } from "./sent.js";
+import { NOT_SENT_FOLLOWED_TEXT, reasonText } from "./sent.js";
 import { activityKey, activityRows, loadActivityDetail, lookForKeptRow, sozuFactOf } from "../activity.js";
 import { migrationFactOf } from "../migrationFacts.js";
 import { waiting } from "../../components/Waiting.js";
+import { REPLACED_TEXT } from "../../../shared/waitingSends.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
 // then its date, memo, fee, the profile it left or reached, and its ID, which
@@ -46,6 +47,8 @@ function statusNote(tx, desc, hidden) {
   if (tx?.dropped) {
     return `The network dropped it before it ran, so no fee was charged.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
   }
+  // Chosen not to be sent, and arrived after all (txReconcile.js).
+  if (tx?.sent?.wentAfterAll && desc.status !== "failed") return "It went out after you chose not to send it.";
   switch (desc.status) {
     case "pending":
       if (globalThis.navigator?.onLine === false) return "No connection. It's looked up again once you're back online.";
@@ -58,9 +61,56 @@ function statusNote(tx, desc, hidden) {
         : "The wallet stopped waiting for a result. That doesn't mean it failed.";
     case "failed":
       return `${txErrorText(tx?.error) || reasonText(tx?.error) || "It ran but didn't go through."}${stayed}`;
+    // Handed over as the connection went, and the network never got it.
+    case "unsent":
+      return "It didn't reach the network. Nothing has left your wallet.";
+    case "not_sent":
+      return REPLACED_TEXT;
     default:
       return "";
   }
+}
+
+// Not sent yet: the network never got it, and it goes out as it was made,
+// with Send it now, or never, with Don't send (Chen's: "Not confirmed yet" for
+// good, with nothing to tap). Each answers once.
+function unsentActions(tx, { state, actions } = {}) {
+  if (tx?.status !== "unsent" || tx?.source !== "sent") return null;
+  const hash = String(tx.hash ?? "");
+  const answer = (text, className, ask) =>
+    h("button", {
+      class: `${className} btn-full`,
+      type: "button",
+      text,
+      onclick: async (event) => {
+        const buttons = event?.currentTarget?.parentNode?.querySelectorAll?.("button") ?? [];
+        for (const button of buttons) button.disabled = true;
+        await ask();
+        state.needsRefresh = true;
+        actions?.render?.({ forceRefresh: true })?.catch?.(() => {});
+      },
+    });
+  return h("div", { class: "home-waiting__actions tx-unsent-actions" }, [
+    answer("Send it now", "btn-primary", async () => {
+      const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_RESEND_TX", hash })).catch((error) => ({ error }));
+      // Handed over, and its answer lost: it's looked up, never said not sent (Astra's).
+      if (res?.error?.data?.sent === "unknown") actions?.showToast?.("It may have gone out. It shows here once the network says.");
+      else if (res?.error) actions?.showToast?.(res.error.message ?? "Couldn't send it. Try again.");
+    }),
+    // Its hand-over had no clear answer, so it may still arrive: followed, and
+    // said so, never that nothing left (Astra's).
+    answer("Don't send", "btn-outline", async () => {
+      const res = await Promise.resolve(actions?.send?.({ type: "DUSK_UI_DROP_TX", hash })).catch(() => null);
+      if (!res?.result?.dropped) {
+        actions?.showToast?.(res?.result?.went ? "It went out already." : "Couldn't drop it. Try again.");
+        return;
+      }
+      actions?.showToast?.(res.result.followed ? NOT_SENT_FOLLOWED_TEXT : "Not sent. Nothing left your wallet.");
+      state.txDetailHash = null;
+      state.route = state.txDetailFrom || "home";
+      state.txDetailFrom = null;
+    }),
+  ]);
 }
 
 const kv = (label, value, { className = "" } = {}) =>
@@ -81,7 +131,7 @@ function profileValue(ov, tx, rail) {
 const feeValue = (text, hidden) => h("span", {}, [balance(hidden, text), " DUSK"]);
 
 function feeRow(tx, desc, hidden) {
-  if (tx?.dropped) return kv("Network fee", "None charged");
+  if (tx?.dropped || tx?.status === "unsent" || tx?.status === "not_sent") return kv("Network fee", "None charged");
   if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Network fee", feeValue(formatDuskExact(tx.fee), hidden));
   const limit = tx?.gasLimit ?? 0n;
   const price = tx?.gasPrice ?? 0n;
@@ -337,6 +387,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
       const note = statusNote(tx, desc, hidden);
       return note ? h("p", { class: "tx-hero-note", text: note }) : null;
     })(),
+    unsentActions(tx, { state, actions }),
   ].filter(Boolean));
 
   // The profile's side: what it sent from, or received on.

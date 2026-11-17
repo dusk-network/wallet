@@ -2,7 +2,7 @@ import "fake-indexeddb/auto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import vaults from "../shared/fixtures/vault-v1.json";
 
-const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), resendSend: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null, balanceRead: null }));
+const engine = vi.hoisted(() => ({ sendTransaction: vi.fn(), resendSend: vi.fn(), handedOverTx: vi.fn(() => null), rebroadcastTx: vi.fn(), unlocked: true, wallet: "wallet A", key: "", held: [], addFails: false, switchFails: false, checkpoints: [], handedOver: new Set(), balance: null, balanceRead: null }));
 
 // The engine's contacts key for the unlocked wallet, made as walletEngine.js
 // makes it: from its seed (here, a hash of its phrase), at its own place.
@@ -115,6 +115,9 @@ vi.mock("../shared/walletEngine.js", () => ({
   // The transaction a payment's try handed over without a clear answer, sent again as it was made; or forgotten.
   resendSend: engine.resendSend,
   forgetHandedOver: vi.fn(() => ({ forgotten: true })),
+  // Any other public send handed over without a clear answer, as it was signed; and sent again as it is.
+  handedOverTx: engine.handedOverTx,
+  rebroadcastTx: engine.rebroadcastTx,
   sendUnderWay: vi.fn(() => ({ underWay: false })),
   // The last nonce the wallet's own sends took: none here.
   lastOwnNonce: vi.fn(() => ({ nonce: null })),
@@ -218,6 +221,82 @@ describe("local sends", () => {
     engine.sendTransaction.mockResolvedValueOnce({ hash: "cc".repeat(32), nonce: 1n });
     await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "stake", amount: "1000000000000", profileIndex: 1 } });
     await expect(getTxMeta("cc".repeat(32))).resolves.toMatchObject({ kind: "stake", profileIndex: 1 });
+  });
+
+  // Chen's, R01: handed over as the Wi-Fi came back flaky, the node never got it, and it said "Not confirmed yet"
+  // for good, with nothing to tap.
+  it("keep a public one handed over without a clear answer as it was signed, which Send it now sends again as it is and Don't send leaves followed", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { getTxMeta, patchTxMeta } = await import("../shared/txStore.js");
+    const hash = "c1".repeat(32);
+    const lost = Object.assign(new Error("Failed to fetch"), { data: { sent: "unknown", hash, nonce: "5", account: ACCOUNT } });
+    engine.sendTransaction.mockRejectedValueOnce(lost);
+    engine.handedOverTx.mockImplementation(({ hash: asked }) => (asked === hash ? { hex: "ab12", nonce: "5", account: ACCOUNT, profileIndex: 0 } : null));
+    await expect(localSend({ type: "DUSK_UI_SEND_TX", walletId: "account of wallet A", params: { kind: "stake", amount: "1000000000000", gas: { limit: "40000000", price: "1" } } })).resolves.toMatchObject({ error: { data: { sent: "unknown", hash } } });
+    await expect(getTxMeta(hash)).resolves.toMatchObject({ status: "unknown", recoveryReason: "handover_unclear", account: ACCOUNT, nonce: "5", signedTx: "ab12" });
+
+    // The node never had it: Send it now sends it as it was signed.
+    await patchTxMeta(hash, { status: "unsent", recoveryReason: "not_reached" });
+    engine.rebroadcastTx.mockResolvedValueOnce({ hash, nonce: "5" });
+    await expect(localSend({ type: "DUSK_UI_RESEND_TX", hash })).resolves.toEqual({ ok: true, result: { hash } });
+    expect(engine.rebroadcastTx).toHaveBeenLastCalledWith(expect.objectContaining({ hex: "ab12", hash, nonce: "5", account: ACCOUNT, profileIndex: 0 }));
+    const went = await getTxMeta(hash);
+    expect([went.status, went.signedTx]).toEqual(["submitted", undefined]);
+
+    // Another, never had either: Don't send leaves it never to be sent again from here, followed till its nonce is
+    // used, as its hand-over had no clear answer (Astra's: forgotten, saying nothing left, though it might still go).
+    const other = "c2".repeat(32);
+    engine.sendTransaction.mockRejectedValueOnce(Object.assign(new Error("Failed to fetch"), { data: { sent: "unknown", hash: other } }));
+    engine.handedOverTx.mockImplementation(() => ({ hex: "cd34", nonce: "6", account: ACCOUNT, profileIndex: 0 }));
+    await localSend({ type: "DUSK_UI_SEND_TX", walletId: "account of wallet A", params: { kind: "stake", amount: "1000000000000", gas: { limit: "40000000", price: "1" } } }).catch(() => {});
+    await patchTxMeta(other, { status: "unsent", recoveryReason: "not_reached" });
+    await expect(localSend({ type: "DUSK_UI_DROP_TX", hash: other })).resolves.toEqual({ ok: true, result: { dropped: true, followed: true } });
+    const chosen = await getTxMeta(other);
+    expect(chosen).toMatchObject({ status: "unsent", dontSendAt: expect.any(Number) });
+    expect(chosen.signedTx).toBeUndefined();
+    await expect(localSend({ type: "DUSK_UI_RESEND_TX", hash: other })).resolves.toMatchObject({ error: { code: -32602 } });
+    engine.handedOverTx.mockReset();
+  });
+
+  // Astra's: Send it now handed it over and its answer was lost; it stayed Not sent yet, for Don't send to forget.
+  it("look up a Send it now whose answer was lost, with nothing to drop meanwhile", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { getTxMeta, putTxMeta } = await import("../shared/txStore.js");
+    const hash = "c3".repeat(32);
+    await putTxMeta(hash, { status: "unsent", kind: "stake", privacy: "public", walletId: "account of wallet A", account: ACCOUNT, nonce: "5", signedTx: "ab12", profileIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network" });
+    engine.rebroadcastTx.mockRejectedValueOnce(Object.assign(new Error("Failed to fetch"), { data: { sent: "unknown", hash } }));
+    await expect(localSend({ type: "DUSK_UI_RESEND_TX", hash })).resolves.toMatchObject({ error: { data: { sent: "unknown" } } });
+    await expect(getTxMeta(hash)).resolves.toMatchObject({ status: "unknown", signedTx: "ab12" });
+    await expect(localSend({ type: "DUSK_UI_DROP_TX", hash })).resolves.toEqual({ ok: true, result: { dropped: false } });
+    await expect(getTxMeta(hash)).resolves.toMatchObject({ status: "unknown", signedTx: "ab12" });
+  });
+
+  // Astra's: Send it now asked whether the wallet was open once, before anything waited; a lock meanwhile still let
+  // the transaction go out after it.
+  it("send one again with Send it now only once a lock under way is over, and not once it locked", async () => {
+    const { localSend } = await import("./localBus.js");
+    const { putTxMeta } = await import("../shared/txStore.js");
+    const { WALLET_LIFECYCLE_LOCK, withStorageLock } = await import("../shared/storageLock.js");
+    const hash = "c4".repeat(32);
+    await putTxMeta(hash, { status: "unsent", kind: "stake", privacy: "public", walletId: "account of wallet A", account: ACCOUNT, nonce: "5", signedTx: "ab12", profileIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network" });
+    engine.rebroadcastTx.mockClear();
+    const locked = Promise.withResolvers();
+    const locking = withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+      await locked.promise;
+      engine.unlocked = false;
+    });
+    try {
+      const answer = localSend({ type: "DUSK_UI_RESEND_TX", hash });
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(engine.rebroadcastTx).not.toHaveBeenCalled();
+      locked.resolve();
+      await locking;
+      await expect(answer).resolves.toMatchObject({ error: { message: "Wallet locked" } });
+      expect(engine.rebroadcastTx).not.toHaveBeenCalled();
+    } finally {
+      locked.resolve();
+      engine.unlocked = true;
+    }
   });
 
   it("are looked up again by their ID when the page asks, as the app comes back, and the page hears how they went", async () => {
@@ -1592,6 +1671,23 @@ describe("arrival notices in the app on a phone", () => {
     // The notice Android shows says which payment, and on a locked phone that hides it, only what came of it.
     expect([phoneNotices.watched[1].title, phoneNotices.watched[1].body, phoneNotices.watched[1].publicBody]).toEqual(["Your payment arrived", "0.03 DUSK to sofiadesign.dusk · Mainnet", "Mainnet"]);
     await vi.waitFor(() => expect(phoneNotices.settled).toContain("e2".repeat(32)));
+  });
+
+  // Astra's: a send sent again with Send it now was never looked for by Android, nor followed to its block, as each
+  // send is: it could stay on its way, and its notice never came.
+  it("follows a send sent again with Send it now to its block, and has Android look for it, as any send", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    const { getTxMeta, putTxMeta } = await import("../shared/txStore.js");
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
+    const hash = "e8".repeat(32);
+    await putTxMeta(hash, { status: "unsent", kind: "transfer", privacy: "public", to: ACCOUNT, amount: "1", walletId: "account of wallet A", account: ACCOUNT, nonce: "5", signedTx: "ab12", profileIndex: 0, nodeUrl: "https://testnet.nodes.dusk.network" });
+    engine.executed = Promise.withResolvers();
+    engine.rebroadcastTx.mockResolvedValueOnce({ hash, nonce: "5" });
+    await expect(localSend({ type: "DUSK_UI_RESEND_TX", hash })).resolves.toEqual({ ok: true, result: { hash } });
+    await vi.waitFor(() => expect(phoneNotices.watched.map((watched) => watched.hash)).toEqual([hash]));
+    engine.executed.resolve({ data: { err: null } });
+    await vi.waitFor(async () => expect((await getTxMeta(hash))?.status).toBe("executed"));
   });
 
   // Sofía's: "Your payment arrived · 0.01 DUSK to Lena · Testnet", after Android had closed the app, without the memo

@@ -41,7 +41,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { readStakingAgain, sozuConfirmView } from "./views/sozu.js";
-import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentStatus, sentView } from "./views/sent.js";
+import { WENT_AFTER_ALL_TEXT, noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentStatus, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -1082,7 +1082,14 @@ function sendsOnTheirWay() {
     const status = String(tx?.status ?? "").toLowerCase();
     // In its block without its fee, as a notice's news has it (DUSK_UI_TX_NOTICED): its fee is looked up.
     const feeUnread = (status === "executed" || status === "failed") && tx?.feePaid == null;
-    if ((["submitted", "mempool", "unknown"].includes(status) || feeUnread) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
+    // Handed over without a clear answer and kept as it was signed, whatever
+    // its age: whether the node ever had it, or another took its nonce
+    // (Chen's: Not confirmed yet for good, 80 minutes on).
+    const signed = Boolean(tx?.signedTx) && (status === "unknown" || status === "unsent");
+    // Chosen not to be sent, its hand-over having had no clear answer: followed
+    // till its nonce is used, whatever its age (txReconcile.js).
+    const followed = Boolean(tx?.dontSendAt) && status !== "executed" && status !== "failed";
+    if (signed || followed || ((["submitted", "mempool", "unknown"].includes(status) || feeUnread) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS)) {
       hashes.add(String(tx?.hash ?? ""));
     }
   }
@@ -1095,6 +1102,8 @@ async function lookUpSends() {
   const hashes = sendsOnTheirWay();
   if (!hashes.length) return;
   const answers = await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
+  // One chosen not to be sent arrived after all: Sent, and said so.
+  if (answers.some((answer) => answer?.result?.wentAfterAll)) showToast(WENT_AFTER_ALL_TEXT);
   // Looked up: what the node said shows from here on. A node that couldn't
   // be asked yet, as just back from away, said nothing: the Sent screen goes
   // on saying it's being looked up, never that it's taking long.

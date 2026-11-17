@@ -72,6 +72,12 @@ const moonlightNonces = new Map();
 // which waitingSends.js follows), by their nonce's key: their nonce stays
 // taken only while the node may have them (settleUncertainNonce).
 const uncertainNonces = new Map();
+// Those same transactions as they were signed, by their ID, for the wallet to
+// keep with their record (handedOverTx): one the node turns out never to have
+// had is sent again as it is from there (rebroadcastTx). Gone with a lock; the
+// last few kept.
+const handedOverTxs = new Map();
+const HANDED_OVER_KEPT = 16;
 
 // Reads shared for a few seconds: the popup asks for the same public balance,
 // Sozu status and token balances many times as it opens and draws. Each is
@@ -686,7 +692,10 @@ async function executeMoonlightTransaction(network, tx, profileIndex, sendId = "
     // looks after is looked up on the node before then (settleUncertainNonce).
     if (error?.data?.sent === "unknown") {
       moonlightNonces.set(key, nonce > (moonlightNonces.get(key) ?? 0n) ? nonce : moonlightNonces.get(key));
-      if (!sendId && error.data.hash) uncertainNonces.set(key, { nonce, hash: String(error.data.hash), nodeUrl: String(engineConfig.nodeUrl ?? "") });
+      if (!sendId && error.data.hash) {
+        uncertainNonces.set(key, { nonce, hash: String(error.data.hash), nodeUrl: String(engineConfig.nodeUrl ?? "") });
+        keepHandedOver(error, { nonce, account: profile.account.toString(), profileIndex: Number(profileIndex) || 0 });
+      }
     }
     throw error;
   }
@@ -837,6 +846,7 @@ export function lock() {
   clearWalletState();
   moonlightNonces.clear();
   uncertainNonces.clear();
+  handedOverTxs.clear();
   unclearSends.clear();
   heldWalletIds.clear();
   state.vaultWallets.clear();
@@ -1710,13 +1720,124 @@ function sayWhetherItWent(network) {
       // Handed over, and not turned down in so many words: it may have gone.
       const went = built?.buffer && handedOver.has(built.buffer) && error?.data?.sent !== false;
       if (went && nonceKey && built.nonce !== undefined && built.nonce !== null) keepUnclear(sendId, built, nonceKey);
-      throw markSent(error, went ? { sent: "unknown", hash: String(built.hash ?? "") || undefined } : { sent: false });
+      const said = markSent(error, went ? { sent: "unknown", hash: String(built.hash ?? "") || undefined } : { sent: false });
+      // The transaction as it was handed over, for whoever keeps it to send again (keepHandedOver).
+      if (went) {
+        try {
+          Object.defineProperty(said, "handedOverTx", { value: built, enumerable: false, configurable: true });
+        } catch {
+          // A frozen error: nothing to send again from.
+        }
+      }
+      throw said;
     } finally {
       if (ownBuild) tx.build = build;
       else if (build) delete tx.build;
     }
   };
   return network;
+}
+
+// A public transaction handed over without a clear answer that nothing else
+// follows, kept as it was signed (handedOverTx), with its nonce and account
+// told in its error's data, for its record.
+function keepHandedOver(error, { nonce, account, profileIndex }) {
+  const built = error?.handedOverTx;
+  const hash = String(built?.hash ?? error?.data?.hash ?? "");
+  if (!hash || !built?.buffer) return;
+  handedOverTxs.delete(hash);
+  handedOverTxs.set(hash, { hex: bytesToHex(built.buffer), nonce: nonce.toString(), account, profileIndex, walletId: getWalletId(), nodeUrl: String(engineConfig.nodeUrl ?? "") });
+  while (handedOverTxs.size > HANDED_OVER_KEPT) handedOverTxs.delete(handedOverTxs.keys().next().value);
+  markSent(error, { nonce: nonce.toString(), account });
+}
+
+/**
+ * A public transaction handed over without a clear answer that nothing here
+ * follows (anything but a payment from Send, which waitingSends.js follows),
+ * as it was signed: its bytes, nonce, account and profile, for the wallet to
+ * keep with its record, so that one the node never had can go out again as
+ * it is (rebroadcastTx). Null where none is kept by that ID.
+ * @param {{ hash?: string }} params
+ * @returns {{ hex: string, nonce: string, account: string, profileIndex: number } | null}
+ */
+export function handedOverTx({ hash } = {}) {
+  const kept = handedOverTxs.get(String(hash ?? ""));
+  if (!kept || !state.unlocked || kept.walletId !== getWalletId()) return null;
+  const { hex, nonce, account, profileIndex } = kept;
+  return { hex, nonce, account, profileIndex };
+}
+
+/**
+ * Sends again, as it was signed, a public transaction the node never had
+ * after a hand-over with no clear answer (its record's Send it now): the
+ * same ID and nonce, so it goes out once at most, whichever copy the node
+ * takes. Only while the node has neither it nor another at its nonce, on the
+ * network it was made for, from the wallet open now; checked by the node
+ * first, as any send is. Fails as a send does, saying whether it went
+ * (`data.sent`).
+ * @param {{ hex?: string, hash?: string, nonce?: string, account?: string, profileIndex?: number, nodeUrl?: string, at?: number }} params
+ * @returns {Promise<{ hash: string, nonce: string }>}
+ */
+export async function rebroadcastTx({ hex, hash, nonce, account, profileIndex, nodeUrl, at } = {}) {
+  const id = String(hash ?? "");
+  const refused = () => markSent(new Error("This send can't be sent again from here."), { sent: false });
+  if (!state.unlocked || !id || !/^\d+$/.test(String(nonce ?? "")) || !account) throw refused();
+  if (nodeUrl && nodeUrl !== String(engineConfig.nodeUrl ?? "")) {
+    throw markSent(new Error("This send waits for the network it was made for."), { sent: false, unreachable: true });
+  }
+  // From the wallet open now, on the network chosen now, after each wait too:
+  // locked, another wallet opened, or another network chosen as the node was
+  // asked, nothing goes (Astra's: locked as the node answered, it still went).
+  const wallet = getWalletId();
+  const on = String(engineConfig.nodeUrl ?? "");
+  const stillHere = () => {
+    if (!state.unlocked || getWalletId() !== wallet || String(engineConfig.nodeUrl ?? "") !== on) throw refused();
+  };
+  // Where the node has it, or may: its nonce taken, as a send's is, the next
+  // one made after it (Astra's: after a lock and an unlock the wallet knew no
+  // nonce of its own, and made the next one at its nonce).
+  const key = `${getNetworkKey()}|${wallet}|${Number(profileIndex) || 0}`;
+  const its = BigInt(String(nonce));
+  const taken = () => {
+    const previous = moonlightNonces.get(key);
+    if (previous == null || previous < its) moonlightNonces.set(key, its);
+  };
+  const { state: where } = await handedOverState(on, { hash: id, account, nonce, at });
+  stillHere();
+  if (where === "in") {
+    taken();
+    return { hash: id, nonce: String(nonce) };
+  }
+  if (where === "replaced") {
+    throw markSent(new Error("Another transaction from this account took its place, so nothing was sent."), { sent: false, replaced: true });
+  }
+  if (where === "used") throw markSent(new Error("The network can't say yet whether it went. Try again in a moment."), { sent: false });
+  if (where !== "absent") throw markSent(new Error("The network didn't answer. Nothing was sent."), { sent: false, unreachable: true });
+  const bytes = hexToBytes(String(hex ?? ""));
+  const network = await ensureNetwork();
+  stillHere();
+  try {
+    await network.transactions.preverify(bytes);
+  } catch (error) {
+    throw markSent(error, { sent: false });
+  }
+  stillHere();
+  try {
+    await network.transactions.propagate(bytes);
+  } catch (error) {
+    if (error?.data?.sent === false) throw markSent(error, { sent: false });
+    // Handed over with no clear answer, it may be in the node's mempool: its
+    // nonce taken, and looked up on the node before the next transaction of
+    // the profile is made, as a send's is (settleUncertainNonce).
+    taken();
+    uncertainNonces.set(key, { nonce: its, hash: id, nodeUrl: on });
+    throw markSent(error, { sent: "unknown", hash: id });
+  }
+  // The node has it now: its nonce is taken, whatever was uncertain of it.
+  taken();
+  if (uncertainNonces.get(key)?.hash === id) uncertainNonces.delete(key);
+  handedOverTxs.delete(id);
+  return { hash: id, nonce: String(nonce) };
 }
 
 function keepUnclear(sendId, built, nonceKey) {

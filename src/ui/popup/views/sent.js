@@ -69,6 +69,15 @@ export const appLeaveText = (ov) =>
     ? "If you leave Dusk Wallet, it locks and this isn't sent."
     : "If you leave Dusk Wallet, it goes out when you open it again. If Android closes the app first, you'll be asked to send it.";
 
+/**
+ * What's said of one the person chose not to send whose hand-over had no clear
+ * answer: it may still arrive, and is followed (Astra's: never "nothing left").
+ */
+export const NOT_SENT_FOLLOWED_TEXT = "Not sent yet. If it still arrives, it will show here.";
+
+/** What's said once one the person chose not to send arrived after all. */
+export const WENT_AFTER_ALL_TEXT = "A payment you chose not to send went out after all.";
+
 // "13:21 CET": when it was sent, with the time zone it shows in.
 function clock(ts) {
   return zonedClockText(Number(ts) || Date.now());

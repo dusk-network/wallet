@@ -441,6 +441,136 @@ describe("a public transaction of a site's, or a contract call, handed over with
   });
 });
 
+// Chen's, R01: handed over as the Wi-Fi came back flaky, the node never had it, and it was "Not confirmed yet" for good
+// with nothing to tap. A contract call, a stake, a site's transfer: kept as it was signed, for Send it now.
+describe("any other public transaction handed over without a clear answer, kept as it was signed", () => {
+  // The node: no transaction in a block, the mempool as `mempool` says (none), the account's nonce as `nonce` says.
+  const answering = (nonce = () => Number(node.balance.nonce), mempool = () => []) => {
+    const fetch = node.fetch;
+    vi.stubGlobal("fetch", async (input, init = {}) => {
+      const url = new URL(String(input), "https://wallet.invalid");
+      const body = String(init.body ?? "");
+      if (url.pathname === "/on/graphql/query" && body.includes("tx(hash")) return new Response(JSON.stringify({ tx: null }));
+      if (url.pathname === "/on/graphql/query" && body.includes("mempoolTxs")) return new Response(JSON.stringify({ mempoolTxs: mempool() }));
+      if (/\/on\/account:[^/]+\/status$/.test(url.pathname)) return new Response(JSON.stringify({ balance: 1, nonce: nonce(), next_nonce: nonce() + 1 }));
+      return fetch(input, init);
+    });
+  };
+
+  it("says its nonce and account, keeps it as it was signed, and sends it again as it is, once, where the node never had it", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    answering();
+    node.drops = /\/propagate$/;
+    const call = await engine.sendTransaction(KINDS["a public contract call, as Sozu's and a token's"]()).catch((e) => e);
+    expect(call.data).toMatchObject({ sent: "unknown", nonce: "1", account: engine.getAccounts()[0] });
+    const made = node.signed.at(-1);
+    const kept = engine.handedOverTx({ hash: call.data.hash });
+    expect(kept).toEqual({ hex: expect.stringMatching(/^[0-9a-f]+$/), nonce: "1", account: engine.getAccounts()[0], profileIndex: 0 });
+
+    node.drops = null;
+    const again = await engine.rebroadcastTx({ ...kept, hash: call.data.hash, nodeUrl: TESTNET });
+    expect(again).toEqual({ hash: call.data.hash, nonce: "1" });
+    // Checked and handed over as it was: the same bytes, nothing signed anew.
+    expect(node.signed.slice(-2)).toEqual([made, made]);
+    // The next one comes after it.
+    const nonces = [];
+    engine.setHandOverHook(async ({ nonce }) => nonces.push(nonce));
+    await engine.sendTransaction({ ...KINDS["a public transfer"](), sendId: "send-next" });
+    engine.setHandOverHook(null);
+    expect(nonces).toEqual(["2"]);
+  });
+
+  it("isn't sent again on another network, nor once its account's nonce went past it, nor after a lock", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    answering();
+    node.drops = /\/propagate$/;
+    const call = await engine.sendTransaction(KINDS["a public contract call, as Sozu's and a token's"]()).catch((e) => e);
+    node.drops = null;
+    const kept = engine.handedOverTx({ hash: call.data.hash });
+    const signed = node.signed.length;
+    await expect(engine.rebroadcastTx({ ...kept, hash: call.data.hash, nodeUrl: "https://nodes.dusk.network" })).rejects.toMatchObject({ data: { sent: false, unreachable: true } });
+    answering(() => 1);
+    await expect(engine.rebroadcastTx({ ...kept, hash: call.data.hash, nodeUrl: TESTNET })).rejects.toMatchObject({ data: { sent: false } });
+    expect(node.signed).toHaveLength(signed);
+    engine.lock();
+    expect(engine.handedOverTx({ hash: call.data.hash })).toBeNull();
+    await expect(engine.rebroadcastTx({ ...kept, hash: call.data.hash, nodeUrl: TESTNET })).rejects.toMatchObject({ data: { sent: false } });
+    expect(node.signed).toHaveLength(signed);
+  });
+
+  // Astra's, the second time: after a lock and an unlock, the wallet knows no nonce of its own. One sent again with
+  // Send it now whose answer was lost, or that the node had already, left its nonce free here, and the next
+  // transaction was made at that same nonce while it may still go through.
+  it("keeps the nonce of one sent again taken, where its answer was lost or the node had it, as a send's", async () => {
+    for (const how of ["its answer lost", "the node had it"]) {
+      await addNode(TESTNET);
+      await engine.unlockWithMnemonic(MNEMONIC);
+      answering();
+      node.drops = /\/propagate$/;
+      const call = await engine.sendTransaction(KINDS["a public contract call, as Sozu's and a token's"]()).catch((e) => e);
+      node.drops = null;
+      const kept = engine.handedOverTx({ hash: call.data.hash });
+      expect(kept.nonce, how).toBe("1");
+      // A lock and an unlock: nothing of the wallet's nonces is known now.
+      engine.lock();
+      await engine.unlockWithMnemonic(MNEMONIC);
+      let inMempool = how === "the node had it";
+      answering(undefined, () => (inMempool ? [{ id: call.data.hash }] : []));
+      if (how === "its answer lost") {
+        node.drops = /\/propagate$/;
+        await expect(engine.rebroadcastTx({ ...kept, hash: call.data.hash, nodeUrl: TESTNET }), how).rejects.toMatchObject({ data: { sent: "unknown" } });
+        node.drops = null;
+        // In the node's mempool after all, as its answer was lost on the way back.
+        inMempool = true;
+      } else {
+        await expect(engine.rebroadcastTx({ ...kept, hash: call.data.hash, nodeUrl: TESTNET }), how).resolves.toEqual({ hash: call.data.hash, nonce: "1" });
+      }
+      // The next one comes after it, never at its nonce.
+      const nonces = [];
+      engine.setHandOverHook(async ({ nonce }) => nonces.push(nonce));
+      await engine.sendTransaction({ ...KINDS["a public transfer"](), sendId: how === "its answer lost" ? "send-after-lost" : "send-after-had" });
+      engine.setHandOverHook(null);
+      expect(nonces, how).toEqual(["2"]);
+      engine.lock();
+    }
+  });
+
+  // Astra's: the wallet was asked whether it's open once, before the node was asked of the transaction; locked as
+  // the node answered, it still handed the transaction over.
+  it("isn't sent once the wallet locks while the node is asked of it", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    answering();
+    node.drops = /\/propagate$/;
+    const call = await engine.sendTransaction(KINDS["a public contract call, as Sozu's and a token's"]()).catch((e) => e);
+    node.drops = null;
+    const kept = engine.handedOverTx({ hash: call.data.hash });
+    const signed = node.signed.length;
+    // Locked as the node says where the account's nonce stands.
+    answering(() => {
+      engine.lock();
+      return Number(node.balance.nonce);
+    });
+    await expect(engine.rebroadcastTx({ ...kept, hash: call.data.hash, nodeUrl: TESTNET })).rejects.toMatchObject({ data: { sent: false } });
+    expect(node.signed).toHaveLength(signed);
+  });
+
+  it("keeps nothing of a payment from Send, which its queue follows, nor of one that went", async () => {
+    await addNode(TESTNET);
+    await engine.unlockWithMnemonic(MNEMONIC);
+    engine.setHandOverHook(async () => {});
+    node.drops = /\/propagate$/;
+    const lost = await engine.sendTransaction({ ...KINDS["a public transfer"](), sendId: "send-lost" }).catch((e) => e);
+    engine.setHandOverHook(null);
+    expect(engine.handedOverTx({ hash: lost.data.hash })).toBeNull();
+    node.drops = null;
+    const went = await engine.sendTransaction(KINDS["a public contract call, as Sozu's and a token's"]());
+    expect(engine.handedOverTx({ hash: went.hash })).toBeNull();
+  });
+});
+
 describe("a prover out of reach", () => {
   // Astra's: a shielded payment proved as the network went failed, the engine's words for that read as no network.
   it("is the network out of reach, as the engine marks it", async () => {

@@ -123,6 +123,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said Not sent yet, with Send it now and Don't send, of a stake, a contract call or any other public transaction of the wallet's own that the network never got as its connection went, rather than Not confirmed for good; Send it now sends the very same transaction, Don't send says it may still arrive and shows it as Sent, with a notice, if it does, and one whose place another took says Not sent.
 - Told a connected site nothing as you switch to another profile, or as its profile's name is checked again and found the same, and refused in the page itself a site's request whose parameters carry a prototype or a "__proto__" key, which the wallet was answering as an empty one.
 - Showed the Android app's notice that a payment is waiting for the network wherever the phone allows the app's notices, rather than only after Tell me when it arrives.
 - Sent a payment kept by the previous version again with Send it now, rather than saying the wallet, profile or network changed.
