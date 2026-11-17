@@ -15,7 +15,7 @@ import { againDraft, sameSentMeanwhile, sentMeanwhileText, unsentOf, waitingOf, 
 import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
-import { whenAtText } from "./txRow.js";
+import { lastReadText, whenAtText } from "./txRow.js";
 import { NOT_SENT_CHOSEN_TEXT, UNCLEAR_TEXT, appLeaveText, reasonText } from "./sent.js";
 import { isTauriRuntime } from "../../../platform/runtime.js";
 import { isPhone } from "../../lib/device.js";
@@ -306,21 +306,20 @@ export function homeView(ov, { state, actions } = {}) {
 }
 
 /**
- * What's said under the balances where they may be out of date: offline, as
- * the browser says at once; read before and kept while the node can't give
- * it or doesn't answer, with when it was read where the wallet kept that,
- * as after opening with no signal; or the parts the node couldn't give now,
- * by name; or not read at all.
+ * What's said under the balances where they may be out of date, with when
+ * they were read last (Lena's wish, the sixth round): offline, as the browser
+ * says at once; read before and kept while the node can't give it or doesn't
+ * answer, as after opening with no signal; or the parts the node couldn't
+ * give now, by name; or not read at all.
  * @returns {HTMLElement | null}
  */
 function staleNote(ov, hasBalance) {
-  const at = Number(ov?.balanceReadAt);
-  const read = Number.isFinite(at) && at > 0 ? ` Last read ${whenAtText(at)}.` : "";
+  const read = lastReadText(ov?.balanceReadAt);
   const note = (text) => h("div", { class: "muted balance-stale", role: "status", text });
   if (globalThis.navigator?.onLine === false) return note(`${BALANCE_OFFLINE}${read}`);
   if (ov?.balanceStale || (hasBalance && ov?.networkStatus?.nodeStatus === "offline")) return note(`${BALANCE_STALE}${read}`);
-  const parts = [ov?.shieldedStale && "shielded balance", ov?.stakeStale && "stake"].filter(Boolean);
-  if (parts.length) return note(`Your ${parts.join(" and ")} couldn't be read just now, so ${parts.length > 1 ? "they" : "it"} may be out of date.`);
+  const parts = [ov?.shieldedStale && ["shielded balance", ov.shieldedReadAt], ov?.stakeStale && ["stake", ov.stakeReadAt]].filter(Boolean);
+  if (parts.length) return note(`Your ${parts.map(([name]) => name).join(" and ")} couldn't be read just now, so ${parts.length > 1 ? "they" : "it"} may be out of date.${lastReadText(...parts.map(([, at]) => at))}`);
   return ov?.balanceError ? h("div", { class: "muted", text: BALANCE_UNREAD }) : null;
 }
 

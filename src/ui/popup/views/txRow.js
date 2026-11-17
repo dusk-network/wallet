@@ -76,6 +76,17 @@ export function whenAtText(ms, now = Date.now(), { seconds = false } = {}) {
   return day === "Today" ? at : day === "Yesterday" ? `yesterday ${at}` : `on ${day} ${at}`;
 }
 
+/**
+ * " Last read at 14:32.", for a note that figures may be out of date: when
+ * they were read last, the oldest of them, where each one's is known; else "".
+ * @param {...unknown} times - when each was read, in ms
+ * @returns {string}
+ */
+export function lastReadText(...times) {
+  const at = times.map(Number);
+  return at.length && at.every((t) => Number.isFinite(t) && t > 0) ? ` Last read ${whenAtText(Math.min(...at))}.` : "";
+}
+
 /** When, on Home's short list: "Just now", "5 min ago", "14:32", "Yesterday", "24 Oct". */
 export function recentText(ms, now = Date.now()) {
   const ago = now - ms;

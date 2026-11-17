@@ -6,6 +6,7 @@ import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom, screenReaderText, visibleText } from "./testing/fakeDom.js";
 import { iconSvg } from "./components/ActionIcon.js";
 import { homeView } from "./popup/views/home.js";
+import { whenAtText } from "./popup/views/txRow.js";
 
 // The token and NFT cards load on their own; the balance card is what matters here.
 vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
@@ -289,6 +290,31 @@ describe("home balance", () => {
     expect(draw({ stakeStale: true }).note).toBe("Your stake couldn't be read just now, so it may be out of date.");
     expect(draw({ stakeStale: true, shieldedStale: true }).note).toBe("Your shielded balance and stake couldn't be read just now, so they may be out of date.");
     expect(draw({}).note).toBe("");
+  });
+
+  // Lena's wish, the sixth round: no "may be out of date" said when the figures were read last.
+  it("says when the parts it couldn't read now were read last, the older of them", () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(new Date(2026, 10, 17, 10, 30));
+      const { document } = installFakeDom();
+      vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
+      const state = { route: "home", addressBook: { loaded: true, items: [] } };
+      const note = (over) => {
+        const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs: [], balance: { value: "857535243" }, balanceReadAt: Date.now(), shieldedBalance: { value: "0", spendable: "0" }, staked: { lux: "247500000", native: "0", sozu: "247500000" }, ...over };
+        document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
+        return document.body.querySelector(".balance-stale")?.textContent ?? "";
+      };
+      const stake = new Date(2026, 10, 17, 10, 2).getTime();
+      const shielded = new Date(2026, 10, 17, 9, 58).getTime();
+      expect(note({ stakeStale: true, stakeReadAt: stake })).toBe(`Your stake couldn't be read just now, so it may be out of date. Last read ${whenAtText(stake)}.`);
+      expect(note({ stakeStale: true, stakeReadAt: stake, shieldedStale: true, shieldedReadAt: shielded })).toBe(
+        `Your shielded balance and stake couldn't be read just now, so they may be out of date. Last read ${whenAtText(shielded)}.`
+      );
+      expect(whenAtText(shielded)).toMatch(/^at 9:58|^at 09:58/);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refreshes through the header's old Refresh action", async () => {

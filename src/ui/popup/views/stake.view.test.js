@@ -14,6 +14,7 @@ import { stakeConfirmView, stakeFormView } from "./stake.js";
 import { readStakingAgain, sozuConfirmView } from "./sozu.js";
 import { screenShown } from "../../lib/clickGuard.js";
 import { reviewOf, sentView } from "./sent.js";
+import { whenAtText } from "./txRow.js";
 import { switchContext } from "../context.js";
 
 // The profile's verified name, as the header shows it: none unless a test gives one.
@@ -548,6 +549,36 @@ describe("staking overview", () => {
     const text = visibleText(body.querySelector(".stake-sum"));
     expect(text).toContain("With Sozu0.0997 DUSK");
     expect(text).toContain("What's with Sozu couldn't be read again, so it may be out of date.");
+  });
+
+  // Lena's wish, the sixth round: "may be out of date" never said when the figures were read last.
+  it("says when what it shows was read last: Sozu's last read that went through, and the stake's own, in one note", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const at = (hours, minutes) => new Date(2026, 10, 17, hours, minutes).getTime();
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    let answer = async () => ({ ...sozu().status, position, pool: sozu().pool });
+    const notes = () => [...body.querySelectorAll(".stake-sum > div")].filter(isShown).map(visibleText).filter((text) => text.includes("out of date"));
+    // The stake read at 10:02; Sozu at 10:05.
+    vi.setSystemTime(at(10, 5));
+    const state = { route: "stake", staking: staking(owner(), { updatedAt: at(10, 2) }), sozu: sozu({ position, loaded: false }) };
+    popup(state, ov(), { sozuStatus: () => answer() });
+    await settle();
+    expect(notes()).toEqual([]);
+
+    // Sozu can't be read again at 10:09: said, with when it was.
+    vi.setSystemTime(at(10, 9));
+    answer = async () => {
+      throw new Error("node down");
+    };
+    state.sozu.loaded = false;
+    popup(state, ov(), { sozuStatus: () => answer() });
+    await settle();
+    expect(notes()).toEqual([`What's with Sozu couldn't be read again, so it may be out of date. Last read ${whenAtText(at(10, 5))}.`]);
+
+    // The node silent too: one note for both, with the older of the two reads.
+    popup(state, ov({ networkStatus: { nodeStatus: "offline" }, balanceReadAt: at(10, 8) }), { sozuStatus: () => answer() });
+    await settle();
+    expect(notes()).toEqual([`Your stake may be out of date. Last read ${whenAtText(at(10, 2))}.`]);
   });
 
   it("leaves out an answer from before a switch of wallet, and asks again", async () => {

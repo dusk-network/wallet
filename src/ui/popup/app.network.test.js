@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "../../shared/fixtures/activity-testnet.json";
 import { fakeArchive } from "../../shared/fixtures/fakeArchive.js";
+import { clockText } from "../lib/time.js";
 import { installFakeDom, settle } from "../testing/fakeDom.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
@@ -340,6 +341,100 @@ describe("a node that answers again before the balance does", () => {
       for (const resolve of held.splice(0)) resolve(read("2000000000"));
       await vi.waitFor(() => expect(app.querySelector(".balance-amount").textContent).toBe("2 DUSK"));
       expect(app.textContent).not.toContain("may be out of date");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+// Lena's wish, the sixth round: "may be out of date" never said when the figures were read last; with the node
+// silent or the browser offline while the wallet showed, no time was known at all.
+describe("when the balance shown was read last", () => {
+  const NODE = "https://testnet.nodes.dusk.network";
+  const at = (hours, minutes, seconds = 0) => new Date(2026, 10, 17, hours, minutes, seconds).getTime();
+  // The wallet's page in English, its node answering `answer` for each overview and `nodeStatus()` when its check
+  // asks, the browser online while `online()`.
+  async function wallet({ answer, nodeStatus = () => "online", online = () => true }) {
+    const dom = installFakeDom({ pathname: "/popup.html" });
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "en-US", get onLine() { return online(); } });
+    dom.document.body.innerHTML = "";
+    const pill = dom.document.createElement("button");
+    pill.id = "network-pill";
+    pill.className = "network-pill";
+    const actions = dom.document.createElement("div");
+    actions.id = "header-actions";
+    const app = dom.document.createElement("div");
+    app.id = "app";
+    dom.document.body.append(pill, actions, app);
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    send.mockReset();
+    send.mockImplementation(async (message) => {
+      if (message.type === "DUSK_UI_OVERVIEW") return answer();
+      if (message.type === "DUSK_UI_CHECK_NODE") return { ok: true, networkStatus: { nodeStatus: nodeStatus(), nodeUrl: NODE } };
+      return {};
+    });
+    const { render } = await import("./app.js");
+    const reads = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_OVERVIEW").length;
+    const note = () => app.querySelector(".balance-stale")?.textContent ?? "";
+    return { app, dom, note, reads, render };
+  }
+  const overview = { hasVault: true, isUnlocked: true, networkName: "Testnet", nodeUrl: NODE, accounts: [ACCOUNT], selectedAccountIndex: 0, txs: [], shieldedSync: { state: "done", notes: 1 } };
+  const read = () => ({ ...overview, balance: { value: "1047700000" }, shieldedBalance: { value: "0", spendable: "0" }, networkStatus: { nodeStatus: "online", nodeUrl: NODE } });
+
+  it("says the time of the last read that went through once the node stops answering", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    vi.setSystemTime(at(10, 2));
+    let silent = false;
+    try {
+      const view = await wallet({ answer: () => (silent ? new Promise(() => {}) : read()), nodeStatus: () => (silent ? "offline" : "online") });
+      await view.render();
+      await settle();
+      expect(view.note()).toBe("");
+      // Read again at 10:07, by Refresh.
+      vi.setSystemTime(at(10, 7, 30));
+      view.app.querySelector("button.balance-refresh").click();
+      await vi.waitFor(() => expect(view.reads()).toBe(2));
+      await settle();
+
+      // Silent from 10:09: said within the next ask, with when the balance shown was read.
+      vi.setSystemTime(at(10, 9));
+      silent = true;
+      vi.advanceTimersByTime(4_000);
+      await vi.waitFor(() => expect(view.note()).toBe(`Your balance may be out of date. Last read at ${clockText(at(10, 7, 30))}.`));
+      expect(view.note()).toMatch(/at 10:07\b/);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("says the time of this popup's last read while offline, not an older one kept on the device, through a Refresh that can't read it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(at(10, 2));
+    let online = true;
+    // Offline, the wallet gives the balance kept on the device, and when it kept it: once a minute at most.
+    const kept = () => ({ ...overview, balance: { value: "1047700000" }, balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: at(10, 2), shieldedError: "Failed to fetch" });
+    try {
+      const view = await wallet({ answer: () => (online ? read() : kept()), online: () => online });
+      await view.render();
+      await settle();
+      vi.setSystemTime(at(10, 3, 40));
+      view.app.querySelector("button.balance-refresh").click();
+      await vi.waitFor(() => expect(view.reads()).toBe(2));
+      await settle();
+
+      // Offline at 10:04: said at once, with when it was read.
+      vi.setSystemTime(at(10, 4));
+      online = false;
+      view.dom.window.dispatchEvent(new Event("offline"));
+      await settle();
+      const said = `Your balance may be out of date until you're back online. Last read at ${clockText(at(10, 3, 40))}.`;
+      expect(view.note()).toBe(said);
+      // A Refresh that can't read it: the same time, not now and not the device's older one.
+      view.app.querySelector("button.balance-refresh").click();
+      await vi.waitFor(() => expect(view.reads()).toBe(3));
+      await settle();
+      expect(view.note()).toBe(said);
     } finally {
       vi.useRealTimers();
     }

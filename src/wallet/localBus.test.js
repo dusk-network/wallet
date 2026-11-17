@@ -874,12 +874,15 @@ describe("the balance in the app", () => {
   it("shows the one read last on this phone where it can't be read now, said to be out of date with when it was read", async () => {
     const { localSend } = await import("./localBus.js");
     engine.balance = 857535243n;
+    const readFrom = Date.now();
     await expect(localSend({ type: "DUSK_UI_OVERVIEW" })).resolves.toMatchObject({ balance: { value: "857535243" }, balanceError: null });
+    const readTo = Date.now();
 
-    // No signal now.
+    // No signal now. Lena's wish, the sixth round: each part kept says when it was read, the shielded balance's too.
     engine.balance = null;
     const offline = await localSend({ type: "DUSK_UI_OVERVIEW" });
-    expect(offline).toMatchObject({ balance: { value: "857535243" }, balanceStale: true, balanceReadAt: expect.any(Number), shieldedBalance: { value: "0" }, shieldedStale: true });
+    expect(offline).toMatchObject({ balance: { value: "857535243" }, balanceStale: true, balanceReadAt: expect.any(Number), shieldedBalance: { value: "0" }, shieldedStale: true, shieldedReadAt: expect.any(Number) });
+    for (const at of [offline.balanceReadAt, offline.shieldedReadAt]) expect(at >= readFrom && at <= readTo).toBe(true);
     expect(offline.balanceError).toBeTruthy();
 
     // Nothing kept: nothing shown, never a figure made up.

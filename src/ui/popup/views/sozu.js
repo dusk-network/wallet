@@ -43,7 +43,7 @@ import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { SOZU_FACT_SOON_MS, activityKey, activityRows, keptRatesOf, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
-import { whenAtText } from "./txRow.js";
+import { lastReadText } from "./txRow.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
 // rate and the deposit fee are read; null until then.
@@ -214,6 +214,7 @@ function applyStakeTerms({ st, draft, terms }) {
   st.status = status;
   st.pool = status.pool ?? null;
   st.position = status.position ?? null;
+  st.readAt = Date.now();
   const next = quoteJson(quote, depositFee);
   const changed =
     shownTerms(draft.quote) !== shownTerms(next) ||
@@ -385,14 +386,15 @@ const accountOf = (ov, idx) => String(ov?.accounts?.[idx] ?? "");
 /**
  * Staking's figures were read from the node, as Home's balance was: with no
  * network, or a node that stopped answering, they're said to be maybe out of
- * date, as Home says it, with when they were read where that's known. Null
- * while they're as read.
+ * date, as Home says it, with when they were read last: each figure the
+ * screen shows (`readAt`), else the balance, where that's known (Lena's wish,
+ * the sixth round). Null while they're as read.
  * @param {object} ov - the overview
+ * @param {unknown[]} [readAt] - when each figure shown was read
  * @returns {HTMLElement | null}
  */
-export function stakeStaleNote(ov) {
-  const at = Number(ov?.balanceReadAt);
-  const read = Number.isFinite(at) && at > 0 ? ` Last read ${whenAtText(at)}.` : "";
+export function stakeStaleNote(ov, readAt = []) {
+  const read = (readAt.length ? lastReadText(...readAt) : "") || lastReadText(ov?.balanceReadAt);
   const note = (text) => h("div", { class: "muted balance-stale stake-stale", role: "status", text });
   if (globalThis.navigator?.onLine === false) return note(`Your stake may be out of date until you're back online.${read}`);
   if (ov?.balanceStale || ov?.stakeStale || ov?.networkStatus?.nodeStatus === "offline") return note(`Your stake may be out of date.${read}`);
@@ -613,6 +615,8 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
       st.status = resp?.result ?? resp ?? null;
       st.pool = st.status?.pool ?? null;
       st.position = st.status?.position ?? null;
+      // When, for a note that it may be out of date once a read fails or the node goes silent.
+      st.readAt = Date.now();
       st.profileIndex = idx;
       st.loaded = true;
       st.loading = false;
@@ -635,11 +639,11 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
  * What the selected profile holds with Sozu, for the Staking overview, as read
  * for this wallet on this network. `known` is false until that's read, or when
  * the read found the pool but not the position. `failed` says the last read
- * failed, so what's known may be out of date, and `reading` that it's being
- * read again.
+ * failed, so what's known may be out of date, `readAt` when what's known was
+ * read, and `reading` that it's being read again.
  * @param {object} ov
  * @param {{ state: object, actions: object }} ctx
- * @returns {{ known: boolean, failed: boolean, reading: boolean, poolLux: bigint, stDuskLux: bigint }}
+ * @returns {{ known: boolean, failed: boolean, reading: boolean, poolLux: bigint, stDuskLux: bigint, readAt: number | null }}
  */
 export function sozuHolding(ov, { state, actions } = {}) {
   const st = sozuState(state);
@@ -669,6 +673,7 @@ export function sozuHolding(ov, { state, actions } = {}) {
     reading: Boolean(st.loading),
     poolLux: safeBigInt(position.poolBalanceLux, 0n),
     stDuskLux: safeBigInt(position.stDuskBalanceLux, 0n),
+    readAt: answered ? st.readAt ?? null : null,
     // The status read for this profile and network, for Rewards by year.
     status: answered ? st.status : null,
   };
@@ -1046,7 +1051,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     cfg && liveStatus?.reason ? h("div", { class: "muted", text: liveStatus.reason }) : null,
     syncing ? syncWarning() : null,
     positionGroup,
-    positionGroup ? stakeStaleNote(ov) : null,
+    positionGroup ? stakeStaleNote(ov, [st.readAt]) : null,
     assetError,
     actionTabs,
     stakeOff

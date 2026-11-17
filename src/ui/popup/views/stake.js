@@ -32,6 +32,7 @@ import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/Ne
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { readSozuFactsAgain, sozuHolding, sozuLiquidStakingView, stakeStaleNote, stakingHistory } from "./sozu.js";
+import { lastReadText } from "./txRow.js";
 import { keptRatesOf, nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
 import { currencyName } from "../activityExport.js";
 import { duskPrices } from "../duskPrice.js";
@@ -668,13 +669,19 @@ function stakingOverview(ov, ctx, { state, actions }) {
 
   // The reasons Unstake and Claim can't be pressed, said once each.
   const reasons = showNativeActions && !sozuUnread ? [...new Set([unstakeState, claimState].filter((s) => !s.ok).map((s) => s.reason))] : [];
+  // Lena's: with the node silent, Staking said nothing of its own; and "may be
+  // out of date" never said when the figures were read. Each figure shown was
+  // read on its own: the note says the oldest, and says it for Sozu's too.
+  const staleNote = stakeStaleNote(ov, hasLiquid ? [st.updatedAt, holding.readAt] : [st.updatedAt]);
   const sozuNote = sozuOnItsWay
     ? `Your ${sozuOnItsWay.asset.action === "sozu_unstake" ? "unstake from" : "stake with"} Sozu is on its way.`
     : !holding.failed
       ? null
-      : hasLiquid
-        ? "What's with Sozu couldn't be read again, so it may be out of date."
-        : "What's with Sozu couldn't be read.";
+      : !hasLiquid
+        ? "What's with Sozu couldn't be read."
+        : staleNote
+          ? null
+          : `What's with Sozu couldn't be read again, so it may be out of date.${lastReadText(holding.readAt)}`;
 
   const figure = (label, lux, sub = null) =>
     h("div", {}, [
@@ -702,8 +709,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
           figure("Native rewards", rewardLux),
         ])
       : h("div", { class: "stake-sum__two" }, [figure("Staked", stakedLux), figure("Rewards", rewardLux)]),
-    // Lena's: with the node silent, Home said its balance may be out of date and Staking said nothing of its own.
-    stakeStaleNote(ov),
+    staleNote,
     lockedLux > 0n
       ? h("div", { class: "stake-cap" }, [
           "Locked: ",
