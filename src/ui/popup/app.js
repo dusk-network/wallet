@@ -87,6 +87,9 @@ try {
 }
 
 const app = document.getElementById("app");
+// The page the wallet's drawn on: the request link it was opened with goes
+// from this page's address, as its Back entries are this page's (systemBack).
+const page = globalThis.window;
 const headerActionsHost = document.getElementById("header-actions");
 // Toasts live outside #app, which scrolls and is redrawn.
 const toaster = createToaster();
@@ -456,7 +459,7 @@ function setApp(children) {
   // filled in goes with it, not the next Send's. Not one that opened the app
   // before it had a wallet, which waits through the setup's screens.
   if (!onLinksScreens()) {
-    forgetRequestLink();
+    forgetRequestLink(page);
     if (state.draft?.filledIn && !(state.draft.linkSetup && ONBOARD_ROUTES.has(state.route))) state.draft = null;
   }
   systemBack.sync();
@@ -1914,7 +1917,7 @@ function openPaymentLink(url, { handed = false } = {}) {
   // Handed to the tab: the request it was opened with goes from its address,
   // or a reload, or Firefox bringing the tab back, would fill Send with that
   // one (Astra's).
-  if (handed) forgetRequestLink();
+  if (handed) forgetRequestLink(page);
   Object.assign(state, { draft, route: "send" });
   render()
     .then(() => {
