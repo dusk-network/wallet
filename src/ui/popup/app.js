@@ -30,7 +30,7 @@ import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../.
 import { saveHandedExport } from "./activityExport.js";
 import { siteLastSeen } from "../../shared/siteRecords.js";
 import { forgetRequestLink, requestDraftOf } from "../lib/requestLink.js";
-import { keepOpenSend, takeOpenSend } from "../lib/sendDraft.js";
+import { keepOpenRequest, keepOpenSend, takeOpenRequest, takeOpenSend } from "../lib/sendDraft.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
 import { keepIncomingWatched } from "./incoming.js";
@@ -1300,20 +1300,30 @@ function returnAfterUnlock(ov) {
 // The app on the way to the background with Send, or its Review, open: what's
 // typed is kept on the phone as Send left open, for Android may end the app
 // meanwhile; the app opens on it again, once unlocked (reopenSend). Back in
-// front, the app wasn't ended: it's a draft as any other again.
+// front, the app wasn't ended: it's a draft as any other again. A wallet tab
+// hidden or reloading keeps its Send the same way, a link's payment with its
+// way back asking first, and the request form being filled in, in that tab
+// alone (Marek's and Amélie's: Firefox for Android's pull down at the top of
+// the page reloaded the tab, and the payment a link filled in went without a
+// word, as did a half-filled request).
 let openSendKept = false;
 function keepSendOpen() {
-  if (!isTauriRuntime() || !state.overview?.isUnlocked || !["send", "confirm"].includes(state.route)) return;
+  if (!state.overview?.isUnlocked) return;
+  // The request form: kept while it's open with something typed in it, else nothing of it.
+  if (!isTauriRuntime()) keepOpenRequest(state.route === "receive" ? state.receive : null, state.overview);
+  if (!["send", "confirm"].includes(state.route)) return;
   keepOpenSend(state.draft, state.overview);
   openSendKept = true;
 }
 let sendReopened = false;
 function reopenSend(ov) {
-  if (!isTauriRuntime() || !ov?.isUnlocked) return;
+  if (!ov?.isUnlocked) return;
   if (!sendReopened) {
     sendReopened = true;
     const values = takeOpenSend(ov);
+    const request = isTauriRuntime() ? null : takeOpenRequest(ov);
     if (values && state.route === "home") Object.assign(state, { route: "send", draft: values });
+    else if (request && state.route === "home") Object.assign(state, { route: "receive", receive: { ...request, requestOpen: true, context: state.context } });
     return;
   }
   if (openSendKept && document.visibilityState !== "hidden") {
@@ -1340,6 +1350,8 @@ try {
   window.addEventListener("pageshow", (event) => {
     if (event?.persisted) resumeWatching();
   });
+  // A tab reloading, seen or not, keeps its open Send and request form for after.
+  window.addEventListener("pagehide", keepSendOpen);
 } catch {
   // ignore
 }

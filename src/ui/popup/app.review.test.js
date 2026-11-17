@@ -1879,6 +1879,102 @@ describe("a request link handed to the wallet's tab open already", () => {
   });
 });
 
+// Marek's and Amélie's: in Firefox for Android a pull down at the top of the page reloaded the wallet's tab, and the
+// payment a link filled in went without a word, as did a half-filled request; after it, Back no longer asked.
+describe("a wallet tab that reloads", () => {
+  // The tab's session as a reload keeps it: its history's entries, each with its state, and its session storage.
+  function tabSession() {
+    const kept = new Map();
+    const entries = [null];
+    let at = 0;
+    let win = null;
+    const history = {
+      closed: false,
+      get state() {
+        return entries[at];
+      },
+      get at() {
+        return at;
+      },
+      pushState(state) {
+        entries.splice(at + 1, Infinity, state);
+        at++;
+      },
+      back() {
+        this.go(-1);
+      },
+      go(delta) {
+        if (at + delta < 0) {
+          this.closed = true;
+          return;
+        }
+        at += delta;
+        setTimeout(() => win.dispatchEvent(fakeEvent("popstate", { state: entries[at] })), 0);
+      },
+    };
+    return {
+      history,
+      kept,
+      // The page loaded in it: pressed in before, or, just reloaded, not.
+      page: (pressed) => (w) => {
+        win = w;
+        w.navigator = { userActivation: { isActive: false, hasBeenActive: pressed } };
+        vi.stubGlobal("sessionStorage", { getItem: (key) => kept.get(key) ?? null, setItem: (key, value) => kept.set(key, String(value)), removeItem: (key) => kept.delete(key) });
+        return history;
+      },
+    };
+  }
+  const values = (t) => ["To", "Amount", "Memo"].map((name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name)?.value);
+  const question = (t) => t.dom.document.querySelector("[role=alertdialog]");
+
+  it("opens again on a link's payment, and the phone's Back still asks before it goes", async () => {
+    const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
+    const link = makePaymentLink({ amount: "0.02", memo: "popiah", network: "testnet", to: B }).https;
+    const tab = tabSession();
+    let t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: tab.page(true), tab: { id: 7 } });
+    t.deliver({ type: "DUSK_UI_OPEN_LINK", tabId: 7, link }, {}, vi.fn());
+    await flush();
+    expect([t.state.route, ...values(t), tab.history.at]).toEqual(["send", B, "0.02", "popiah", 2]);
+
+    // Pulled down: the page goes, and loads again in the same tab, with nothing pressed in it.
+    t.dom.window.dispatchEvent(fakeEvent("pagehide"));
+    t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: tab.page(false), tab: { id: 7 } });
+    expect([t.state.route, ...values(t), tab.history.at]).toEqual(["send", B, "0.02", "popiah", 2]);
+    expect(t.app.textContent).toContain("Filled in from the link");
+    tab.history.back();
+    await flush();
+    expect(visibleText(question(t))).toBe("Leave this payment?This clears the payment the link filled in.StayLeave");
+    // The question's own Back is Stay.
+    tab.history.back();
+    await flush();
+    expect([question(t), t.state.route, ...values(t), tab.history.closed]).toEqual([null, "send", B, "0.02", "popiah", false]);
+  });
+
+  it("opens again on the request form as it was being filled in, and on Home once it was left", async () => {
+    const tab = tabSession();
+    const { typeInto } = await import("../testing/fakeDom.js");
+    let t = await popupOn("receive", { addressBook: { loaded: true, items: [] }, receive: null }, undefined, { history: tab.page(true), tab: { id: 7 } });
+    t.state.receive.requestOpen = true;
+    await t.render();
+    await flush();
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    typeInto(field("Amount"), "0.5");
+    typeInto(field("Memo"), "Rent March");
+    await vi.waitFor(() => expect(t.app.querySelector(".receive-request__meta")?.textContent).toBe("0.5 DUSK"));
+    t.dom.window.dispatchEvent(fakeEvent("pagehide"));
+
+    t = await popupOn("home", { addressBook: { loaded: true, items: [] }, receive: null }, undefined, { history: tab.page(false), tab: { id: 7 } });
+    expect([t.state.route, field("Amount")?.value, field("Memo")?.value, t.app.querySelector("details.receive-request")?.open]).toEqual(["receive", "0.5", "Rent March", true]);
+
+    // Left for Home, then reloaded: Home.
+    t.state.route = "home";
+    await t.render();
+    t.dom.window.dispatchEvent(fakeEvent("pagehide"));
+    t = await popupOn("home", { addressBook: { loaded: true, items: [] }, receive: null }, undefined, { history: tab.page(false), tab: { id: 7 } });
+    expect(t.state.route).toBe("home");
+  });
+});
+
 // Astra's: a link handed to the tab in place left the request the tab was opened with in its address, and a reload,
 // or Firefox bringing the tab back, filled Send with that one.
 describe("a request link handed to a wallet tab opened with another", () => {

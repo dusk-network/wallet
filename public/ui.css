@@ -140,6 +140,10 @@
 html, body { height: 100%; }
 html { color-scheme: dark; }
 
+/* No pull to refresh: in Firefox for Android a pull down at the top of the
+   page reloaded the wallet's tab, a link's payment and all (Marek's, Amélie's). */
+html, body { overscroll-behavior-y: none; }
+
 body {
   margin: 0;
   font-family: var(--font-sans);
