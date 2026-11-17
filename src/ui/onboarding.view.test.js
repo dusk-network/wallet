@@ -320,6 +320,34 @@ describe("setting up and unlocking", () => {
     expect(acts.showToast).toHaveBeenCalledWith("Your recovery words match.");
   });
 
+  // Marek's: words shown in clear stayed in Android's app switcher and in Firefox's tab list.
+  it("hides the words shown in Check your recovery words on a phone the moment the page is hidden, left or loses the focus", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) AppleWebKit/537.36 Chrome/156.0 Mobile Safari/537.36" });
+    dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+    const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] } };
+    const body = show(onboardingCreateConfirmView({ state, actions: actions() }));
+    const grid = body.querySelector(".srp-grid");
+    const show_ = button(body, "Show words");
+    typeInto(wordBoxes(body)[0], "abandon");
+    for (const away of [
+      () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      },
+      () => dom.window.dispatchEvent(fakeEvent("pagehide")),
+      () => dom.window.dispatchEvent(fakeEvent("blur")),
+    ]) {
+      dom.document.visibilityState = "visible";
+      show_.click();
+      expect([grid.classList.contains("is-hidden"), show_.textContent]).toEqual([false, "Hide words"]);
+      away();
+      expect([grid.classList.contains("is-hidden"), show_.textContent, show_.getAttribute("aria-pressed")]).toEqual([true, "Show words", "false"]);
+      dom.document.visibilityState = "visible";
+      dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      expect(grid.classList.contains("is-hidden")).toBe(true);
+    }
+  });
+
   // Lena's: a whole word typed in the first box, no suggestion showing, and Enter checked at once, two boxes empty,
   // saying "That doesn't match your recovery words".
   it("goes on to the next box with Enter on any box but the last, and checks only once every box holds a word", async () => {
@@ -485,6 +513,57 @@ describe("a new recovery phrase", () => {
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
     expect(css).toMatch(/\.review-actions \{\s*position: sticky;/);
     expect(Number(/\.srp-word-text \{[^}]*font-size: (\d+)px/.exec(css)?.[1])).toBeGreaterThanOrEqual(18);
+  });
+
+  // Marek's: the words in clear stayed in Android's app switcher and in Firefox's tab list.
+  it("hides its revealed words the moment the page is hidden, left or loses the focus, till Reveal again", () => {
+    for (const away of [
+      () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      },
+      () => dom.window.dispatchEvent(fakeEvent("pagehide")),
+      () => dom.window.dispatchEvent(fakeEvent("blur")),
+    ]) {
+      dom.document.visibilityState = "visible";
+      const state = { route: "onboard_create_phrase", onboard: { ...emptyFlow(), mnemonic: MNEMONIC, reveal: true } };
+      const acts = actions();
+      const body = show(onboardingCreatePhraseView({ state, actions: acts }));
+      const blurred = (page) => page.querySelector(".srp-grid").classList.contains("srp-grid--blur");
+      expect([blurred(body), Boolean(button(body, "Hide"))]).toEqual([false, true]);
+      away();
+      // At once, before any redraw: hidden, and Reveal to see them.
+      expect([blurred(body), Boolean(button(body, "Reveal")), state.onboard.reveal]).toEqual([true, true, false]);
+      expect(acts.render).toHaveBeenCalled();
+      // Back in sight, drawn again: still hidden, Copy off, till Reveal.
+      dom.document.visibilityState = "visible";
+      dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      const again = show(onboardingCreatePhraseView({ state, actions: acts }));
+      expect([blurred(again), again.querySelectorAll(".phrase-tools button").map((b) => b.disabled)]).toEqual([true, [false, true]]);
+      button(again, "Reveal").click();
+      expect(state.onboard.reveal).toBe(true);
+    }
+  });
+
+  // Marek's: in Firefox for Android the app switcher took its picture before the page heard it was leaving.
+  it("shows its words in Firefox for Android only while Hold to show words is held, with no Copy", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const state = { route: "onboard_create_phrase", onboard: { ...emptyFlow(), mnemonic: MNEMONIC, reveal: true } };
+    const acts = actions();
+    const body = show(onboardingCreatePhraseView({ state, actions: acts }));
+    const blurred = () => body.querySelector(".srp-grid").classList.contains("srp-grid--blur");
+    expect([blurred(), body.querySelectorAll(".phrase-tools button").map((b) => b.textContent)]).toEqual([true, ["Hold to show words"]]);
+    const hold = button(body, "Hold to show words");
+    hold.click();
+    expect([blurred(), state.onboard.reveal]).toEqual([true, false]);
+    hold.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 1 }));
+    expect(blurred()).toBe(false);
+    hold.dispatchEvent(fakeEvent("pointerup", { button: 0, pointerId: 1 }));
+    expect(blurred()).toBe(true);
+    hold.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 2 }));
+    dom.document.visibilityState = "hidden";
+    dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    expect([blurred(), acts.render.mock.calls.length]).toEqual([true, 0]);
   });
 
   it("keeps its words through Back to the password and forward again", async () => {

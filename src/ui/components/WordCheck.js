@@ -1,6 +1,8 @@
 // Boxes for "Check your recovery words": one for each word asked, named by
 // its place (Word 4), as Import's boxes are made: no password manager, no
-// keyboard learning, hidden on a phone till Show words, the words a box's
+// keyboard learning, hidden on a phone till Show words (and again the moment
+// the page is out of sight: pageAway.js; in Firefox for Android shown only
+// while Hold to show words is held), the words a box's
 // letters start suggested under it (WordSuggestions.js), and letters that
 // start none marked at once. Enter, or a phone keyboard's Next, goes on to
 // the next box, suggestions shown or not, and never checks (Lena's: a whole
@@ -13,7 +15,8 @@ import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, isRecoveryWord } from "@d
 import { wordlist } from "@scure/bip39/wordlists/english";
 import { isTauriRuntime } from "../../platform/runtime.js";
 import { h } from "../lib/dom.js";
-import { isPhone } from "../lib/device.js";
+import { isFirefoxAndroid, isPhone } from "../lib/device.js";
+import { HOLD_TO_SHOW_TEXT, holdToShow, onPageAway } from "../lib/pageAway.js";
 import { createWordSuggestions, underBox } from "./WordSuggestions.js";
 
 /**
@@ -103,23 +106,25 @@ export function createWordCheck({ places, masked = isPhone(), passwordBoxes = ma
   });
   const grid = h("div", { class: ["srp-grid srp-grid--input", masked ? "srp-grid--masked is-hidden" : ""].filter(Boolean).join(" ") }, cells);
   let shown = false;
-  const showBtn = masked
-    ? h("button", {
-        class: "text-btn srp-show",
-        type: "button",
-        text: "Show words",
-        "aria-pressed": "false",
-        onclick: () => {
-          shown = !shown;
-          grid.classList.toggle("is-hidden", !shown);
-          if (passwordBoxes) for (const input of inputs) input.setAttribute("type", shown ? "text" : "password");
-          showBtn.textContent = shown ? "Hide words" : "Show words";
-          showBtn.setAttribute("aria-pressed", String(shown));
-        },
-      })
-    : null;
+  const hold = masked && isFirefoxAndroid();
+  const setShown = (next) => {
+    shown = next;
+    grid.classList.toggle("is-hidden", !shown);
+    if (passwordBoxes) for (const input of inputs) input.setAttribute("type", shown ? "text" : "password");
+    if (!hold) showBtn.textContent = shown ? "Hide words" : "Show words";
+    showBtn.setAttribute("aria-pressed", String(shown));
+  };
+  const showBtn = masked ? h("button", { class: "text-btn srp-show", type: "button", text: hold ? HOLD_TO_SHOW_TEXT : "Show words", "aria-pressed": "false" }) : null;
+  if (showBtn && hold) holdToShow(showBtn, setShown);
+  else if (showBtn) showBtn.onclick = () => setShown(!shown);
   const el = h("form", { class: "mnemonic-input", novalidate: "" }, [h("div", { class: "box srp-box" }, [grid]), showBtn].filter(Boolean));
   el.addEventListener("submit", (e) => e.preventDefault?.());
+  // Shown words hide again the moment the page is out of sight, till Show words again.
+  if (masked) {
+    onPageAway(() => {
+      if (shown) setShown(false);
+    }, el);
+  }
   return {
     el,
     /** Each word typed, by its place. */

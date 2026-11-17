@@ -5,6 +5,8 @@
 import { formatLuxForInput, parseDuskToLux, amountForInput } from "../../../shared/amount.js";
 import { walletLabel } from "../../../shared/wallets.js";
 import { h } from "../../lib/dom.js";
+import { HOLD_TO_SHOW_TEXT, holdToShow, onPageAway } from "../../lib/pageAway.js";
+import { isFirefoxAndroid } from "../../lib/device.js";
 import { shortAddress } from "../../lib/strings.js";
 import { decimalInput, fieldError, fieldLabel, groupLabel, newPasswordField, passwordForm, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
 import { srpGridEl } from "./onboarding.js";
@@ -217,7 +219,11 @@ export function resetWalletView(ov, { state, actions } = {}) {
 /**
  * The open wallet's recovery phrase, again, from the app's Settings and from
  * Show my recovery words after a check: the password first, or a fingerprint
- * where it's on; then its words, till the screen is left. Nothing of them is
+ * where it's on; then its words, till the screen is left, hidden with Hide
+ * and the moment the page is out of sight, before a switcher or a tab list
+ * takes its picture of them (pageAway.js), till Reveal; in Firefox for
+ * Android, whose switcher has its picture before the page hears it's
+ * leaving, shown only while Hold to show words is held. Nothing of them is
  * kept.
  */
 export function recoveryPhraseView(ov, { state, actions } = {}) {
@@ -232,13 +238,27 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
   let busy = false;
   let asked = null;
 
-  const words = (mnemonic) => [
-    open ? h("p", { class: "settings-profile-line", text: walletLabel(open) }) : null,
-    h("p", { class: "auth-lead", text: `These are this wallet's ${mnemonic.trim().split(/\s+/).length} words, in order. Check them against the ones you wrote down.` }),
-    h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
-    srpGridEl(mnemonic),
-    h("button", { class: "btn-primary btn-full", type: "button", text: "Done", onclick: () => backToSettings(state, actions) }),
-  ];
+  const words = (mnemonic) => {
+    const hold = isFirefoxAndroid();
+    const shown = srpGridEl(mnemonic, { blurred: hold });
+    const grid = shown.querySelector(".srp-grid");
+    const reveal = (on) => {
+      grid?.classList.toggle("srp-grid--blur", !on);
+      if (!hold) toggle.textContent = on ? "Hide" : "Reveal";
+    };
+    const toggle = h("button", { class: "mini-btn", type: "button", text: hold ? HOLD_TO_SHOW_TEXT : "Hide" });
+    if (hold) holdToShow(toggle, reveal);
+    else toggle.onclick = () => reveal(Boolean(grid?.classList.contains("srp-grid--blur")));
+    onPageAway(() => reveal(false), shown);
+    return [
+      open ? h("p", { class: "settings-profile-line", text: walletLabel(open) }) : null,
+      h("p", { class: "auth-lead", text: `These are this wallet's ${mnemonic.trim().split(/\s+/).length} words, in order. Check them against the ones you wrote down.` }),
+      h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
+      shown,
+      h("div", { class: "phrase-tools" }, [toggle]),
+      h("button", { class: "btn-primary btn-full", type: "button", text: "Done", onclick: () => backToSettings(state, actions) }),
+    ];
+  };
 
   const show = async (password) => {
     if (busy) return;

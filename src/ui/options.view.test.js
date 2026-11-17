@@ -1226,8 +1226,54 @@ describe("security in the app on a phone", () => {
     await settle();
     expect(body.querySelectorAll(".srp-word-text").map((w) => w.textContent)).toEqual(MNEMONIC.split(" "));
     expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RECOVERY_PHRASE", password: "the password" });
+    // Marek's: words in clear stayed in Android's app switcher and Firefox's tab list. Hidden the moment the page is
+    // hidden, left or loses the focus, and with Hide; shown again only with Reveal.
+    const blurred = () => body.querySelector(".srp-grid").classList.contains("srp-grid--blur");
+    expect([blurred(), body.querySelectorAll("button").map((b) => b.textContent)]).toEqual([false, ["← Back", "Hide", "Done"]]);
+    for (const away of [
+      () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      },
+      () => dom.window.dispatchEvent(fakeEvent("pagehide")),
+      () => dom.window.dispatchEvent(fakeEvent("blur")),
+      () => press("Hide"),
+    ]) {
+      dom.document.visibilityState = "visible";
+      away();
+      expect([blurred(), body.querySelectorAll("button").map((b) => b.textContent)]).toEqual([true, ["← Back", "Reveal", "Done"]]);
+      dom.document.visibilityState = "visible";
+      dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      dom.window.dispatchEvent(fakeEvent("focus"));
+      expect(blurred()).toBe(true);
+      press("Reveal");
+      expect(blurred()).toBe(false);
+    }
     press("Done");
     expect(view.state.route).toBe("options");
+  });
+
+  // Marek's: in Firefox for Android the app switcher took its picture before the page heard it was leaving.
+  it("shows the recovery phrase in Firefox for Android only while Hold to show words is held", async () => {
+    const view = await settings();
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_RECOVERY_PHRASE" ? { ok: true, result: MNEMONIC } : {}));
+    const { recoveryPhraseView } = await import("./popup/views/wallets.js");
+    dom.document.body.replaceChildren(...recoveryPhraseView(view.ov, { state: view.state, actions: view.actions }));
+    const body = dom.document.body;
+    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "the password");
+    body.querySelectorAll("button").find((b) => b.textContent === "Show recovery phrase").click();
+    await settle();
+    const blurred = () => body.querySelector(".srp-grid").classList.contains("srp-grid--blur");
+    const hold = body.querySelectorAll("button").find((b) => b.textContent === "Hold to show words");
+    expect(blurred()).toBe(true);
+    hold.click();
+    expect(blurred()).toBe(true);
+    hold.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 1 }));
+    expect(blurred()).toBe(false);
+    hold.dispatchEvent(fakeEvent("pointercancel", { pointerId: 1 }));
+    expect(blurred()).toBe(true);
   });
 
   // Amélie's, the seventh time: a way to check the paper, typing the words and hearing they match. Then

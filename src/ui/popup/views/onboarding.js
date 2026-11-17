@@ -1,6 +1,8 @@
 import { entropyToMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import { h } from "../../lib/dom.js";
+import { HOLD_TO_SHOW_TEXT, holdToShow, onPageAway } from "../../lib/pageAway.js";
+import { isFirefoxAndroid } from "../../lib/device.js";
 import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
 import { checkboxInput, fieldError, groupLabel, newPasswordField, passwordForm, stepActions, unlockPasswordField } from "../../components/FormControls.js";
@@ -365,11 +367,17 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
     return onboardingCreatePasswordView({ state, actions });
   }
 
+  // In Firefox for Android, whose app switcher has its picture of the page
+  // before the page hears it's leaving, shown only while held (pageAway.js),
+  // and so with no Copy, which waits for Reveal.
+  const hold = isFirefoxAndroid();
+  if (hold) state.onboard.reveal = false;
   const toggle = h("button", {
     class: "mini-btn",
     type: "button",
-    text: state.onboard.reveal ? "Hide" : "Reveal",
+    text: hold ? HOLD_TO_SHOW_TEXT : state.onboard.reveal ? "Hide" : "Reveal",
     onclick: () => {
+      if (hold) return;
       state.onboard.reveal = !state.onboard.reveal;
       actions?.render?.().catch(() => {});
     },
@@ -398,6 +406,19 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
     },
   });
 
+  // Revealed, the words hide again the moment the page is out of sight, till
+  // Reveal again: before Android's app switcher or Firefox's tab list takes
+  // its picture of them (Marek's).
+  const words = srpGridEl(mnemonic, { blurred: !state.onboard.reveal });
+  if (hold) holdToShow(toggle, (on) => words.querySelector(".srp-grid")?.classList.toggle("srp-grid--blur", !on));
+  onPageAway(() => {
+    if (!state.onboard.reveal) return;
+    state.onboard.reveal = false;
+    words.querySelector(".srp-grid")?.classList.add("srp-grid--blur");
+    toggle.textContent = "Reveal";
+    actions?.render?.()?.catch?.(() => {});
+  }, words);
+
   return [
     subnav({
       title: "Recovery phrase",
@@ -410,8 +431,8 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
       adding ? walletLanding(ov).el : null,
       h("p", { class: "auth-lead", text: "Write down these 12 words in order and keep them somewhere safe." }),
       h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
-      srpGridEl(mnemonic, { blurred: !state.onboard.reveal }),
-      h("div", { class: "phrase-tools" }, [toggle, copyBtn]),
+      words,
+      h("div", { class: "phrase-tools" }, hold ? [toggle] : [toggle, copyBtn]),
       // In view at the bottom however small the window, as Confirm is on a Review.
       stepActions(next),
     ].filter(Boolean)),

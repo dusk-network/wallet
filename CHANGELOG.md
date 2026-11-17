@@ -45,6 +45,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Hid recovery words shown in clear again the moment the page is hidden or loses the focus, on Import, Check your recovery words, a new wallet's words and the recovery phrase, until they're shown again; in Firefox for Android they show only while Hold to show words is held.
 - Kept a payment a link filled in, and a Send or a request being typed, through a reload of the wallet's tab, the phone's Back still asking Leave this payment?; and stopped a pull down at the top of the wallet's pages reloading them in Firefox for Android.
 - Held a payment that waited for the network where its account sent something else meanwhile, saying so with Send it too and Don't send, rather than sending it by itself.
 - Went on to the next box with Enter in Check your recovery words, suggestions shown or not, and checked only once every box holds a word, a word taken with Enter in the last box being only taken.

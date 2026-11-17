@@ -3045,6 +3045,15 @@ body.page--popup .brand-mark {
   pointer-events: none;
 }
 
+/* Recovery words shown only while this is held (pageAway.js holdToShow):
+   the press is the hold, never a scroll, a selection or the browser's menu. */
+.hold-to-show {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 .srp-word {
   display: flex;
   align-items: center;
