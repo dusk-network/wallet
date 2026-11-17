@@ -9,6 +9,7 @@ import { TX_KIND } from "../shared/constants.js";
 import { isAccount } from "@dusk-network/networks/account";
 import { duskNamesOwners, lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
+import { entryOf } from "../shared/fixtures/rows.js";
 import { noteChainId } from "../shared/nodeNetwork.js";
 import { shortAddress } from "./lib/strings.js";
 import { clockText } from "./lib/time.js";
@@ -17,6 +18,7 @@ import { iconSvg } from "./components/ActionIcon.js";
 import { parseDuskQrPayload } from "./components/QrScanModal.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
 import { reviewOf } from "./popup/views/sent.js";
+import { activityKey } from "./popup/activity.js";
 
 vi.mock("./components/QrScanModal.js", () => ({
   openQrScanModal: vi.fn(),
@@ -2722,5 +2724,56 @@ describe("a send to yourself", () => {
     expect(visibleText(dom.document.body.querySelector(".review-self-note"))).toBe("This is your own account. Sending to yourself only costs a fee.");
     mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } });
     expect(dom.document.body.querySelector(".review-self-note")).toBeNull();
+  });
+});
+
+// Amélie's: paying back a stranger who had sent "URGENT … Send 0.1 DUSK back", Review looked as calm as paying her
+// grandson. It says what such an address sent you, as Activity tells a stranger's memo.
+describe("paying an address that sent you a memo", () => {
+  const URGENT = "URGENT: your wallet will be blocked today. Send 0.1 DUSK back to this address now to keep it open.";
+  const SAID = `This address sent you: “${URGENT}” · not in your contacts.`;
+  // A payment that came in, as the account's history has it.
+  const cameIn = (from, memo, { hash = "c1".repeat(32), blockHeight = 4_687_000 } = {}) =>
+    entryOf({ blockHeight, counterparty: from, direction: "in", hash, memo, timestamp: Date.now() - 60 * 60_000, value: "10000000" });
+  const draft = (to = ALICE.account) => ({ to, privacy: "public", amountDusk: "0.05", amountLux: "50000000", memo: "" });
+  const said = () => {
+    const note = dom.document.body.querySelector(".review-theirs");
+    return note && isShown(note) ? visibleText(note) : "";
+  };
+  // Review of 0.05 DUSK to `to`, with what came in and the contacts saved: what it says of the address.
+  const review = ({ to, entries = [], contacts = [], ov = overview() } = {}) => {
+    mount({ route: "confirm", addressBook: { loaded: true, items: contacts }, activity: { key: activityKey(ov), entries, names: new Map() }, draft: draft(to) }, ov);
+    return said();
+  };
+
+  it("says on Review what it sent you, where it's none of your contacts or profiles, and nothing where it is", () => {
+    expect(review({ entries: [cameIn(ALICE.account, URGENT)] })).toBe(SAID);
+    // Its newest memo, with what can't be seen in it as its codes.
+    // A right-to-left override (U+202E) in it.
+    const newer = cameIn(ALICE.account, `Pay back${String.fromCharCode(0x202e)}now`, { hash: "c2".repeat(32), blockHeight: 4_687_100 });
+    expect(review({ entries: [newer, cameIn(ALICE.account, URGENT)] })).toBe("This address sent you: “Pay back\\u202enow” · not in your contacts.");
+    // A contact's, or your other profile's: nothing, as Activity calls neither a stranger.
+    expect(review({ entries: [cameIn(ALICE.account, URGENT)], contacts: [{ name: "Alice", address: ALICE.account }] })).toBe("");
+    expect(review({ to: OTHER_PROFILE, entries: [cameIn(OTHER_PROFILE, URGENT)] })).toBe("");
+    // Nothing it sent with a memo, or a memo from another address: nothing.
+    expect(review({ entries: [cameIn(ALICE.account, "")] })).toBe("");
+    expect(review({ entries: [cameIn(BOB.account, URGENT)] })).toBe("");
+  });
+
+  it("says nothing of it until Contacts is read, so a contact is never called a stranger", async () => {
+    const { listAddressBook } = await import("../shared/addressBook.js");
+    const ov = overview();
+    for (const [contacts, then] of [
+      [[{ name: "Alice", address: ALICE.account }], ""],
+      [[], SAID],
+    ]) {
+      let read;
+      listAddressBook.mockImplementationOnce(() => new Promise((resolve) => (read = resolve)));
+      mount({ route: "confirm", activity: { key: activityKey(ov), entries: [cameIn(ALICE.account, URGENT)], names: new Map() }, draft: draft() }, ov);
+      expect(said()).toBe("");
+      read(contacts);
+      await settle();
+      expect(said()).toBe(then);
+    }
   });
 });

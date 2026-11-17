@@ -4737,6 +4737,16 @@ button.tx-open:focus-visible::after {
   direction: ltr;
   unicode-bidi: isolate;
 }
+/* On Review, the words a stranger sent you: one line, as in their row, so
+   what Review says after them shows whole (send.js). */
+.review-theirs__memo {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
 
 /* An icon button with a name: Copy beside an address */
 button.copy-ico {

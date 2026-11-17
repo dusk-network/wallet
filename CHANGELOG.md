@@ -45,6 +45,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said on Review what an address that isn't one of your contacts or profiles sent you: "This address sent you: “…” · not in your contacts."
 - Named the request list's Copy link Copy request, which copies the request's words and link, as Share does.
 - Brought This request was paid already into view as it opens, in the popup, the full tab and on a phone.
 - Made Stay the main button in Leave this payment?, and Cancel in Import's Go back?, with Leave and Go back the quiet ones.

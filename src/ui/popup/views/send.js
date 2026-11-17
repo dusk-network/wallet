@@ -53,7 +53,8 @@ import { forgetRequestLink, pastedRequestNames, readPastedRequest, readRequestLi
 import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
-import { whenAtText } from "./txRow.js";
+import { contactNames, theirMemo, whenAtText } from "./txRow.js";
+import { safeText } from "../../../shared/safeText.js";
 import { clockText } from "../../lib/time.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, linkAmount, networkMismatch } from "@dusk-network/app-core/payment-links";
@@ -1434,7 +1435,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // once. Said, not stopped: it can be meant.
   const payment = { lux: safeBigInt(d.amountLux, 0n), memo: String(d.memo ?? ""), to: toAddr };
   const waitingTwin = sameWaiting(ov, payment, { except: String(d.replaces ?? "") });
-  const madeAgain = waitingTwin ? null : sentAlready(activityRows(ov, state), payment);
+  const rows = activityRows(ov, state);
+  const madeAgain = waitingTwin ? null : sentAlready(rows, payment);
   const repeat = Boolean(waitingTwin || (madeAgain && madeAgain.time !== null));
   // Another profile of this wallet's by its own name, as the form says it: "to Profile 1".
   const againName = own ? "" : ownProfileName(ov, toAddr) || contactName() || duskName?.name || "";
@@ -1449,6 +1451,20 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         ),
       ])
     : null;
+
+  // What the recipient wrote you, where it's none of your profiles or
+  // contacts: the memo of its newest payment to you, said as Activity says a
+  // stranger's (theirMemo), on one line (Amélie's: paying back a stranger who
+  // had sent "URGENT … Send 0.1 DUSK back", Review looked as calm as paying
+  // her grandson). Said once Contacts is read: a contact is no stranger.
+  const theirsNote = h("div", { class: "callout warn review-theirs", role: "alert", hidden: true });
+  const showTheirs = () => {
+    const ab = state.addressBook;
+    const known = !own && !service && ab?.loaded && Array.isArray(ab.items) ? contactNames(state, actions, ov) : null;
+    const memo = known ? rows.filter((row) => String(row?.counterparty ?? "").trim() === toAddr).map((row) => theirMemo(row, known)?.memo).find(Boolean) : "";
+    setChildren(theirsNote, memo ? [h("div", { class: "callout-title" }, ["This address sent you: ", h("span", { class: "memo-theirs__text review-theirs__memo", text: `“${safeText(memo.trim()).text}”` }), " · not in your contacts."])] : []);
+    theirsNote.hidden = !memo;
+  };
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
   const saveContactBtn = h("button", {
@@ -1486,6 +1502,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   });
   const refreshContactUI = () => {
     showToNames();
+    showTheirs();
     saveContactBtn.hidden = own || Boolean(contactName());
   };
   refreshContactUI();
@@ -1641,6 +1658,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       // As the form said it: it goes, for a fee.
       own ? h("div", { class: "send-self-note review-self-note", text: `This is your own ${toAddr === ownAccount ? "account" : "shielded address"}. Sending to yourself only costs a fee.` }) : null,
+      theirsNote,
       againNote,
       toNameNote,
       ...serviceNotes
