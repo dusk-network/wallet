@@ -45,6 +45,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Named the request list's Copy link Copy request, which copies the request's words and link, as Share does.
+- Brought This request was paid already into view as it opens, in the popup, the full tab and on a phone.
 - Made Stay the main button in Leave this payment?, and Cancel in Import's Go back?, with Leave and Go back the quiet ones.
 - Opened the payment's Review with Send it too, on a payment held as its account sent something else while it waited, rather than sending it at once, and made Send it too and Don't send the main buttons of its screen; Don't send and Cancel say Not sent. Nothing left your wallet., in no colour.
 - Named what the account sent while a held payment waited, from the chain: how much, to whom, its memo and when, saying where it looks like this same payment, and read the history again as the hold comes.

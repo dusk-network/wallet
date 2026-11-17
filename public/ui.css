@@ -5343,9 +5343,11 @@ details.receive-request > summary {
   font-size: 12.5px;
 }
 
-/* Asked on the card before a request paid already is copied or shared again */
+/* Asked on the card before a request paid already is copied or shared again;
+   brought into view with room to spare at the screen's edge (requests.js). */
 .request-paid-ask {
   margin-top: 6px;
+  scroll-margin-block: 16px;
 }
 
 .request-paid-ask__text {

@@ -79,6 +79,9 @@ export function paidAtOf(state, asked) {
   return Number.isFinite(at) ? at : null;
 }
 
+// Whether the system asks for less motion (prefers-reduced-motion).
+const lessMotion = () => Boolean(globalThis.window?.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+
 /**
  * Asks before a request paid already is copied or shared again, on its own
  * card, so nothing hides it: "This request was paid already, on <date>."
@@ -86,7 +89,10 @@ export function paidAtOf(state, asked) {
  * anyway gives it out (Sofía's, Nandini's, Marek's and Chen's: Copy said only
  * Copied, Share sent a fresh "asks you to pay" for an invoice paid twice, and
  * in the app the one toast that said so hid under Android's clipboard preview).
- * What's asked stays through a redraw (`holder.asking`).
+ * Asked with a press, it comes into view, its buttons too (Sofía's, Nandini's
+ * and Marek's: it opened below the popup's edge, and the phone's, so the press
+ * seemed to do nothing). What's asked stays through a redraw
+ * (`holder.asking`), left where it is.
  * @param {object} holder - where the question asked is kept: state.requests, or Receive's form
  * @param {string} key - whose question: a request's ID, or the form's
  * @param {Record<string, { verb: string, go: () => void }>} acts - what each button gives out, by name
@@ -99,9 +105,10 @@ export function paidAsk(holder, key, acts) {
     el.hidden = true;
     el.replaceChildren();
   };
-  const open = (act, at) => {
+  // The question for `act`, open; false where there's none to ask.
+  const show = (act, at) => {
     const { verb, go } = acts[act] ?? {};
-    if (!go || !Number.isFinite(at)) return;
+    if (!go || !Number.isFinite(at)) return false;
     if (holder) holder.asking = { key, act, at };
     el.replaceChildren(
       h("p", { class: "request-paid-ask__text", text: paidAlreadyText(at) }),
@@ -119,8 +126,14 @@ export function paidAsk(holder, key, acts) {
       ])
     );
     el.hidden = false;
+    return true;
   };
-  if (holder?.asking?.key === key) open(holder.asking.act, holder.asking.at);
+  // Scrolled the least that shows it all: smoothly, as Request payment comes
+  // into view, but at once where less motion is asked for.
+  const open = (act, at) => {
+    if (show(act, at)) el.scrollIntoView?.({ block: "nearest", behavior: lessMotion() ? "auto" : "smooth" });
+  };
+  if (holder?.asking?.key === key) show(holder.asking.act, holder.asking.at);
   return { el, open };
 }
 
@@ -225,7 +238,7 @@ function refundsOf(requests, matches, rows) {
   );
 }
 
-function requestRow(request, match, { ov, hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, refunds, linkOf, share = null, earlier = false }) {
+function requestRow(request, match, { ov, hidden, address, state, actions, walletId, rows, rowOf, rowBack, context, refunds, linkOf, message, share = null, earlier = false }) {
   // The payments with all a request asks, after the one that paid it: paid twice, or more.
   const again = match?.state === "paid" ? (match.more ?? []).filter((payment) => payment.matched === "amount-memo") : [];
   // A request of any amount says what came in, plainly: a lux is no green Paid.
@@ -308,11 +321,14 @@ function requestRow(request, match, { ov, hidden, address, state, actions, walle
   // Paid already: said with when beside its Copy and Share, which ask first on the card.
   const paidAt = !earlier && match?.state === "paid" && Number.isFinite(match.at) ? match.at : null;
   const what = `${request.lux === null ? "any amount" : hidden ? "a hidden amount" : `${formatDuskExact(request.lux)} DUSK`}${request.memo ? `, ${request.memo}` : ""}`;
-  const copyLink = linkOf(request)
+  // Its words and its link, as its Share gives them and the form's Copy
+  // request does (Sofía's and Chen's: Copy link gave the bare link, and Share
+  // the whole message).
+  const copyRequest = message && linkOf(request)
     ? copyButton({
-        value: () => linkOf(request),
-        label: `Copy the link of the request for ${what}`,
-        text: "Copy link",
+        value: () => message(request),
+        label: `Copy the request for ${what}`,
+        text: "Copy request",
         className: "text-btn",
         failText: "Copy failed",
         onFail: actions?.showToast,
@@ -324,7 +340,7 @@ function requestRow(request, match, { ov, hidden, address, state, actions, walle
       })
     : null;
   const ask = paidAsk(state.requests, request.id, {
-    copy: { verb: "Copy", go: () => copyLink?.pressAnyway() },
+    copy: { verb: "Copy", go: () => copyRequest?.pressAnyway() },
     share: { verb: "Share", go: () => share?.(request) },
   });
   return h("li", { class: "request-row" }, [
@@ -342,8 +358,8 @@ function requestRow(request, match, { ov, hidden, address, state, actions, walle
     h("div", { class: "request-row__actions" }, [
       ...payments.map(({ at, hash }) => h("button", { class: "text-btn chain-link", type: "button", text: "See payment", onclick: () => open(hash, at) })),
       paidAt === null ? null : h("span", { class: "request-row__paid", text: `${again.length ? "Paid twice, first" : "Paid"} ${whenAtText(paidAt)}` }),
-      // Its link to copy again, as the web wallet's list has it.
-      copyLink,
+      // The request to copy again, as the web wallet's list has it.
+      copyRequest,
       // In the app, its own Share beside it: its words, its link and its QR code, as it was asked.
       share && linkOf(request)
         ? h("button", {
@@ -362,9 +378,12 @@ function requestRow(request, match, { ov, hidden, address, state, actions, walle
 
 /**
  * The profile's requests on this network, or null for none.
+ * @param {object} ov
+ * @param {{ state: object, actions?: object, message?: (request: object) => string, share?: ((request: object) => void) | null }} opts -
+ *   `message`: what a request gives out, copied or shared: its words and link (Receive's); `share`: the app's Share
  * @returns {HTMLElement | null}
  */
-export function requestsSection(ov, { state, actions, share = null } = {}) {
+export function requestsSection(ov, { state, actions, message = null, share = null } = {}) {
   const kept = keptRequests(ov, { state, actions });
   const { account, profileIndex } = selected(ov);
   const address = String(ov?.addresses?.[profileIndex] ?? "");
@@ -416,7 +435,7 @@ export function requestsSection(ov, { state, actions, share = null } = {}) {
       "ul",
       { class: "group request-list" },
       shown.map((request) =>
-        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { ov, hidden, address, state, actions, walletId: kept.walletId, rows, rowOf, rowBack, context: activityKey(ov), refunds, linkOf, share, earlier: earlier(request) })
+        requestRow(request, earlier(request) ? undefined : matches.get(request.id), { ov, hidden, address, state, actions, walletId: kept.walletId, rows, rowOf, rowBack, context: activityKey(ov), refunds, linkOf, message, share, earlier: earlier(request) })
       )
     ),
   ]);
