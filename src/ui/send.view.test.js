@@ -2112,6 +2112,61 @@ describe("a request link", () => {
     expect([refusal(), form.to.value, form.amount.value, state.draft?.memo]).toEqual([[], ALICE.account, "0.002", "r35 marek T2"]);
   });
 
+  // R02. Marek's: one invisible or look-alike character in the wallet's own line, or "You are asked", switched the check
+  // off and the link's 0.15 filled in under a line saying 0.002; and the extension read only the line right before the
+  // link, so a "Thanks!" or "Pay me here:" between them let it by. Both wallets read the whole message now (app-core).
+  it("reads the whole pasted message, through what can't be seen and look-alike letters, and refuses one that says another amount", async () => {
+    const DISAGREES = "The message and its link don't agree.";
+    const link = (amount) => httpsLink(`to=${ALICE.account}&amount=${amount}&memo=r37+marek+T2&network=testnet`);
+    const line = "You're asked to pay 0.002 DUSK on Testnet · r37 marek T2";
+    for (const text of [
+      `You\u200b're asked to pay 0.002 DUSK on Testnet · r37 marek T2\nPay here: ${link("0.15")}`,
+      `You're asked t\u043e pay 0.002 DUSK on Testnet · r37 marek T2\nPay here: ${link("0.15")}`,
+      `You're asked to pay 0.002 DUS\u041a on Testnet · r37 marek T2\nPay here: ${link("0.15")}`,
+      `You are asked to pay 0.002 DUSK on Testnet · r37 marek T2\nPay here: ${link("0.15")}`,
+      `${line}\nThanks!\nPay here: ${link("0.15")}`,
+      `${line}\nPay me here: ${link("0.15")}`,
+      `${line}\nPay here 👉 ${link("0.15")}`,
+      `${line}\nYou're asked to pay 0.15 DUSK on Testnet · r37 marek T2\nPay here: ${link("0.15")}`,
+    ]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, text);
+      await settle();
+      expect(refusal(), JSON.stringify(text)).toEqual([DISAGREES]);
+      expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], JSON.stringify(text)).toEqual(["", "", ""]);
+    }
+    // Words that state nothing else may be around its link: filled in.
+    for (const text of [`${line}\nThanks!\nPay here: ${link("0.002")}`, `Hi Marek,\nPay me here: ${link("0.002")}`]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, text);
+      await settle();
+      expect([refusal(), form.to.value, form.amount.value, state.draft?.memo], JSON.stringify(text)).toEqual([[], ALICE.account, "0.002", "r37 marek T2"]);
+    }
+  });
+
+  // R02, Nandini's: "You're asked to pay 0.012 DUSK to alice.dusk on Testnet…" over a link to Amélie's account filled
+  // Amélie in, and never said alice.dusk; "alice·dusk" too. A name anywhere in the message is the link's, or refused.
+  it("looks up a .dusk name anywhere in a pasted message, and refuses one that isn't the link's recipient", async () => {
+    const DISAGREES = "The message and its link don't agree.";
+    duskNamesOwners.mockImplementation(async (names) => new Map(names.map((name) => [name, { account: BOB.account }])));
+    for (const name of ["alice.dusk", "alice\u00b7dusk"]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, `You're asked to pay 0.012 DUSK to ${name} on Testnet · Invoice NOV-17c r37\nPay here: ${httpsLink(`to=${ALICE.account}&amount=0.012&memo=Invoice+NOV-17c+r37&network=testnet`)}`);
+      await settle();
+      expect(duskNamesOwners.mock.lastCall?.[0], name).toEqual(["alice.dusk"]);
+      expect([refusal(), form.to.value, form.amount.value], name).toEqual([[DISAGREES], "", ""]);
+    }
+    // Without the name: filled in.
+    const state = newState();
+    const form = mount(state);
+    paste(form, `You're asked to pay 0.012 DUSK on Testnet · Invoice NOV-17c r37\nPay here: ${httpsLink(`to=${ALICE.account}&amount=0.012&memo=Invoice+NOV-17c+r37&network=testnet`)}`);
+    await settle();
+    expect([refusal(), form.to.value, form.amount.value]).toEqual([[], ALICE.account, "0.012"]);
+  });
+
   // Sofía's, as Marek tried it: "sofiadesign.dusk asks you…" over someone else's link filled in their account.
   describe("whose .dusk name a shared request's line says it's from", () => {
     const DISAGREES = "The message and its link don't agree.";

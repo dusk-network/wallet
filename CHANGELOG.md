@@ -129,6 +129,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Read the whole of a pasted payment message, through characters that can't be seen and look-alike letters, refusing one whose amount, network or .dusk name anywhere in it isn't its link's, "You are asked" and "Please pay" read as the wallet's own line; words that state none of these may surround the link.
 - Kept a date's or a list's picker open in the Android app while the wallet draws its page again, and took "Choose both days." away once both are chosen.
 - Focused the password box as Unlock, Check your recovery words and Reset wallet open, with the keyboard up in the Android app.
 - Said on the setup screen which network a payment link that opened the app before there was a wallet is for, and when it was opened; once the wallet's made, Send says when, and a link older than ten minutes goes, as one behind the lock does.
