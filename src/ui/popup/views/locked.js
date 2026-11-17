@@ -3,6 +3,7 @@ import { passwordInput } from "../../components/FormControls.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
 import { isPhone } from "../../lib/device.js";
 import { fingerprintPassword, fingerprintStatus, showKeyboard, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
+import { focusOnOpen } from "../../lib/focusOnOpen.js";
 
 /** What the unlock screen says once the phone's fingerprints changed. */
 export const FINGERPRINTS_CHANGED_TEXT = "Your fingerprints changed, so fingerprint unlock is off. Unlock with your password.";
@@ -86,7 +87,11 @@ export function lockedView({ state, actions } = {}) {
       lost = { again: available };
       sayFinger(FINGERPRINTS_CHANGED_TEXT);
     }
-    if (!on) return;
+    // No fingerprint asked for: the password, with the keyboard up.
+    if (!on) {
+      focusOnOpen(pwd);
+      return;
+    }
     fingerBtn.hidden = false;
     byFingerprint();
     // Back in front with the wallet still locked: asked again, as the app opens.

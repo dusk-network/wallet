@@ -722,13 +722,23 @@ describe("the requests made here", () => {
 
     dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === "Copy request").click();
     await vi.waitFor(() => expect(shown()).toHaveLength(1));
-    expect(shown()).toEqual([{ amount: "1.25 DUSK", state: "Waiting", match: "Nothing matching has come in.", buttons: ["Copy link", "Remove"] }]);
+    expect(shown()).toEqual([{ amount: "1.25 DUSK", state: "Waiting", match: "Nothing matching has come in.", buttons: ["Copy request", "Remove"] }]);
     expect(items[KEY][ACCOUNT]).toEqual([expect.objectContaining({ lux: "1250000000", memo: "Factura 33", network: "testnet", to: ACCOUNT })]);
 
     // The same one copied again is the same request.
     dom.document.body.querySelector('button[data-label="Copy request"]').click();
     await settle();
     expect(items[KEY][ACCOUNT]).toHaveLength(1);
+
+    // Sofía's and Chen's: the list's Copy link gave the bare link. Its Copy request gives what the form's gave.
+    const fromForm = dom.clipboard.writeText.mock.lastCall?.[0];
+    expect(fromForm).toBe(`You're asked to pay 1.25 DUSK · Factura 33\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.25&memo=Factura+33&network=testnet`);
+    dom.clipboard.writeText.mockClear();
+    const listed = dom.document.body.querySelector(".request-row .request-row__actions button");
+    expect([visibleText(listed), accessibleName(listed)]).toEqual(["Copy request", "Copy the request for 1.25 DUSK, Factura 33"]);
+    listed.click();
+    await settle();
+    expect(dom.clipboard.writeText.mock.calls).toEqual([[fromForm]]);
   });
 
   // Sofía's, in the app: Copy request on an invoice paid already, the form still filled in, made a second
@@ -790,8 +800,8 @@ describe("the requests made here", () => {
     const state = { route: "receive", receive: { tab: "public" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
     const actions = await draw(state);
     const [paid, waiting] = dom.document.body.querySelectorAll(".request-row");
-    expect(visibleText(paid.querySelector(".request-row__actions"))).toBe(`Paid twice, first ${whenAtText(T0 + HOUR)}Copy linkShareRemove`);
-    expect(visibleText(waiting.querySelector(".request-row__actions"))).toBe("Copy linkShareRemove");
+    expect(visibleText(paid.querySelector(".request-row__actions"))).toBe(`Paid twice, first ${whenAtText(T0 + HOUR)}Copy requestShareRemove`);
+    expect(visibleText(waiting.querySelector(".request-row__actions"))).toBe("Copy requestShareRemove");
     const ask = () => {
       const el = dom.document.body.querySelector(".request-row .request-paid-ask");
       return el && isShown(el) ? visibleText(el) : "";
@@ -804,25 +814,66 @@ describe("the requests made here", () => {
     expect(invoke.mock.calls.some(([cmd]) => cmd === "share_text")).toBe(false);
     press(dom.document.body.querySelector(".request-row"), "Share anyway");
     await vi.waitFor(() => expect(invoke.mock.calls.some(([cmd]) => cmd === "share_text")).toBe(true));
+    const [, shared] = invoke.mock.calls.find(([cmd]) => cmd === "share_text");
 
     dom.clipboard.writeText.mockClear();
-    press(dom.document.body.querySelector(".request-row"), "Copy link");
+    press(dom.document.body.querySelector(".request-row"), "Copy request");
     await settle();
     expect(dom.clipboard.writeText).not.toHaveBeenCalled();
     await actions.render();
     expect(ask()).toBe(`This request was paid already, ${onDayAtText(T0 + HOUR)}.Copy anywayCancel`);
     press(dom.document.body.querySelector(".request-row"), "Copy anyway");
     await settle();
-    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.016&memo=Factura+117&network=testnet`);
-    // One not paid gives its link at once.
-    press(dom.document.body.querySelectorAll(".request-row")[1], "Copy link");
+    // Sofía's and Chen's: Copy link gave the bare link, Share the whole message. Copy request gives what Share gives.
+    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(shared.text);
+    expect(shared.text).toBe(`You're asked to pay 0.016 DUSK · Factura 117\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.016&memo=Factura+117&network=testnet`);
+    // One not paid gives its request at once.
+    press(dom.document.body.querySelectorAll(".request-row")[1], "Copy request");
     await settle();
-    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.02&memo=Factura+118&network=testnet`);
+    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(`You're asked to pay 0.02 DUSK · Factura 118\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.02&memo=Factura+118&network=testnet`);
     expect(actions.showToast).not.toHaveBeenCalled();
   });
 
+  // Sofía's, Nandini's and Marek's: the question opened below the popup's edge, and the phone's, so the press seemed
+  // to do nothing.
+  it("brings the question about a request paid already into view as it's asked, on its card and on the form, and not as the screen draws again", async () => {
+    items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "16000000", memo: "Factura 117" })] };
+    const entries = [paidIn("a1".repeat(32), "16000000", "Factura 117", T0 + HOUR)];
+    const state = { route: "receive", receive: { tab: "public", requestOpen: true, amountDusk: "0.016", memo: "Factura 117" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
+    const actions = await draw(state);
+    await vi.waitFor(() => expect(shown().map((row) => row.state)).toEqual(["Paid"]));
+    // Each question brought into view: where it is, whether it shows by then, and how it's scrolled to.
+    const scrolled = [];
+    const watch = () => {
+      for (const ask of dom.document.body.querySelectorAll(".request-paid-ask")) {
+        ask.scrollIntoView = (how) => scrolled.push([ask.closest(".request-row") ? "card" : ask.closest(".receive-request") ? "form" : "address", isShown(ask), how]);
+      }
+    };
+    // The card's Copy, whatever it gives, and the form's Copy request.
+    const cardCopy = () => dom.document.body.querySelector(".request-row .request-row__actions").querySelectorAll("button").find((b) => visibleText(b).startsWith("Copy"));
+    const formCopy = () => dom.document.body.querySelector(".receive-request").querySelectorAll("button").find((b) => visibleText(b) === "Copy request");
+    watch();
+    cardCopy().click();
+    await settle();
+    // Shown, then the least scroll that shows all of it, smoothly, as Request payment comes into view.
+    expect(scrolled).toEqual([["card", true, { block: "nearest", behavior: "smooth" }]]);
+    expect(dom.clipboard.writeText).not.toHaveBeenCalled();
+    // Drawn again, still asked: left where it is.
+    await actions.render();
+    watch();
+    await settle();
+    expect(visibleText(dom.document.body.querySelector(".request-row .request-paid-ask"))).toBe(`This request was paid already, ${onDayAtText(T0 + HOUR)}.Copy anywayCancel`);
+    expect(scrolled).toHaveLength(1);
+    // The form's, where less motion is asked for: at once.
+    dom.window.matchMedia = (query) => ({ matches: query === "(prefers-reduced-motion: reduce)" });
+    formCopy().click();
+    await settle();
+    expect(scrolled.slice(1)).toEqual([["form", true, { block: "nearest", behavior: "auto" }]]);
+    expect(dom.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
   // Chen's and Sofía's: the requests in the list had Copy link and Remove, and their Share was up by the address.
-  it("shares each request in the list in the app from beside its Copy link, as it was asked", async () => {
+  it("shares each request in the list in the app from beside its Copy request, as it was asked, and copies the same", async () => {
     dom.document.body.dataset.runtime = "tauri";
     dom.window.matchMedia = () => ({ matches: true });
     const invoke = vi.fn(async () => null);
@@ -830,18 +881,24 @@ describe("the requests made here", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "16000000", memo: "Factura 117" })] };
     await draw({ receive: { tab: "public" } });
-    expect(shown()[0].buttons).toEqual(["Copy link", "Share", "Remove"]);
-    dom.document.body.querySelector(".request-row__actions").querySelectorAll("button").find((b) => visibleText(b) === "Share").click();
+    expect(shown()[0].buttons).toEqual(["Copy request", "Share", "Remove"]);
+    const row = () => dom.document.body.querySelector(".request-row__actions").querySelectorAll("button");
+    row().find((b) => visibleText(b) === "Share").click();
     await vi.waitFor(() => expect(invoke.mock.calls.some(([cmd]) => cmd === "share_text")).toBe(true));
     const [, args] = invoke.mock.calls.find(([cmd]) => cmd === "share_text");
     expect([args.title, args.text]).toEqual([
       "Dusk payment request",
       `You're asked to pay 0.016 DUSK · Factura 117\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.016&memo=Factura+117&network=testnet`,
     ]);
+    // Sofía's and Chen's: its copy gave the bare link. It gives what Share gives.
+    dom.clipboard.writeText.mockClear();
+    row().find((b) => visibleText(b) === "Copy request").click();
+    await settle();
+    expect(dom.clipboard.writeText.mock.calls).toEqual([[args.text]]);
     // None outside the app.
     delete dom.document.body.dataset.runtime;
     await draw({ receive: { tab: "public" } });
-    expect(shown()[0].buttons).toEqual(["Copy link", "Remove"]);
+    expect(shown()[0].buttons).toEqual(["Copy request", "Remove"]);
   });
 
   it("says what came in for each: paid, to check, or paid twice, each payment to open, and keeps what paid", async () => {
@@ -866,9 +923,9 @@ describe("the requests made here", () => {
     const actions = await draw(state);
 
     expect(shown()).toEqual([
-      { amount: "1.25 DUSK", state: "Paid", match: `Amount and memo match a payment of 1.25 DUSK ${whenAtText(T0 + HOUR)}.`, buttons: ["See payment", "Copy link", "Remove"] },
-      { amount: "2 DUSK", state: "Check", match: `Same amount ${whenAtText(T0 + 2 * HOUR)}, with another memo: "Other". Check it's this one.`, buttons: ["See payment", "Copy link", "Remove"] },
-      { amount: "Any amount", state: "Paid twice", match: "Its memo matches 2 payments.", buttons: ["Copy link", "Remove"] },
+      { amount: "1.25 DUSK", state: "Paid", match: `Amount and memo match a payment of 1.25 DUSK ${whenAtText(T0 + HOUR)}.`, buttons: ["See payment", "Copy request", "Remove"] },
+      { amount: "2 DUSK", state: "Check", match: `Same amount ${whenAtText(T0 + 2 * HOUR)}, with another memo: "Other". Check it's this one.`, buttons: ["See payment", "Copy request", "Remove"] },
+      { amount: "Any amount", state: "Paid twice", match: "Its memo matches 2 payments.", buttons: ["Copy request", "Remove"] },
     ]);
     // What paid stays paid, kept with its request and what it paid.
     await vi.waitFor(() => expect(items[KEY][ACCOUNT].find((r) => r.id === "a").paid).toEqual({ at: T0 + HOUR, hash: "a1".repeat(32), lux: "1250000000" }));
@@ -936,7 +993,7 @@ describe("the requests made here", () => {
   });
 
   // Sofía's: after Send back, the request still offered it, and said nothing of it.
-  it("says when a payment was sent back, and offers no Send back for it again; and copies a request's link", async () => {
+  it("says when a payment was sent back, and offers no Send back for it again; and copies the request", async () => {
     items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "16000000", memo: "Factura 117" })] };
     const SENDER = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
     const entries = [
@@ -951,12 +1008,12 @@ describe("the requests made here", () => {
     expect(second.querySelectorAll("button").map(visibleText)).toEqual(["See payment"]);
     expect(visibleText(second.querySelector(".request-payment__sent"))).toBe(`Sent back ${whenAtText(T0 + 3 * HOUR, Date.now(), { seconds: true })}`);
 
-    // Its link, to copy again (the web wallet's list has it), once it's said it was paid already.
-    dom.document.body.querySelectorAll(".request-row__actions button").find((b) => visibleText(b) === "Copy link").click();
+    // The request, its words and link, to copy again (the web wallet's list has it), once it's said it was paid already.
+    dom.document.body.querySelectorAll(".request-row__actions button").find((b) => visibleText(b) === "Copy request").click();
     await settle();
     dom.document.body.querySelectorAll(".request-row button").find((b) => visibleText(b) === "Copy anyway").click();
     await settle();
-    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(`https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.016&memo=Factura+117&network=testnet`);
+    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(`You're asked to pay 0.016 DUSK · Factura 117\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=0.016&memo=Factura+117&network=testnet`);
   });
 
   it("sends back a payment that paid a request again: to whoever sent it, what it brought, with the request's memo", async () => {
@@ -1054,7 +1111,7 @@ describe("the requests made here", () => {
       return state;
     };
 
-    const unchecked = (amount) => ({ amount, state: "Not checked", match: "Made by an earlier version for a node it didn't name, so payments aren't checked against it.", buttons: ["Copy link", "Remove"] });
+    const unchecked = (amount) => ({ amount, state: "Not checked", match: "Made by an earlier version for a node it didn't name, so payments aren't checked against it.", buttons: ["Copy request", "Remove"] });
     // On a custom node: the earlier custom one, never matched to the payment that looks like its own.
     await drawOn(on("https://node-42.example", 42));
     expect(shown()).toEqual([unchecked("5 DUSK")]);

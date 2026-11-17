@@ -160,9 +160,35 @@
     }
   }
 
+  // A request's parameters as plain data, as the wallet reads them
+  // (background/rpc.js): text, numbers, true and false, lists, bytes, and
+  // objects that hold what they hold themselves, with nothing on a prototype
+  // of their own and no "__proto__" key. Checked here, on the page's own
+  // object: posting it to the wallet copies its own fields only, and would
+  // hand on a request the site never made (Marek's: a balance request with
+  // the account under "__proto__" came to the wallet as {}, and was answered
+  // with the connected profile's balance).
+  function plainData(value, depth = 0) {
+    if (value === null || typeof value !== "object") return typeof value !== "function" && typeof value !== "symbol";
+    if (depth > 64) return false;
+    if (ArrayBuffer.isView(value) || Object.prototype.toString.call(value) === "[object ArrayBuffer]") return true;
+    const proto = Object.getPrototypeOf(value);
+    if (Array.isArray(value)) {
+      return proto === Array.prototype && Object.getOwnPropertySymbols(value).length === 0 && value.every((item) => plainData(item, depth + 1));
+    }
+    if (proto !== Object.prototype && proto !== null) return false;
+    const keys = Reflect.ownKeys(value);
+    return keys.every((key) => typeof key === "string" && key !== "__proto__") && keys.every((key) => plainData(value[key], depth + 1));
+  }
+
   async function request({ method, params } = {}) {
     if (!method || typeof method !== "string") {
       throw new Error("Invalid request: method must be a string");
+    }
+    if (!plainData(params)) {
+      const err = new Error("The request's parameters must be plain data.");
+      err.code = -32602;
+      throw err;
     }
 
     ensurePushSubscribed();

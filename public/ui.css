@@ -140,6 +140,10 @@
 html, body { height: 100%; }
 html { color-scheme: dark; }
 
+/* No pull to refresh: in Firefox for Android a pull down at the top of the
+   page reloaded the wallet's tab, a link's payment and all (Marek's, Amélie's). */
+html, body { overscroll-behavior-y: none; }
+
 body {
   margin: 0;
   font-family: var(--font-sans);
@@ -3041,6 +3045,15 @@ body.page--popup .brand-mark {
   pointer-events: none;
 }
 
+/* Recovery words shown only while this is held (pageAway.js holdToShow):
+   the press is the hold, never a scroll, a selection or the browser's menu. */
+.hold-to-show {
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
 .srp-word {
   display: flex;
   align-items: center;
@@ -4088,6 +4101,8 @@ body[data-runtime="tauri"] .qrscan-overlay {
   font-weight: 500;
 }
 
+/* Their two buttons: the quiet one, then the main one, twice as wide, where
+   the thumb is. */
 .send-password__actions,
 .wallet-dialog__actions {
   display: grid;
@@ -4722,6 +4737,16 @@ button.tx-open:focus-visible::after {
   direction: ltr;
   unicode-bidi: isolate;
 }
+/* On Review, the words a stranger sent you: one line, as in their row, so
+   what Review says after them shows whole (send.js). */
+.review-theirs__memo {
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
 
 /* An icon button with a name: Copy beside an address */
 button.copy-ico {
@@ -5328,9 +5353,11 @@ details.receive-request > summary {
   font-size: 12.5px;
 }
 
-/* Asked on the card before a request paid already is copied or shared again */
+/* Asked on the card before a request paid already is copied or shared again;
+   brought into view with room to spare at the screen's edge (requests.js). */
 .request-paid-ask {
   margin-top: 6px;
+  scroll-margin-block: 16px;
 }
 
 .request-paid-ask__text {

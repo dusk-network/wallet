@@ -85,6 +85,7 @@ export const SENT_MEANWHILE_TEXT = "Your account sent something else while this 
  *   feeLux: string, memo: string, at: number, seenNonce?: string, hash?: string, nonce?: string,
  *   ended?: "closed" | "locked" | "switched" | "failed", error?: string,
  *   stopped?: "closed" | "locked" | "switched", held?: boolean,
+ *   meanwhile?: Array<{ hash: string, to: string, lux: string, memo: string, at: number | null }>,
  * }} WaitingRecord
  */
 
@@ -111,7 +112,9 @@ export const SENT_MEANWHILE_TEXT = "Your account sent something else while this 
  * `nonceNow`, the account's nonce as the node has it now, its mempool's
  * included; `chainNonce`, as its chain has it alone, which the engine counts
  * a new transaction's from; `ownNonce`, the last one the wallet's own sends
- * took, or null.
+ * took, or null; `meanwhile`, what the account sent at the nonces after
+ * `after` up to `upTo`, as far as the node says it (txLifecycle.js
+ * sentMeanwhileOf).
  * @typedef {{
  *   answers: () => Promise<boolean>,
  *   cancelInEngine: (sendId: string) => Promise<{ cancelled: boolean }>,
@@ -122,6 +125,7 @@ export const SENT_MEANWHILE_TEXT = "Your account sent something else while this 
  *   nonceNow?: (record: WaitingRecord) => Promise<bigint | string>,
  *   chainNonce?: (record: WaitingRecord) => Promise<bigint | string>,
  *   ownNonce?: (record: WaitingRecord) => Promise<bigint | string | null>,
+ *   meanwhile?: (record: WaitingRecord, range: { after: bigint, upTo: bigint }) => Promise<Array<object>>,
  *   tell: (message: object) => void,
  * }} WaitingHost
  */
@@ -186,13 +190,20 @@ export function sendCancelled(text = SEND_CANCELLED_TEXT) {
   return error;
 }
 
+// One called off as another is sent in its place: nothing's said of it.
+function inPlaceOf(error) {
+  error.data = { ...error.data, inPlace: true };
+  return error;
+}
+
 // The payments waiting here, the oldest first: { sendId, record, attempt,
 // resolve, reject, state: "waiting" | "sending" | "unclear" | "held" |
-// "settled", handedOver, stopping, refused, heldAt, accepted }. "unclear":
-// handed over without a clear answer, to be looked up on the node; "held":
-// its account sent something else while it waited, the nonce then
-// (`heldAt`), and it waits for Send it too, which takes that as seen
-// (`accepted`).
+// "replacing" | "settled", handedOver, stopping, refused, heldAt, accepted,
+// replacing }. "unclear": handed over without a clear answer, to be looked up
+// on the node; "held": its account sent something else while it waited, the
+// nonce then (`heldAt`), and it waits for Send it too, which takes that as
+// seen (`accepted`); "replacing": held, and another being sent in its place
+// from Send it too's Review (that one's `replacing`), till that one goes out.
 const queue = [];
 // Payments being tried the first time, before any waited, by their ID, with
 // what's kept of them (`record`): one called off meanwhile (`cancelled`) never
@@ -262,9 +273,10 @@ const samePayment = (kept, again) => SAME_PAYMENT.every((key) => (key === "accou
 // (`replaces`): that one, as it was, or null where it isn't one to replace.
 // Another payment, or one from another wallet, profile or network, is refused,
 // and the one Home said wasn't sent stays as it was.
+const replacingNow = (sendId) => queue.some((item) => item.sendId === sendId && item.state === "replacing");
 const keepInPlace = (record, replaces) =>
   changeKept((kept) => {
-    const prior = replaces && replaces !== record.sendId && kept[replaces] && !kept[replaces].hash && !active(replaces) ? kept[replaces] : null;
+    const prior = replaces && replaces !== record.sendId && kept[replaces] && !kept[replaces].hash && (!active(replaces) || replacingNow(replaces)) ? kept[replaces] : null;
     if (prior && !samePayment(prior, record)) throw new Error(NOT_IN_PLACE_TEXT);
     if (prior) delete kept[replaces];
     kept[record.sendId] = record;
@@ -347,7 +359,11 @@ async function sentMeanwhile(item, host, { record = item.record, signed = false 
   if (!seen.length) return null;
   const now = nonceOf(await Promise.resolve().then(() => host.nonceNow(record)).catch(() => null));
   if (now === null) return "unknown";
-  return seen.every((nonce) => now > nonce) ? now : null;
+  if (!seen.every((nonce) => now > nonce)) return null;
+  // What it's past: the account's nonce the wallet knew of last, whatever sent
+  // after it being what the account sent meanwhile (hold).
+  item.seenUpTo = seen.reduce((a, b) => (b > a ? b : a));
+  return now;
 }
 
 // Sent it too past another transaction of its account (`accepted`), which
@@ -365,7 +381,11 @@ async function pastAccepted(item, host) {
 }
 
 // Held, its account having sent something else meanwhile (`now`, its nonce
-// then): it goes out only on Send it too, and the page is told.
+// then): it goes out only on Send it too, and the page is told. What the
+// account sent meanwhile is read from the node, as far as it says it, and
+// kept with it (`meanwhile`), for Home and Sent to name: what, to whom, with
+// what memo and when (Marek's, Lena's, Chen's: "something else" was the
+// very same payment, made on another device).
 async function hold(item, host, now) {
   item.state = "held";
   item.heldAt = now;
@@ -373,20 +393,78 @@ async function hold(item, host, now) {
     if (kept[item.sendId]) kept[item.sendId] = { ...kept[item.sendId], held: true };
   }).catch(() => {});
   tellWaits(host, item.sendId, false, false, true);
+  const named = await sentWhileHeld(item, host, now);
+  if (!named.length || item.state !== "held") return;
+  await changeKept((kept) => {
+    if (kept[item.sendId]) kept[item.sendId] = { ...kept[item.sendId], meanwhile: named };
+  }).catch(() => {});
+  tellWaits(host, item.sendId, false, false, true);
+}
+
+/** How long the node is given to say what an account sent while a payment waited. */
+const MEANWHILE_READ_MS = 10_000;
+
+// What the account sent after the nonce the wallet knew of last, up to `now`,
+// as the node says it within MEANWHILE_READ_MS; none where it doesn't.
+async function sentWhileHeld(item, host, now) {
+  if (item.seenUpTo == null || typeof host.meanwhile !== "function") return [];
+  let timer;
+  const late = new Promise((resolve) => {
+    timer = setTimeout(() => resolve([]), MEANWHILE_READ_MS);
+  });
+  const read = Promise.resolve().then(() => host.meanwhile(item.record, { after: item.seenUpTo, upTo: now })).catch(() => []);
+  const said = await Promise.race([read, late]).finally(() => clearTimeout(timer));
+  return (Array.isArray(said) ? said : [])
+    .filter((sent) => sent && typeof sent === "object" && /^\d+$/.test(String(sent.lux ?? "")))
+    .map(({ hash, to, lux, memo, at }) => ({ hash: String(hash ?? ""), to: String(to ?? ""), lux: String(lux), memo: String(memo ?? ""), at: Number(at) || null }));
 }
 
 // Out of the queue, its record kept as `how` says: kept as went once it went
 // out; forgotten once it was called off with Cancel, or is followed by its
 // transaction's ID; kept as not sent otherwise. One called off that took the place of a
-// payment Home said wasn't sent gives that payment its place back.
+// payment Home said wasn't sent gives that payment its place back; one sent
+// in the place of a held one (`replacing`) that never went out, called off or
+// turned down, gives it back held; one that went, that one goes.
 function settle(item, how, error) {
   item.state = "settled";
   const at = queue.indexOf(item);
   if (at >= 0) queue.splice(at, 1);
-  if (how === "cancelled") return forgetFor(item.sendId, item.prior).catch(() => {});
-  if (how === "out") return keepWent(item.sendId).catch(() => {});
-  if (how === "followed") return forget(item.sendId).catch(() => {});
+  const held = item.replacing;
+  if (how === "cancelled" || (how === "failed" && held?.state === "replacing")) {
+    return forgetFor(item.sendId, item.prior)
+      .then(() => heldAgain(held, item.host))
+      .catch(() => {});
+  }
+  if (how === "out") {
+    replacedBy(held);
+    return keepWent(item.sendId).catch(() => {});
+  }
+  if (how === "followed") {
+    replacedBy(held);
+    return forget(item.sendId).catch(() => {});
+  }
   return endKept(item.sendId, how, how === "failed" ? String(error?.message ?? error ?? "") : "").catch(() => {});
+}
+
+// A payment held for Send it too that another was sent in the place of, from
+// its Review: out of the queue once that one went out, or may have, said not
+// sent, in its place. Its record went as that one was kept in its place.
+function replacedBy(held) {
+  if (held?.state !== "replacing") return;
+  held.state = "settled";
+  const at = queue.indexOf(held);
+  if (at >= 0) queue.splice(at, 1);
+  held.reject(inPlaceOf(sendCancelled()));
+}
+
+// ... and held again, as it was, where that one never went out, called off or
+// turned down (its balance, its gas): its record back in its place first
+// (forgetFor), then Send it too and Don't send again (Astra's: it was gone
+// with the one turned down).
+function heldAgain(held, host) {
+  if (held?.state !== "replacing") return;
+  held.state = "held";
+  if (host) tellWaits(host, held.sendId, false, false, true);
 }
 
 // The ID of the transaction a payment's try handed to the node, or was
@@ -672,33 +750,45 @@ async function follow(host, { now = false } = {}) {
  */
 export async function sendWhenReachable({ sendId, record, attempt, host, replaces = "" }) {
   const kept = { ...record, sendId, at: Date.now() };
+  // Send it too, from its Review: sent in the place of the one held for it.
+  // That one stays held, out of reach, till this one goes out, and goes then,
+  // said not sent in its place; where this one never goes out, it's held
+  // again, as it was (Astra's: one turned down for its balance or gas took
+  // the held payment with it).
+  const held = replaces ? queue.find((item) => item.sendId === String(replaces) && item.state === "held") : null;
+  if (held) held.state = "replacing";
   // Kept before anything else happens to it: a wallet that closes from here
   // on finds it, and says what came of it. Not kept, it isn't sent.
   let prior;
   try {
     prior = await keepInPlace(kept, String(replaces ?? ""));
   } catch (error) {
+    heldAgain(held, host);
     throw notSent(error);
   }
   let unclear = false;
-  if (!queue.length) {
-    const first = { cancelled: false, handedOver: false, record: kept };
+  if (!queue.some((item) => item !== held)) {
+    const first = { cancelled: false, handedOver: false, record: kept, replacing: held };
     firstTries.set(sendId, first);
     host.changed?.();
     try {
       const result = await attempt({ waited: false });
       await forget(sendId).catch(() => {});
+      replacedBy(held);
       return result;
     } catch (error) {
       // Called off as it was tried: nothing went out, and it never waits after.
       if (first.cancelled && error?.data?.sent !== "unknown") {
         await forgetFor(sendId, prior).catch(() => {});
+        heldAgain(held, host);
         throw sendCancelled();
       }
       // Handed over with no clear answer: a public one is looked up on the
       // node once it answers; a shielded one is followed by its ID (the
-      // host keeps it so), and its record goes.
+      // host keeps it so), and its record goes. What it was sent in the
+      // place of goes: it may have gone out.
       if (error?.data?.sent === "unknown") {
+        replacedBy(held);
         if (!checkedOnNode(kept) || !(await handedOverHash(sendId, error))) {
           await forget(sendId).catch(() => {});
           throw error;
@@ -706,8 +796,10 @@ export async function sendWhenReachable({ sendId, record, attempt, host, replace
         unclear = true;
       } else if (!unreachableBeforeSent(error)) {
         // Turned down: Send said why, and one sent again from Home is said
-        // not sent there again, as it was.
+        // not sent there again, as it was, as is one held.
         await forgetFor(sendId, first.handedOver ? null : prior).catch(() => {});
+        if (first.handedOver) replacedBy(held);
+        else heldAgain(held, host);
         throw error;
       }
     } finally {
@@ -715,7 +807,7 @@ export async function sendWhenReachable({ sendId, record, attempt, host, replace
     }
   }
   return new Promise((resolve, reject) => {
-    queue.push({ sendId, record: kept, attempt, resolve, reject, state: unclear ? "unclear" : "waiting", handedOver: unclear, prior: unclear ? null : prior });
+    queue.push({ sendId, record: kept, attempt, resolve, reject, state: unclear ? "unclear" : "waiting", handedOver: unclear, prior: unclear ? null : prior, ...(held && !unclear ? { replacing: held, host } : {}) });
     tellWaits(host, sendId, true, unclear);
     wake();
     follow(host).catch(() => {});
@@ -948,6 +1040,7 @@ export async function noteHandingOver(sendId, sent, host) {
   if (first) first.handedOver = true;
   // Handed over: what it took the place of never comes back.
   if (item) Object.assign(item, { handedOver: true, prior: null });
+  replacedBy(first?.replacing ?? item?.replacing);
   if (first || item) tellWaits(host, id, false, true);
   else await followHandedOver(host);
   return true;

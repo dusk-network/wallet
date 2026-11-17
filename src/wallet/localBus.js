@@ -17,15 +17,15 @@ import { chainIdForChoice, checkAllEndpoints, checkEveryMs, checkNode, getNetwor
 import { WALLET_MESSAGE_EVENT } from "../shared/constants.js";
 import { ERROR_CODES, rpcError } from "../shared/errors.js";
 import { serializeError } from "../shared/transport.js";
-import { getTxEpoch, getTxMeta, listTxs, onTxSettled, patchTxMeta, putTxMeta } from "../shared/txStore.js";
-import { sendingProfile, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
+import { forgetTxs, getTxEpoch, getTxMeta, listTxs, onTxSettled, patchTxMeta, putTxMeta } from "../shared/txStore.js";
+import { sendingProfile, signedTxFields, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import {
   executionEventError,
   executionEventOk,
   waitForTxExecution,
 } from "../shared/txExecution.js";
-import { accountNonce, accountNonceNow, classifyTxPresence, finalizedTxMetadata, handedOverState } from "../shared/txLifecycle.js";
+import { accountNonce, accountNonceNow, classifyTxPresence, finalizedTxMetadata, handedOverState, sentMeanwhileOf } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx } from "../shared/txReconcile.js";
 import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.js";
 import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
@@ -68,6 +68,8 @@ import {
   cancelSend,
   resendSend,
   forgetHandedOver,
+  handedOverTx,
+  rebroadcastTx,
   sendUnderWay,
   lastOwnNonce,
   setHandOverHook,
@@ -161,6 +163,140 @@ async function watchArrival(hash, tx) {
   });
 }
 
+// A send handed to the node, followed as each one is: Android looks for it
+// once the app leaves the screen, where the person asked for notices
+// (watchArrival); one found on the node after a hand-over with no clear
+// answer (`found`) is looked up at once; and the wallet waits for its block,
+// or for it to drop out, keeping what came of it on its record.
+function followSent(hash, { record, nodeUrl, txEpoch, found = false }) {
+  const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
+  const pendingNullifiers = Array.isArray(record?.pendingNullifiers) ? record.pendingNullifiers : [];
+  watchArrival(hash, record).catch(() => {});
+  if (found) {
+    recheckTx(hash)
+      .then(({ event }) => tellPage({ type: "DUSK_UI_TX_STATUS", ...event }))
+      .catch(() => {});
+  }
+
+  // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
+  (async () => {
+    try {
+      const timeoutMs = 180_000;
+      const removedWatcher = waitTxRemoved(hash, { timeoutMs }).catch((e) => {
+        if (/removed watcher not available/i.test(String(e?.message ?? e))) {
+          return new Promise(() => {});
+        }
+        throw e;
+      });
+      const executedEvent = await waitForTxExecution(
+        waitTxExecuted(hash, { timeoutMs }),
+        removedWatcher,
+        async () => {
+          const meta = await getTxMeta(hash);
+          const presence = await classifyTxPresence(nodeUrl, hash);
+          const now = Date.now();
+          const isShielded = pendingNullifiers.length > 0;
+
+          if (presence.state === "executed_success" || presence.state === "executed_failed") {
+            const ok = presence.state === "executed_success";
+            await patch(hash, {
+              status: ok ? "executed" : "failed",
+              error: ok ? undefined : presence.error || undefined,
+              executedAt: now,
+              lastCheckedAt: now,
+              reservationStatus: isShielded ? "spent" : meta?.reservationStatus,
+              reservationUpdatedAt: isShielded ? now : meta?.reservationUpdatedAt,
+            });
+          } else if (presence.state === "not_found") {
+            await patch(hash, {
+              status: "unknown",
+              lastCheckedAt: now,
+              recoveryReason: "removed_unconfirmed",
+              reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
+            });
+          } else if (presence.state === "mempool") {
+            await patch(hash, {
+              status: "mempool",
+              lastCheckedAt: now,
+              reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
+            });
+          } else {
+            await patch(hash, {
+              status: "unknown",
+              lastCheckedAt: now,
+              recoveryReason: "removed_unconfirmed",
+              reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
+            });
+          }
+        }
+      );
+      const ok = executionEventOk(executedEvent);
+      const error = ok ? "" : executionEventError(executedEvent);
+
+      const now = Date.now();
+      await patch(hash, {
+        status: ok ? "executed" : "failed",
+        error: ok ? undefined : (error || undefined),
+        executedAt: now,
+        lastCheckedAt: now,
+        ...(pendingNullifiers.length
+          ? { reservationStatus: "spent", reservationUpdatedAt: now }
+          : {}),
+      });
+
+      const presence = await classifyTxPresence(nodeUrl, hash);
+      if (presence.state === "executed_success" || presence.state === "executed_failed") {
+        const finalizedOk = ok && presence.state === "executed_success";
+        await patch(hash, {
+          ...finalizedTxMetadata(presence.tx),
+          status: finalizedOk ? "executed" : "failed",
+          error: finalizedOk ? undefined : error || presence.error || undefined,
+          lastCheckedAt: Date.now(),
+        });
+      }
+    } catch (e) {
+      const meta = await getTxMeta(hash);
+      const hasExecution = meta?.status === "executed" || meta?.status === "failed";
+      const timedOut = /timed out/i.test(String(e?.message ?? e));
+      if (!hasExecution && timedOut && meta?.recoveryReason === "removed_unconfirmed") {
+        const presence = await classifyTxPresence(nodeUrl, hash);
+        const now = Date.now();
+        if (presence.state === "executed_success" || presence.state === "executed_failed") {
+          const ok = presence.state === "executed_success";
+          await patch(hash, {
+            status: ok ? "executed" : "failed",
+            error: ok ? undefined : presence.error || undefined,
+            executedAt: now,
+            lastCheckedAt: now,
+            reservationStatus: pendingNullifiers.length ? "spent" : meta?.reservationStatus,
+            reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
+          });
+        } else if (presence.state === "not_found") {
+          await patch(hash, {
+            status: "removed",
+            removedAt: now,
+            lastCheckedAt: now,
+            recoveryReason: "removed",
+            reservationStatus: pendingNullifiers.length ? "recoverable" : meta?.reservationStatus,
+            reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
+          });
+        } else {
+          await patch(hash, { lastCheckedAt: now });
+        }
+      } else if (!hasExecution) {
+        await patch(hash, {
+          status: "unknown",
+          lastCheckedAt: Date.now(),
+          recoveryReason: timedOut ? "watcher_timeout" : "watcher_unavailable",
+        });
+      }
+    } finally {
+      // Reconcile shielded state after tx execution.
+      startShieldedSync({ force: false }).catch(() => {});
+    }
+  })().catch(() => {});
+}
+
 // A payment from Send waiting for the network, told to Android for the app's
 // time away (android/ArrivalJob.kt's Waiting): the app signs and sends only
 // while it's open, so the notice says it goes out once the app's opened
@@ -198,6 +334,8 @@ const waitingHost = {
   // Whether the account sent something else while one waited: its nonce on
   // the node now, and the last the wallet's own sends took.
   nonceNow: (record) => accountNonceNow(record.nodeUrl, record.account),
+  // What the account sent while one waited, as the node says it, for its hold to name.
+  meanwhile: (record, range) => sentMeanwhileOf(record.nodeUrl, { account: record.account, ...range, at: record.at }),
   chainNonce: (record) => accountNonce(record.nodeUrl, record.account),
   ownNonce: async (record) => lastOwnNonce({ profileIndex: Number(record.profileIndex) || 0 }).nonce,
   // Handed to the node: kept as a sent one, from when it was made, and looked
@@ -818,6 +956,62 @@ export async function localSend(message) {
       return { ok: true, result: { dropped: await dropUnsent(String(message.sendId ?? "")) } };
     }
 
+    // Send it now, on a send of the wallet's own the node never had after a
+    // hand-over with no clear answer (Not sent yet): the very transaction
+    // signed for it, as it is, so it goes out once at most; then followed as
+    // each send is (followSent). Where another took its place, Not sent. As a
+    // send is, with the wallet's lock, unlock and reset waiting for it
+    // (Astra's: locked as the node was asked of it, it still went); and where
+    // its answer is lost, it's looked up again, never said not sent before
+    // the node says it never had it.
+    if (message?.type === "DUSK_UI_RESEND_TX") {
+      const hash = String(message.hash ?? "");
+      const { meta, result, txEpoch } = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+        const status = engineStatus();
+        if (!status.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+        const meta = await getTxMeta(hash);
+        if (!meta?.signedTx || meta.status !== "unsent" || meta.dontSendAt || String(meta.walletId ?? "") !== String(status.accounts?.[0] ?? "")) {
+          throw rpcError(ERROR_CODES.INVALID_PARAMS, "This send can't be sent again from here.");
+        }
+        await ensureEngineConfigured();
+        const txEpoch = await getTxEpoch();
+        const result = await rebroadcastTx({
+          hex: meta.signedTx,
+          hash,
+          nonce: meta.nonce,
+          account: meta.account,
+          profileIndex: Number(meta.profileIndex) || 0,
+          nodeUrl: meta.nodeUrl,
+          at: meta.submittedAt,
+        }).catch(async (error) => {
+          if (error?.data?.replaced) await patchTxMeta(hash, { status: "not_sent", recoveryReason: "replaced", signedTx: undefined }, { epoch: txEpoch }).catch(() => {});
+          else if (error?.data?.sent === "unknown") await patchTxMeta(hash, { status: "unknown", recoveryReason: "handover_unclear", lastCheckedAt: Date.now() }, { epoch: txEpoch }).catch(() => {});
+          throw error;
+        });
+        await patchTxMeta(hash, { status: "submitted", lastCheckedAt: Date.now() }, { epoch: txEpoch });
+        return { meta, result, txEpoch };
+      });
+      followSent(hash, { record: { ...meta, status: "submitted" }, nodeUrl: String(meta.nodeUrl ?? ""), txEpoch });
+      return { ok: true, result: { hash: result?.hash ?? hash } };
+    }
+
+    // Don't send, on one of the wallet's own sends the node never had. Its
+    // hand-over had no clear answer, so it may still arrive: never sent again
+    // from here, it's followed till its nonce is used, and shows as Sent if it
+    // went after all (txReconcile.js). One another took the place of goes.
+    if (message?.type === "DUSK_UI_DROP_TX") {
+      const hash = String(message.hash ?? "");
+      const meta = await getTxMeta(hash);
+      if (meta?.status === "unsent" && !meta.dontSendAt) {
+        // As the record is when it's written: one that went meanwhile isn't marked.
+        const stored = await patchTxMeta(hash, { dontSendAt: Date.now(), signedTx: undefined });
+        return { ok: true, result: stored?.dontSendAt ? { dropped: true, followed: true } : { dropped: false, went: stored?.status === "executed" || stored?.status === "failed" } };
+      }
+      const dropped = meta?.status === "not_sent";
+      if (dropped) await forgetTxs([hash]);
+      return { ok: true, result: { dropped } };
+    }
+
     // UI initiated transaction (from the wallet popup)
     if (message?.type === "DUSK_UI_SEND_TX") {
       // A payment from Send (`sendId`) waits for the network where it
@@ -901,7 +1095,10 @@ export async function localSend(message) {
           const hash = error?.data?.sent === "unknown" ? String(error.data.hash ?? "") : "";
           if (hash && !(sendId && checkedOnNode(baseParams))) {
             const sent = { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(baseParams, status) };
-            await putTxMeta(hash, unclearTxMeta(baseParams, sent, walletSendFields(baseParams, message)), { epoch: txEpoch }).catch(() => {});
+            // A public one as it was signed: asked of the node by its nonce,
+            // and sent again as it is where the node never had it (txReconcile.js).
+            const signed = signedTxFields(handedOverTx({ hash }));
+            await putTxMeta(hash, unclearTxMeta(baseParams, sent, { ...walletSendFields(baseParams, message), ...signed }), { epoch: txEpoch }).catch(() => {});
           }
           throw error;
         });
@@ -920,142 +1117,11 @@ export async function localSend(message) {
             tellWaitingForApp();
           })
         : await attempt();
-      const patch = (txHash, value) => patchTxMeta(txHash, value, { epoch: txEpoch });
-
       // Kept as sent as it was handed over (keptSent), under the node it was sent on.
       const hash = result?.hash ?? "";
       try {
         const nodeUrl = sentOn || (await getSettings())?.nodeUrl || "";
-
-        if (hash && record) {
-          const { pendingNullifiers } = record;
-          // Asked for notices: Android looks for it too, once the app leaves the screen.
-          watchArrival(hash, record).catch(() => {});
-          // Found on the node after a hand-over with no clear answer, maybe in its block already: looked up now.
-          if (result?.found) {
-            recheckTx(hash)
-              .then(({ event }) => tellPage({ type: "DUSK_UI_TX_STATUS", ...event }))
-              .catch(() => {});
-          }
-
-          // Fire-and-forget: wait for EXECUTED/REMOVED and patch local activity.
-          (async () => {
-            try {
-              const timeoutMs = 180_000;
-              const removedWatcher = waitTxRemoved(hash, { timeoutMs }).catch((e) => {
-                if (/removed watcher not available/i.test(String(e?.message ?? e))) {
-                  return new Promise(() => {});
-                }
-                throw e;
-              });
-              const executedEvent = await waitForTxExecution(
-                waitTxExecuted(hash, { timeoutMs }),
-                removedWatcher,
-                async () => {
-                  const meta = await getTxMeta(hash);
-                  const presence = await classifyTxPresence(nodeUrl, hash);
-                  const now = Date.now();
-                  const isShielded = pendingNullifiers.length > 0;
-
-                  if (presence.state === "executed_success" || presence.state === "executed_failed") {
-                    const ok = presence.state === "executed_success";
-                    await patch(hash, {
-                      status: ok ? "executed" : "failed",
-                      error: ok ? undefined : presence.error || undefined,
-                      executedAt: now,
-                      lastCheckedAt: now,
-                      reservationStatus: isShielded ? "spent" : meta?.reservationStatus,
-                      reservationUpdatedAt: isShielded ? now : meta?.reservationUpdatedAt,
-                    });
-                  } else if (presence.state === "not_found") {
-                    await patch(hash, {
-                      status: "unknown",
-                      lastCheckedAt: now,
-                      recoveryReason: "removed_unconfirmed",
-                      reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
-                    });
-                  } else if (presence.state === "mempool") {
-                    await patch(hash, {
-                      status: "mempool",
-                      lastCheckedAt: now,
-                      reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
-                    });
-                  } else {
-                    await patch(hash, {
-                      status: "unknown",
-                      lastCheckedAt: now,
-                      recoveryReason: "removed_unconfirmed",
-                      reservationStatus: isShielded ? "pending" : meta?.reservationStatus,
-                    });
-                  }
-                }
-              );
-              const ok = executionEventOk(executedEvent);
-              const error = ok ? "" : executionEventError(executedEvent);
-
-              const now = Date.now();
-              await patch(hash, {
-                status: ok ? "executed" : "failed",
-                error: ok ? undefined : (error || undefined),
-                executedAt: now,
-                lastCheckedAt: now,
-                ...(pendingNullifiers.length
-                  ? { reservationStatus: "spent", reservationUpdatedAt: now }
-                  : {}),
-              });
-
-              const presence = await classifyTxPresence(nodeUrl, hash);
-              if (presence.state === "executed_success" || presence.state === "executed_failed") {
-                const finalizedOk = ok && presence.state === "executed_success";
-                await patch(hash, {
-                  ...finalizedTxMetadata(presence.tx),
-                  status: finalizedOk ? "executed" : "failed",
-                  error: finalizedOk ? undefined : error || presence.error || undefined,
-                  lastCheckedAt: Date.now(),
-                });
-              }
-            } catch (e) {
-              const meta = await getTxMeta(hash);
-              const hasExecution = meta?.status === "executed" || meta?.status === "failed";
-              const timedOut = /timed out/i.test(String(e?.message ?? e));
-              if (!hasExecution && timedOut && meta?.recoveryReason === "removed_unconfirmed") {
-                const presence = await classifyTxPresence(nodeUrl, hash);
-                const now = Date.now();
-                if (presence.state === "executed_success" || presence.state === "executed_failed") {
-                  const ok = presence.state === "executed_success";
-                  await patch(hash, {
-                    status: ok ? "executed" : "failed",
-                    error: ok ? undefined : presence.error || undefined,
-                    executedAt: now,
-                    lastCheckedAt: now,
-                    reservationStatus: pendingNullifiers.length ? "spent" : meta?.reservationStatus,
-                    reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
-                  });
-                } else if (presence.state === "not_found") {
-                  await patch(hash, {
-                    status: "removed",
-                    removedAt: now,
-                    lastCheckedAt: now,
-                    recoveryReason: "removed",
-                    reservationStatus: pendingNullifiers.length ? "recoverable" : meta?.reservationStatus,
-                    reservationUpdatedAt: pendingNullifiers.length ? now : meta?.reservationUpdatedAt,
-                  });
-                } else {
-                  await patch(hash, { lastCheckedAt: now });
-                }
-              } else if (!hasExecution) {
-                await patch(hash, {
-                  status: "unknown",
-                  lastCheckedAt: Date.now(),
-                  recoveryReason: timedOut ? "watcher_timeout" : "watcher_unavailable",
-                });
-              }
-            } finally {
-              // Reconcile shielded state after tx execution.
-              startShieldedSync({ force: false }).catch(() => {});
-            }
-          })().catch(() => {});
-        }
+        if (hash && record) followSent(hash, { record, nodeUrl, txEpoch, found: Boolean(result?.found) });
       } catch {
         // best-effort
       }

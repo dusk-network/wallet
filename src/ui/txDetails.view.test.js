@@ -101,6 +101,52 @@ describe("transaction details", () => {
     expect([view.status, view.note]).toEqual(["Completed", ""]);
   });
 
+  // Chen's, R01: "Not confirmed yet" for good, with nothing to tap, though the network never had it.
+  it("says Not sent yet, with Send it now and Don't send, of one the network never had, and Not sent of one another took the place of", async () => {
+    const stake = { kind: TX_KIND.STAKE, amount: "1000000000", profileIndex: 0, privacy: "public", source: "sent", account: "acct", nonce: "4" };
+    const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "activity", addressBook: { loaded: true, items: [] } };
+    const answers = { DUSK_UI_RESEND_TX: { ok: true, result: { hash: HASH } }, DUSK_UI_DROP_TX: { ok: true, result: { dropped: true, followed: true } } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async (message) => answers[message.type]) };
+    const show = (tx) => {
+      dom.document.body.replaceChildren(...txDetailsView({ nodeUrl: NODE, txs: [{ hash: HASH, nodeUrl: NODE, ...tx }] }, { state, actions }));
+      const body = dom.document.body;
+      return { body, status: visibleText(body.querySelector(".tx-hero-status")), note: visibleText(body.querySelector(".tx-hero-note")), buttons: body.querySelectorAll(".tx-unsent-actions button") };
+    };
+    let view = show({ ...stake, status: "unsent", signedTx: "ab12" });
+    expect([view.status, view.note, view.buttons.map((b) => b.textContent)]).toEqual(["Not sent yet", "It didn't reach the network. Nothing has left your wallet.", ["Send it now", "Don't send"]]);
+    expect(visibleText(view.body)).toContain("Network feeNone charged");
+    expect(visibleText(view.body)).not.toContain("Pending");
+    view.buttons[0].click();
+    await settle();
+    expect(actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RESEND_TX", hash: HASH });
+    expect(actions.render).toHaveBeenCalled();
+
+    view = show({ ...stake, status: "unsent", signedTx: "ab12" });
+    view.buttons[1].click();
+    await settle();
+    expect(actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_DROP_TX", hash: HASH });
+    // Astra's: its hand-over had no clear answer, so it may still arrive; said so, never that nothing left.
+    expect(actions.showToast).toHaveBeenLastCalledWith("Not sent yet. If it still arrives, it will show here.");
+    expect([state.route, state.txDetailHash]).toEqual(["activity", null]);
+
+    // Send it now handed it over, and its answer was lost: it may have gone, and is looked up.
+    state.route = "tx";
+    state.txDetailHash = HASH;
+    answers.DUSK_UI_RESEND_TX = { error: { code: -32603, message: "Failed to fetch", data: { sent: "unknown", hash: HASH } } };
+    view = show({ ...stake, status: "unsent", signedTx: "ab12" });
+    view.buttons[0].click();
+    await settle();
+    expect(actions.showToast).toHaveBeenLastCalledWith("It may have gone out. It shows here once the network says.");
+    // Chosen not to be sent, and arrived after all: Sent, and said so.
+    view = show({ ...stake, status: "executed", wentAfterAll: Date.now() });
+    expect(view.note).toBe("It went out after you chose not to send it.");
+
+    state.route = "tx";
+    state.txDetailHash = HASH;
+    view = show({ ...stake, status: "not_sent" });
+    expect([view.status, view.note, view.buttons]).toEqual(["Not sent", "Another transaction from this account took its place, so nothing was sent.", []]);
+  });
+
   // Lena's: "Why: watcher_unavailable".
   it("says in words why the wallet stopped waiting, never its watcher's code", () => {
     const sent = { kind: TX_KIND.TRANSFER, privacy: "public", to: "acct", amount: "1000000000", profileIndex: 0, status: "unknown" };

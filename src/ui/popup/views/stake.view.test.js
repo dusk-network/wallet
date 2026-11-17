@@ -14,6 +14,7 @@ import { stakeConfirmView, stakeFormView } from "./stake.js";
 import { readStakingAgain, sozuConfirmView } from "./sozu.js";
 import { screenShown } from "../../lib/clickGuard.js";
 import { reviewOf, sentView } from "./sent.js";
+import { whenAtText } from "./txRow.js";
 import { switchContext } from "../context.js";
 
 // The profile's verified name, as the header shows it: none unless a test gives one.
@@ -550,6 +551,36 @@ describe("staking overview", () => {
     expect(text).toContain("What's with Sozu couldn't be read again, so it may be out of date.");
   });
 
+  // Lena's wish, the sixth round: "may be out of date" never said when the figures were read last.
+  it("says when what it shows was read last: Sozu's last read that went through, and the stake's own, in one note", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const at = (hours, minutes) => new Date(2026, 10, 17, hours, minutes).getTime();
+    const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
+    let answer = async () => ({ ...sozu().status, position, pool: sozu().pool });
+    const notes = () => [...body.querySelectorAll(".stake-sum > div")].filter(isShown).map(visibleText).filter((text) => text.includes("out of date"));
+    // The stake read at 10:02; Sozu at 10:05.
+    vi.setSystemTime(at(10, 5));
+    const state = { route: "stake", staking: staking(owner(), { updatedAt: at(10, 2) }), sozu: sozu({ position, loaded: false }) };
+    popup(state, ov(), { sozuStatus: () => answer() });
+    await settle();
+    expect(notes()).toEqual([]);
+
+    // Sozu can't be read again at 10:09: said, with when it was.
+    vi.setSystemTime(at(10, 9));
+    answer = async () => {
+      throw new Error("node down");
+    };
+    state.sozu.loaded = false;
+    popup(state, ov(), { sozuStatus: () => answer() });
+    await settle();
+    expect(notes()).toEqual([`What's with Sozu couldn't be read again, so it may be out of date. Last read ${whenAtText(at(10, 5))}.`]);
+
+    // The node silent too: one note for both, with the older of the two reads.
+    popup(state, ov({ networkStatus: { nodeStatus: "offline" }, balanceReadAt: at(10, 8) }), { sozuStatus: () => answer() });
+    await settle();
+    expect(notes()).toEqual([`Your stake may be out of date. Last read ${whenAtText(at(10, 2))}.`]);
+  });
+
   it("leaves out an answer from before a switch of wallet, and asks again", async () => {
     const position = { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" };
     const theirs = { ...sozu().status, position: { poolBalanceLux: "5000000000", stDuskBalanceLux: "1600000000" }, pool: sozu().pool };
@@ -1012,6 +1043,40 @@ describe("staking reviews", () => {
     expect(rows()).toEqual(["ToSavings · alice.dusk · Public"]);
   });
 
+  // Lena's: the unstake's Review said "Total up to 0.01 DUSK" for the 0.1 DUSK coming back.
+  it("say what an unstake or a claim brings back, the fee apart and never a total of the fee alone, hidden as the balances are", async () => {
+    const fee = () => body.querySelectorAll(".gas-fee .kv").filter(isShown).map(visibleText);
+    for (const [label, receives] of [
+      ["Unstake", "You receiveabout 2,000 DUSK"],
+      ["Claim rewards", "You receiveabout 42 DUSK"],
+    ]) {
+      popup({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) }, named());
+      button(label).click();
+      await settle();
+      expect(fee()).toEqual(["Network feeup to 0.05 DUSK", receives]);
+      expect(visibleText(body)).not.toContain("Total");
+    }
+    // The stake and its rewards are balances: hidden with them.
+    popup({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) }, ov({ hideBalances: true }));
+    button("Unstake").click();
+    await settle();
+    expect(fee()).toEqual(["Network feeup to 0.05 DUSK", "You receiveabout •••• DUSK"]);
+
+    // From Sozu: what's typed comes back, shown as on every Review; what Max filled in, hidden.
+    const liquid = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ action: "withdraw", position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }) };
+    const app = popup(liquid, ov({ hideBalances: true }));
+    typeInto(field("Unstake amount"), "5");
+    button("Review unstake").click();
+    await settle();
+    expect(fee()).toEqual(["Network feeup to 0.01 DUSK", "You receiveabout 5 DUSK"]);
+    liquid.route = "stake";
+    app.draw();
+    button("Max").click();
+    button("Review unstake").click();
+    await settle();
+    expect(fee()).toEqual(["Network feeup to 0.01 DUSK", "You receiveabout •••• DUSK"]);
+  });
+
   it("name another owner", async () => {
     const state = { route: "stake", staking: staking(owner({ relatedStakes: [related()] })) };
     popup(state, named());
@@ -1215,8 +1280,8 @@ describe("a stake with Sozu in figures", () => {
     });
 
     // Lena's: opened 10 s after an unstake, both lines said "couldn't be read": the archive
-    // lists an unstake's events a little after its block.
-    it("keeps what it said while a new unstake's facts are read, and reads them again till they come", async () => {
+    // lists an unstake's events a little after its block. And the fourth round: no figure from before it meanwhile.
+    it("says it's reading while a new unstake's facts are read, never that they couldn't be, and reads them again till they come", async () => {
       vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
       vi.setSystemTime(Date.UTC(2026, 5, 1, 12, 0, 10));
       const [staked, unstaked] = ["5e".repeat(32), "5f".repeat(32)];
@@ -1228,19 +1293,18 @@ describe("a stake with Sozu in figures", () => {
       const history = [move(staked, "sozu_stake", "100000000000", 4_800_005, Date.UTC(2026, 2, 1, 12)), move(unstaked, "sozu_unstake", "30300000000", 4_800_006, Date.UTC(2026, 5, 1, 12))];
       popup({ route: "stake", staking: staking(owner()), sozu: holding(34_875_000_000n, 71_145_000_000n), activity: activityOf(overview, history) }, overview);
       await vi.waitFor(() => expect(years()).toHaveLength(1));
-      expect(years()[0].join(" ")).not.toContain("couldn't be read");
-      expect(years()[0][1]).toMatch(/^Sozu, grown while held, after deposit fees: [\d.]+ DUSK$/);
+      expect(years()[0]).toEqual(["2026", "Sozu, grown while held, after deposit fees: Reading…"]);
 
       // Astra's: not on the archive yet 20 s on, nor read 20 s after that, as the archive failed: read again all the same.
       await vi.advanceTimersByTimeAsync(20_000);
       await vi.advanceTimersByTimeAsync(0);
-      expect(years()[0].join(" ")).not.toContain("taken out by unstaking");
+      expect(years()[0]).toEqual(["2026", "Sozu, grown while held, after deposit fees: Reading…"]);
       archive.query = async () => {
         throw new Error("archive down");
       };
       await vi.advanceTimersByTimeAsync(20_000);
       await vi.advanceTimersByTimeAsync(0);
-      expect(years()[0].join(" ")).not.toContain("couldn't be read");
+      expect(years()[0]).toEqual(["2026", "Sozu, grown while held, after deposit fees: Reading…"]);
 
       // The archive has the unstake's events now: read again 20 s on, it's there.
       events[4800006] = [{ origin: unstaked, events: [poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), burn(15_000_000_000n)] }];
@@ -1308,6 +1372,75 @@ describe("a stake with Sozu in figures", () => {
       await vi.advanceTimersByTimeAsync(20_000);
       await vi.waitFor(() => expect(years()[0]).toContain("Sozu, taken out by unstaking: 0.2248 DUSK"));
       vi.useRealTimers();
+    });
+
+    // Lena's, the fourth round: the popup closed at Completed and opened again, Rewards by year said the "taken out"
+    // from before her unstake for 20 to 25 s, beside a "grown" that had moved, never that it was reading. The
+    // archive's history lists a transaction once its block is final, a little after; its block's events have it as
+    // the block is accepted, as Completed reads them.
+    describe("its own unstake, just in a block the archive's history doesn't list yet", () => {
+      const [staked, earlier, unstaked] = ["8d".repeat(32), "8e".repeat(32), "8f".repeat(32)];
+      // 100 DUSK staked at 2 with a 0.25 fee: 49.875 stDUSK. 10 of them unstaked at 2.01 in April, 0.0498 over what
+      // they cost; 15 more at 2.02 now, 0.2248 over: 0.2746 taken out. 24.875 left, worth 2.04 each.
+      const final = {
+        4800011: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }],
+        4800012: [{ origin: earlier, events: [poolEvent("unstake", [0n, 20_100_000_000n, 2_010_000_000_000n, 1_000_000_000_000n]), burn(10_000_000_000n)] }],
+      };
+      // Its block's events, as the archive gives an accepted block's.
+      const itsBlock = { 4800013: [{ ...poolEvent("unstake", [0n, 30_300_000_000n, 2_020_000_000_000n, 1_000_000_000_000n]), origin: unstaked }, { ...burn(15_000_000_000n), origin: unstaked }] };
+      const archiveOf = (blocks) => async (text) => ({
+        ...(await archiveWith(final)(text)),
+        ...Object.fromEntries([...String(text).matchAll(/(h\d+): contractEvents\(height: (\d+)\)/g)].map(([, alias, height]) => [alias, { json: blocks[height] ?? [] }])),
+      });
+      const history = () => [move(staked, "sozu_stake", "100000000000", 4_800_011, Date.UTC(2026, 2, 1, 12)), move(earlier, "sozu_unstake", "20100000000", 4_800_012, Date.UTC(2026, 3, 1, 12))];
+      // As the wallet keeps it once its watcher heard it in its block: what it asked the pool for, and the block.
+      const own = { hash: unstaked, kind: "contract_call", contractId: PILOT, fnName: "sozu_unstake", amount: "30300000000", status: "executed", blockHeight: "4800013", profileIndex: 0, submittedAt: Date.UTC(2026, 5, 1, 12), executedAt: Date.UTC(2026, 5, 1, 12, 0, 5), nodeUrl: "https://testnet.nodes.dusk.network", origin: "Wallet", asset: { kind: "sozu", action: "sozu_unstake", pool: PILOT } };
+      const before = [["2026", "Sozu, grown while held, after deposit fees: 0.6475 DUSK", "Sozu, taken out by unstaking: 0.0498 DUSK"]];
+      const after = [["2026", "Sozu, grown while held, after deposit fees: 1.145 DUSK", "Sozu, taken out by unstaking: 0.2746 DUSK"]];
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+        vi.setSystemTime(Date.UTC(2026, 5, 1, 12, 0, 10));
+      });
+
+      it("counts it at once, from its block's events, in a popup opened again at Completed", async () => {
+        archive.query = archiveOf(itsBlock);
+        const overview = ov({ txs: [own] });
+        popup({ route: "stake", staking: staking(owner()), sozu: holding(24_875_000_000n, 50_745_000_000n), activity: activityOf(overview, history()) }, overview);
+        // Nothing waited for: no time has passed.
+        await vi.waitFor(() => expect(years()).toEqual(after));
+        vi.useRealTimers();
+      });
+
+      it("counts it at once in a popup left open, once its status says it's in its block", async () => {
+        archive.query = archiveOf(itsBlock);
+        const overview = ov({ txs: [] });
+        // Held before: 39.875 stDUSK, worth 2.02 each now.
+        const state = { route: "stake", staking: staking(owner()), sozu: holding(39_875_000_000n, 80_547_500_000n), activity: activityOf(overview, history()) };
+        const app = popup(state, overview);
+        await vi.waitFor(() => expect(years()).toEqual(before));
+        // It goes through: the wallet's record of it, its status read again, and the page told (app.js).
+        overview.txs.push(own);
+        Object.assign(state.sozu, holding(24_875_000_000n, 50_745_000_000n));
+        readStakingAgain(state);
+        app.draw();
+        await vi.waitFor(() => expect(years()).toEqual(after));
+        vi.useRealTimers();
+      });
+
+      it("says it's reading what the unstake moves till its block's events are read, a few seconds on, never the figures from before it", async () => {
+        const blocks = {};
+        archive.query = archiveOf(blocks);
+        const overview = ov({ txs: [own] });
+        popup({ route: "stake", staking: staking(owner()), sozu: holding(24_875_000_000n, 50_745_000_000n), activity: activityOf(overview, history()) }, overview);
+        await vi.waitFor(() => expect(years()).toEqual([["2026", "Sozu, grown while held, after deposit fees: Reading…", "Sozu, taken out by unstaking: Reading…"]]));
+        // How both are counted stays said meanwhile.
+        expect(visibleText(body.querySelector(".stake-years-counted"))).toContain("average cost");
+        // The archive has its block's events a moment on: read again within seconds, not 20.
+        Object.assign(blocks, itsBlock);
+        await vi.advanceTimersByTimeAsync(3_000);
+        await vi.waitFor(() => expect(years()).toEqual(after));
+        vi.useRealTimers();
+      });
     });
 
     // Astra's: rewards accrued, the holding worth more for the same stDUSK, and the year's growth stayed as it was.
@@ -1650,7 +1783,8 @@ describe("liquid staking", () => {
     await settle();
     editor = body.querySelector("dusk-gas-editor");
     expect(String(editor.minLimit)).toBe("4000000");
-    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.01 DUSKTotalup to 0.01 DUSK");
+    // Lena's: "Total up to 0.01 DUSK" for the 5 coming back. What comes back, the fee apart.
+    expect(visibleText(body.querySelector(".gas-fee"))).toBe("Network feeup to 0.01 DUSKYou receiveabout 5 DUSK");
     button("Confirm").click();
     await settle();
     expect(sentGas(app)).toEqual({ limit: "10000000", price: "1" });

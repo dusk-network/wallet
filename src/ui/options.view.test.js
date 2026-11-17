@@ -280,6 +280,11 @@ describe("profile names", () => {
         await name(2, `sofiadesign${point}dusk`);
         expect([shownError(2), question(2)], point).toEqual(["That looks like sofiadesign.dusk, which belongs to another account. Choose another name.", []]);
       }
+      // R12, Marek's, the round after that again: a dot above, a Braille dot, and a middle dot with a space went by.
+      for (const typed of ["sofiadesign\u02d9dusk", "sofiadesign\u2804dusk", "sofiadesign\u00b7 dusk", "sofiadesign \u00b7 dusk"]) {
+        await name(2, typed);
+        expect([shownError(2), question(2)], typed).toEqual(["That looks like sofiadesign.dusk, which belongs to another account. Choose another name.", []]);
+      }
       expect(setAccountName).not.toHaveBeenCalled();
       // This profile's own: saved, nothing asked.
       await name(2, "mine.dusk");
@@ -622,7 +627,31 @@ describe("settings", () => {
     expect(view.actions.send).not.toHaveBeenCalled();
     finger().click();
     await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_RESET_WALLET", password: "the password" }));
-    expect(asked.filter((action) => action !== "status")).toEqual(["unlock", "disable"]);
+    // The password box focused as the screen opened, the keyboard up (R14), then the fingerprint as asked.
+    expect(asked[asked.findIndex((action) => action !== "status")]).toBe("keyboard");
+    expect(asked.filter((action) => action !== "status" && action !== "keyboard")).toEqual(["unlock", "disable"]);
+  });
+
+  // Chen's, Lena's and Sofía's, in the app: on Unlock, Check your recovery words and Reset wallet the password box
+  // wasn't focused, and the keyboard stayed down till it was tapped.
+  it("focuses the password box with the keyboard up as Check your recovery words and Reset wallet open, in the app", async () => {
+    const asked = [];
+    dom.window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (cmd, args) => {
+        if (cmd === "fingerprint") asked.push(args.action);
+        return cmd === "fingerprint" && args.action === "status" ? { ok: true, available: true, on: false } : { ok: true };
+      }),
+    };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const view = await settings({}, { app: true });
+    const { checkWordsView, resetWalletView } = await import("./popup/views/wallets.js");
+    for (const screen of [checkWordsView, resetWalletView]) {
+      asked.length = 0;
+      dom.document.body.replaceChildren(...screen(view.ov, { state: view.state, actions: view.actions }));
+      const password = dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with");
+      await vi.waitFor(() => expect(dom.document.activeElement).toBe(password));
+      await vi.waitFor(() => expect(asked).toContain("keyboard"));
+    }
   });
 
   it("starts each switch of profile, network or wallet before asking the wallet, so a check begun before it can tell", async () => {
@@ -1226,8 +1255,54 @@ describe("security in the app on a phone", () => {
     await settle();
     expect(body.querySelectorAll(".srp-word-text").map((w) => w.textContent)).toEqual(MNEMONIC.split(" "));
     expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RECOVERY_PHRASE", password: "the password" });
+    // Marek's: words in clear stayed in Android's app switcher and Firefox's tab list. Hidden the moment the page is
+    // hidden, left or loses the focus, and with Hide; shown again only with Reveal.
+    const blurred = () => body.querySelector(".srp-grid").classList.contains("srp-grid--blur");
+    expect([blurred(), body.querySelectorAll("button").map((b) => b.textContent)]).toEqual([false, ["← Back", "Hide", "Done"]]);
+    for (const away of [
+      () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      },
+      () => dom.window.dispatchEvent(fakeEvent("pagehide")),
+      () => dom.window.dispatchEvent(fakeEvent("blur")),
+      () => press("Hide"),
+    ]) {
+      dom.document.visibilityState = "visible";
+      away();
+      expect([blurred(), body.querySelectorAll("button").map((b) => b.textContent)]).toEqual([true, ["← Back", "Reveal", "Done"]]);
+      dom.document.visibilityState = "visible";
+      dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      dom.window.dispatchEvent(fakeEvent("focus"));
+      expect(blurred()).toBe(true);
+      press("Reveal");
+      expect(blurred()).toBe(false);
+    }
     press("Done");
     expect(view.state.route).toBe("options");
+  });
+
+  // Marek's: in Firefox for Android the app switcher took its picture before the page heard it was leaving.
+  it("shows the recovery phrase in Firefox for Android only while Hold to show words is held", async () => {
+    const view = await settings();
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_RECOVERY_PHRASE" ? { ok: true, result: MNEMONIC } : {}));
+    const { recoveryPhraseView } = await import("./popup/views/wallets.js");
+    dom.document.body.replaceChildren(...recoveryPhraseView(view.ov, { state: view.state, actions: view.actions }));
+    const body = dom.document.body;
+    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "the password");
+    body.querySelectorAll("button").find((b) => b.textContent === "Show recovery phrase").click();
+    await settle();
+    const blurred = () => body.querySelector(".srp-grid").classList.contains("srp-grid--blur");
+    const hold = body.querySelectorAll("button").find((b) => b.textContent === "Hold to show words");
+    expect(blurred()).toBe(true);
+    hold.click();
+    expect(blurred()).toBe(true);
+    hold.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 1 }));
+    expect(blurred()).toBe(false);
+    hold.dispatchEvent(fakeEvent("pointercancel", { pointerId: 1 }));
+    expect(blurred()).toBe(true);
   });
 
   // Amélie's, the seventh time: a way to check the paper, typing the words and hearing they match. Then

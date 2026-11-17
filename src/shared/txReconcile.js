@@ -3,8 +3,8 @@
 // background's watcher events and rechecks, and the app's (localBus.js).
 
 import { getSettings } from "./settings.js";
-import { classifyTxPresence, finalizedTxMetadata } from "./txLifecycle.js";
-import { getTxEpoch, getTxMeta, patchTxMeta as patchStored } from "./txStore.js";
+import { classifyTxPresence, finalizedTxMetadata, handedOverState } from "./txLifecycle.js";
+import { forgetTxs, getTxEpoch, getTxMeta, patchTxMeta as patchStored } from "./txStore.js";
 
 export function isShieldedTxMeta(meta) {
   return (
@@ -34,6 +34,19 @@ export async function reconcileTxPresence(hash, { preserveRemoved = false, epoch
   const terminalStatus = meta?.status === "executed" || meta?.status === "failed"
     ? meta.status
     : "";
+  // Not sent, as another of its account's transactions took its nonce: it
+  // never will go, and it's said so for good (Astra's: looked up again, it
+  // went back to "Not confirmed yet" for good).
+  if (meta.status === "not_sent") {
+    await patchTxMeta(hash, { lastCheckedAt: now });
+    return { status: "not_sent", origin, nodeUrl };
+  }
+  // Don't send, on one handed over with no clear answer (`dontSendAt`): it may
+  // still arrive, and is followed till its nonce is used. Used by it, it went
+  // after all, Sent, as the store marks it as its outcome's written
+  // (`wentAfterAll`, txStore.js), the page told so once; by another, it never
+  // will, and its record goes.
+  const afterAll = (stored) => (stored?.wentAfterAll && !meta.wentAfterAll ? { wentAfterAll: true } : {});
 
   if (!nodeUrl && terminalStatus) {
     await patchTxMeta(hash, { lastCheckedAt: now });
@@ -63,7 +76,7 @@ export async function reconcileTxPresence(hash, { preserveRemoved = false, epoch
   if (presence.state === "executed_success") {
     const finalized = finalizedTxMetadata(presence.tx);
     const failed = terminalStatus === "failed";
-    await patchTxMeta(hash, {
+    const stored = await patchTxMeta(hash, {
       ...finalized,
       status: failed ? "failed" : "executed",
       error: failed ? meta?.error : undefined,
@@ -79,12 +92,13 @@ export async function reconcileTxPresence(hash, { preserveRemoved = false, epoch
       nodeUrl,
       error: failed ? meta?.error || "" : "",
       ...finalized,
+      ...afterAll(stored),
     };
   }
 
   if (presence.state === "executed_failed") {
     const finalized = finalizedTxMetadata(presence.tx);
-    await patchTxMeta(hash, {
+    const stored = await patchTxMeta(hash, {
       ...finalized,
       status: "failed",
       error: presence.error || undefined,
@@ -100,6 +114,7 @@ export async function reconcileTxPresence(hash, { preserveRemoved = false, epoch
       nodeUrl,
       error: presence.error || "",
       ...finalized,
+      ...afterAll(stored),
     };
   }
 
@@ -125,7 +140,39 @@ export async function reconcileTxPresence(hash, { preserveRemoved = false, epoch
     return { status: "mempool", origin, nodeUrl };
   }
 
+  if (presence.state === "not_found" && meta.dontSendAt) {
+    const where = meta.account && /^\d+$/.test(String(meta.nonce ?? ""))
+      ? (await handedOverState(nodeUrl, { hash, account: meta.account, nonce: meta.nonce, at: meta.submittedAt }).catch(() => null))?.state
+      : null;
+    if (where === "replaced") {
+      await forgetTxs([hash], { epoch });
+      return { status: "not_sent", origin, nodeUrl };
+    }
+    await patchTxMeta(hash, { lastCheckedAt: now });
+    return { status: meta.status, origin, nodeUrl };
+  }
+
   if (presence.state === "not_found") {
+    // A public send handed over without a clear answer, kept as it was signed
+    // (txRecord.js signedTxFields): nowhere and its nonce unused, the node
+    // never had it, and it's Not sent yet, which Send it now sends again as it
+    // is; the account's transaction at its nonce another, it never will go
+    // (Chen's: "Not confirmed yet" for good, with nothing to tap, though the
+    // node never had it). Its nonce gone past it, nothing seen at it yet, it's
+    // looked up again as before.
+    const unsent = meta?.signedTx && meta?.account && /^\d+$/.test(String(meta?.nonce ?? ""))
+      ? (await handedOverState(nodeUrl, { hash, account: meta.account, nonce: meta.nonce, at: meta.submittedAt }).catch(() => null))?.state
+      : null;
+    if (unsent === "absent" || unsent === "replaced") {
+      const status = unsent === "absent" ? "unsent" : "not_sent";
+      await patchTxMeta(hash, {
+        status,
+        lastCheckedAt: now,
+        recoveryReason: unsent === "absent" ? "not_reached" : "replaced",
+        ...(unsent === "replaced" ? { signedTx: undefined } : {}),
+      });
+      return { status, origin, nodeUrl };
+    }
     const confirmedRemoved = preserveRemoved && (
       meta?.recoveryReason === "removed_unconfirmed" || meta?.status === "removed"
     );

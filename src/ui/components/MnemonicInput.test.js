@@ -61,15 +61,86 @@ describe("on a phone", () => {
     expect(words()).toEqual(TWELVE.split(" "));
     expect(input.getMnemonic()).toBe(TWELVE);
 
-    const show = input.el.querySelectorAll("button").find((b) => b.textContent === "Show words");
+    // Marek's: Firefox's app switcher took its picture of words shown before the page heard it was leaving. Shown
+    // read-only only while Hold to show words is held, a tap toggling nothing.
+    const show = input.el.querySelectorAll("button").find((b) => b.textContent === "Hold to show words");
     show.click();
-    expect([new Set(boxes().map(String)), hidden()]).toEqual([new Set(["text,true"]), false]);
-    expect(show.textContent).toBe("Hide words");
-    // Pressed to type in, a box hides them again, and takes what's typed.
-    box(3).dispatchEvent(fakeEvent("pointerdown"));
-    expect([new Set(boxes().map(String)), hidden()]).toEqual([new Set(["text,false"]), true]);
+    expect(hidden()).toBe(true);
+    show.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 1 }));
+    expect([new Set(boxes().map(String)), hidden(), show.getAttribute("aria-pressed")]).toEqual([new Set(["text,true"]), false, "true"]);
+    show.dispatchEvent(fakeEvent("pointerup", { button: 0, pointerId: 1 }));
+    expect([new Set(boxes().map(String)), hidden(), show.getAttribute("aria-pressed"), show.textContent]).toEqual([new Set(["text,false"]), true, "false", "Hold to show words"]);
     typeInto(box(3), "zoo");
     expect(words()[2]).toBe("zoo");
+  });
+
+  it("shows the words in Firefox for Android only while Hold to show words is held, by a finger or a key", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const { input, box } = mount();
+    paste(box(1), TWELVE);
+    const grid = input.el.querySelector(".srp-grid");
+    const show = input.el.querySelectorAll("button").find((b) => b.textContent === "Hold to show words");
+    const seen = () => !grid.classList.contains("is-hidden");
+    for (const [press, letGo] of [
+      [{ type: "pointerdown", button: 0, pointerId: 1 }, { type: "pointerup" }],
+      // A scroll or a call takes the press away.
+      [{ type: "pointerdown", button: 0, pointerId: 2 }, { type: "pointercancel" }],
+      [{ type: "keydown", key: " " }, { type: "keyup", key: " " }],
+      [{ type: "keydown", key: "Enter" }, { type: "blur" }],
+      [{ type: "pointerdown", button: 0, pointerId: 3 }, { page: () => dom.window.dispatchEvent(fakeEvent("blur")) }],
+      [{ type: "pointerdown", button: 0, pointerId: 4 }, { page: () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      } }],
+    ]) {
+      dom.document.visibilityState = "visible";
+      const { type, ...props } = press;
+      show.dispatchEvent(fakeEvent(type, props));
+      expect(seen()).toBe(true);
+      if (letGo.page) letGo.page();
+      else {
+        const { type: up, ...rest } = letGo;
+        show.dispatchEvent(fakeEvent(up, rest));
+      }
+      expect(seen()).toBe(false);
+    }
+    // Its long press is the hold, never the browser's menu.
+    const menu = fakeEvent("contextmenu");
+    show.dispatchEvent(menu);
+    expect(menu.defaultPrevented).toBe(true);
+  });
+
+  // Marek's: with Show words on, Firefox's tab list and Android's app switcher kept a picture of the twelve words in clear.
+  it("hides shown words again the moment the page is hidden, left or loses the focus, till Show words again", () => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 (Linux; Android 15; sdk_gphone64_x86_64 Build/AE3A.240806.036; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/141.0.7390.122 Mobile Safari/537.36",
+    });
+    dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+    const { input, box } = mount();
+    const grid = input.el.querySelector(".srp-grid");
+    const show = input.el.querySelectorAll("button").find((b) => b.textContent === "Show words");
+    const seen = () => [!grid.classList.contains("is-hidden"), show.textContent, show.getAttribute("aria-pressed")];
+    paste(box(1), TWELVE);
+    for (const away of [
+      () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      },
+      () => dom.window.dispatchEvent(fakeEvent("pagehide")),
+      () => dom.window.dispatchEvent(fakeEvent("blur")),
+    ]) {
+      dom.document.visibilityState = "visible";
+      show.click();
+      expect(seen()).toEqual([true, "Hide words", "true"]);
+      away();
+      expect(seen()).toEqual([false, "Show words", "false"]);
+      // Back in sight: still hidden, till Show words.
+      dom.document.visibilityState = "visible";
+      dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      dom.window.dispatchEvent(fakeEvent("focus"));
+      expect(seen()).toEqual([false, "Show words", "false"]);
+    }
+    expect(input.getMnemonic()).toBe(TWELVE);
   });
 
   // In the Android app the words went in text boxes its keyboard learns from: ime-mode is Firefox's alone.

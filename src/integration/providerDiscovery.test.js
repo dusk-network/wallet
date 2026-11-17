@@ -116,6 +116,40 @@ describe("integration: inpage provider discovery", () => {
     expect(announcements[0].info.uuid).not.toBe(DUSK_WALLET_ID);
   });
 
+  // Marek's, after M16 (round 32): a balance request with another account under "__proto__", given as an object or
+  // as JSON, was answered with the connected profile's own balance. Posting the request copies its own fields
+  // only, so the wallet got {} and never saw the prototype: it's refused here, on the page's own object.
+  it("refuses a request whose parameters carry a prototype or a __proto__ key, in every shape, posting nothing", async () => {
+    const window = await runInpageScript();
+    const P2 = "24ZKdvP2account";
+    const proto = (fields) => Object.setPrototypeOf({}, fields);
+    const shapes = [
+      // As a page's literal sets it, and as a test's transport hands it in: on the prototype.
+      proto({ address: P2 }),
+      proto({ profileId: `account:1:${P2}` }),
+      // As JSON.parse and a computed key make it: an own "__proto__" key.
+      JSON.parse(`{"__proto__":{"profileId":"account:1:${P2}"}}`),
+      { ["__proto__"]: { address: P2 } },
+      JSON.parse(`[{"__proto__":{"account":"${P2}"}}]`),
+      [proto({ account: P2 })],
+      { account: proto({ toString: () => P2 }) },
+      Object.create(null, { account: { value: P2, enumerable: true }, [Symbol("profileId")]: { value: P2, enumerable: true } }),
+    ];
+    for (const params of shapes) {
+      const before = window.posted.length;
+      await expect(window.duskWallet.request({ method: "dusk_getPublicBalance", params })).rejects.toMatchObject({
+        code: -32602,
+        message: "The request's parameters must be plain data.",
+      });
+      expect(window.posted.slice(before).filter((entry) => entry.msg?.type === "DUSK_RPC_REQUEST")).toEqual([]);
+    }
+    // Plain data still goes, with nothing at all, or the account alone.
+    for (const params of [undefined, null, {}, { account: "26dtBfP1account" }, ["26dtBfP1account"], Object.create(null)]) {
+      window.duskWallet.request({ method: "dusk_getPublicBalance", params });
+      expect(lastRpcRequest(window).request).toEqual({ method: "dusk_getPublicBalance", params });
+    }
+  });
+
   it("deduplicates equivalent profilesChanged payloads", async () => {
     const window = await runInpageScript();
     const events = [];

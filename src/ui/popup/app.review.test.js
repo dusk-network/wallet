@@ -634,7 +634,13 @@ describe("a request's Send", () => {
     const question = () => t.dom.document.querySelector("[role=alertdialog]");
     history.back();
     await flush();
-    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.StayLeave");
+    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.LeaveStay");
+    // Amélie's and Chen's: Leave was the wide pink button under the thumb. Stay is the main one, with the focus.
+    expect([...question().querySelectorAll("button")].map((b) => [b.textContent, b.className])).toEqual([
+      ["Leave", "btn-outline"],
+      ["Stay", "btn-primary"],
+    ]);
+    expect(t.dom.document.activeElement.textContent).toBe("Stay");
     // The question's own Back is Stay: the payment stays.
     history.back();
     await flush();
@@ -934,6 +940,40 @@ describe("coming back to the wallet during a payment", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // Astra's, as the web wallet does it: Don't send, on one whose hand-over had no clear answer, forgot it, saying
+  // nothing left the wallet, though it might still arrive. It's followed by its ID while the wallet shows, whatever
+  // its age, and listed nowhere meanwhile; once it went after all, it's listed as Sent, and said so.
+  it("follows a send chosen not to be sent, listing it nowhere, and says so once it went after all", async () => {
+    const HASH = "9e".repeat(32);
+    let arrived = false;
+    const record = { hash: HASH, kind: "transfer", privacy: "public", to: TO, amount: "10000000", status: "unsent", dontSendAt: Date.now() - 60_000, submittedAt: Date.now() - 2 * 60 * 60_000, account: A, nonce: "7", nodeUrl: "https://testnet.nodes.dusk.network", walletId: A, profileIndex: 0, source: "sent", origin: "Wallet" };
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, async (message, t) => {
+      if (message.type === "DUSK_UI_RECHECK_TX" && message.hash === HASH) {
+        if (!arrived) return { ok: true, result: { status: "unsent" } };
+        t.open = { ...t.open, txs: [{ ...record, status: "executed", dontSendAt: undefined, wentAfterAll: Date.now() }] };
+        return { ok: true, result: { status: "executed", wentAfterAll: true } };
+      }
+      return undefined;
+    });
+    const toast = () => t.dom.document.body.querySelector(".toast")?.textContent ?? "";
+    const back = async () => {
+      t.dom.document.visibilityState = "visible";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      await flush();
+    };
+    t.open = { ...t.open, txs: [record] };
+    await t.render({ forceRefresh: true });
+    await flush();
+    expect(t.app.textContent).not.toContain("Not sent yet");
+    await back();
+    expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
+    expect(toast()).not.toContain("after all");
+    arrived = true;
+    await back();
+    expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH, HASH]);
+    await vi.waitFor(() => expect(toast()).toContain("A payment you chose not to send went out after all."));
   });
 
   it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
@@ -1668,16 +1708,47 @@ describe("a payment link that opens the app before there's a wallet in it", () =
     return note ? visibleText(note) : "";
   };
 
-  it("says on the setup screen that a payment link waits, to set up or import a wallet to pay it, or open it in the browser", async () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("says on the setup screen that a payment link waits, for which network and since when, to set up or import a wallet to pay it, or open it in the browser", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 17, 7, 2));
     const { t } = await opened(WEB, { open_in_browser: true });
     expect(t.state.route).toBe("onboard_welcome");
-    expect(waiting(t)).toBe("A payment link is waitingSet up or import a wallet to pay it.Open in browser instead");
+    // Chen's: it didn't say Testnet; Sofía's: nor when it was opened.
+    expect(waiting(t)).toBe("A payment link is waitingFor Testnet, opened at 07:02. Set up or import a wallet to pay it.Open in browser instead");
     expect(t.state.draft).toMatchObject({ to: B, memo: "Les tulipes", linkSetup: true });
     // Open in browser instead: handed to the phone's browser, never to the app, which Android gives these links to.
     t.app.querySelectorAll("button").find((b) => b.textContent === "Open in browser instead").click();
     await flush();
     expect(t.dom.window.__TAURI_INTERNALS__.invoke).toHaveBeenCalledWith("open_in_browser", { url: WEB }, undefined);
     expect([waiting(t), t.state.draft]).toEqual(["", null]);
+  });
+
+  // Sofía's: another's link, opened on the shared phone, filled Send in right after her Import eleven minutes on, with
+  // no time; and again with her own after Reset.
+  it("says on Send when it was opened once the wallet's made within ten minutes, and goes past them", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (const [minutes, shown] of [
+      [8, "Filled in from the link, to pay on Testnet. Check it before you send. From a link opened at 07:02."],
+      [11, null],
+    ]) {
+      vi.setSystemTime(new Date(2026, 10, 17, 7, 2));
+      const { t } = await opened(WEB);
+      expect(t.state.draft).toMatchObject({ linkSetup: true });
+      // The wallet made: Send, the link's, as the setup leaves it.
+      vi.setSystemTime(new Date(2026, 10, 17, 7, 2 + minutes));
+      t.send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? { ...t.open, nodeUrl: "https://testnet.nodes.dusk.network" } : message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { ok: true, result: { min: "1", median: "1", max: "1" } } : { ok: true, result: null }));
+      t.state.route = "send";
+      await t.render({ forceRefresh: true });
+      await flush();
+      if (shown) {
+        expect(t.state.route).toBe("send");
+        expect(t.app.querySelector(".send-filled-note")?.textContent).toBe(shown);
+      } else {
+        expect([t.state.route, t.state.draft]).toEqual(["home", null]);
+      }
+    }
   });
 
   it("offers a dusk: link to the browser as its web wallet's link", async () => {
@@ -1825,7 +1896,7 @@ describe("the phone's Back in the app, as Android hands it over", () => {
       await flush();
     };
     await back();
-    expect([t.state.route, visibleText(question())]).toEqual(["send", "Leave this payment?This clears the payment the link filled in.StayLeave"]);
+    expect([t.state.route, visibleText(question())]).toEqual(["send", "Leave this payment?This clears the payment the link filled in.LeaveStay"]);
     // Back on the question: Stay.
     await back();
     expect([question(), t.state.route, ...values()]).toEqual([null, "send", B, "0.04", "laksa"]);
@@ -1871,11 +1942,107 @@ describe("a request link handed to the wallet's tab open already", () => {
 
     history.back();
     await flush();
-    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.StayLeave");
+    expect(visibleText(question())).toBe("Leave this payment?This clears the payment the link filled in.LeaveStay");
     // The question's own Back is Stay.
     history.back();
     await flush();
     expect([question(), t.state.route, ...values(), history.closed]).toEqual([null, "send", B, "0.02", "popiah", false]);
+  });
+});
+
+// Marek's and Amélie's: in Firefox for Android a pull down at the top of the page reloaded the wallet's tab, and the
+// payment a link filled in went without a word, as did a half-filled request; after it, Back no longer asked.
+describe("a wallet tab that reloads", () => {
+  // The tab's session as a reload keeps it: its history's entries, each with its state, and its session storage.
+  function tabSession() {
+    const kept = new Map();
+    const entries = [null];
+    let at = 0;
+    let win = null;
+    const history = {
+      closed: false,
+      get state() {
+        return entries[at];
+      },
+      get at() {
+        return at;
+      },
+      pushState(state) {
+        entries.splice(at + 1, Infinity, state);
+        at++;
+      },
+      back() {
+        this.go(-1);
+      },
+      go(delta) {
+        if (at + delta < 0) {
+          this.closed = true;
+          return;
+        }
+        at += delta;
+        setTimeout(() => win.dispatchEvent(fakeEvent("popstate", { state: entries[at] })), 0);
+      },
+    };
+    return {
+      history,
+      kept,
+      // The page loaded in it: pressed in before, or, just reloaded, not.
+      page: (pressed) => (w) => {
+        win = w;
+        w.navigator = { userActivation: { isActive: false, hasBeenActive: pressed } };
+        vi.stubGlobal("sessionStorage", { getItem: (key) => kept.get(key) ?? null, setItem: (key, value) => kept.set(key, String(value)), removeItem: (key) => kept.delete(key) });
+        return history;
+      },
+    };
+  }
+  const values = (t) => ["To", "Amount", "Memo"].map((name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name)?.value);
+  const question = (t) => t.dom.document.querySelector("[role=alertdialog]");
+
+  it("opens again on a link's payment, and the phone's Back still asks before it goes", async () => {
+    const { makePaymentLink } = await import("@dusk-network/app-core/payment-links");
+    const link = makePaymentLink({ amount: "0.02", memo: "popiah", network: "testnet", to: B }).https;
+    const tab = tabSession();
+    let t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: tab.page(true), tab: { id: 7 } });
+    t.deliver({ type: "DUSK_UI_OPEN_LINK", tabId: 7, link }, {}, vi.fn());
+    await flush();
+    expect([t.state.route, ...values(t), tab.history.at]).toEqual(["send", B, "0.02", "popiah", 2]);
+
+    // Pulled down: the page goes, and loads again in the same tab, with nothing pressed in it.
+    t.dom.window.dispatchEvent(fakeEvent("pagehide"));
+    t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: tab.page(false), tab: { id: 7 } });
+    expect([t.state.route, ...values(t), tab.history.at]).toEqual(["send", B, "0.02", "popiah", 2]);
+    expect(t.app.textContent).toContain("Filled in from the link");
+    tab.history.back();
+    await flush();
+    expect(visibleText(question(t))).toBe("Leave this payment?This clears the payment the link filled in.LeaveStay");
+    // The question's own Back is Stay.
+    tab.history.back();
+    await flush();
+    expect([question(t), t.state.route, ...values(t), tab.history.closed]).toEqual([null, "send", B, "0.02", "popiah", false]);
+  });
+
+  it("opens again on the request form as it was being filled in, and on Home once it was left", async () => {
+    const tab = tabSession();
+    const { typeInto } = await import("../testing/fakeDom.js");
+    let t = await popupOn("receive", { addressBook: { loaded: true, items: [] }, receive: null }, undefined, { history: tab.page(true), tab: { id: 7 } });
+    t.state.receive.requestOpen = true;
+    await t.render();
+    await flush();
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    typeInto(field("Amount"), "0.5");
+    typeInto(field("Memo"), "Rent March");
+    await vi.waitFor(() => expect(t.app.querySelector(".receive-request__meta")?.textContent).toBe("0.5 DUSK"));
+    t.dom.window.dispatchEvent(fakeEvent("pagehide"));
+
+    t = await popupOn("home", { addressBook: { loaded: true, items: [] }, receive: null }, undefined, { history: tab.page(false), tab: { id: 7 } });
+    expect([t.state.route, field("Amount")?.value, field("Memo")?.value, t.app.querySelector("details.receive-request")?.open]).toEqual(["receive", "0.5", "Rent March", true]);
+
+    // Left for Home, then reloaded: Home.
+    t.state.route = "home";
+    await t.render();
+    t.dom.window.dispatchEvent(fakeEvent("pagehide"));
+    t = await popupOn("home", { addressBook: { loaded: true, items: [] }, receive: null }, undefined, { history: tab.page(false), tab: { id: 7 } });
+    expect(t.state.route).toBe("home");
   });
 });
 
@@ -1934,6 +2101,37 @@ describe("a field typed in while the wallet draws its screen again", () => {
     expect(t.app.textContent).toContain("Nothing in your activity matches that.");
   });
 
+  // Sofía's, in the app: the export's dates closed by themselves within seconds, as polls drew the page again, and her
+  // next taps landed on the page under them.
+  it("stays a list or a date whose picker may be open, till it's left; the screen follows then", async () => {
+    const t = await popupOn("activity", { addressBook: { loaded: true, items: [] }, activityExport: { open: true, period: "dates", withContacts: false } });
+    for (const selector of ["#activity-export-from", "#activity-export-period"]) {
+      const field = t.app.querySelector(selector);
+      expect(field).toBeTruthy();
+      field.focus();
+      await t.render({ forceRefresh: true });
+      await t.render({ forceRefresh: true });
+      await flush();
+      expect([t.app.querySelector(selector), t.dom.document.activeElement]).toEqual([field, field]);
+      // Left: drawn again.
+      field.blur();
+      await vi.waitFor(() => expect(t.app.querySelector(selector)).not.toBe(field), { timeout: 3000 });
+    }
+  });
+
+  // Astra's, the second time: Period's own choice, Choose dates, showed no days till something else was focused, as
+  // a list keeps the focus once its picker closes. A choice made in it closes it: what it asks for is drawn at once.
+  it("draws what a choice in a list asks for at once, the choice having closed its picker", async () => {
+    const t = await popupOn("activity", { addressBook: { loaded: true, items: [] }, activityExport: { open: true, period: "all", withContacts: false } });
+    const period = t.app.querySelector("#activity-export-period");
+    expect(t.app.querySelector("#activity-export-from")).toBeNull();
+    period.focus();
+    period.value = "dates";
+    period.dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(t.app.querySelector("#activity-export-from")).toBeTruthy(), { timeout: 3000 });
+    expect(t.app.querySelector("#activity-export-period").value).toBe("dates");
+  });
+
   it("is drawn again at once on another wallet or a lock, typed in or not", async () => {
     const t = await popupOn("activity", { addressBook: { loaded: true, items: [] } });
     const field = t.app.querySelector(".activity-search");
@@ -1944,5 +2142,31 @@ describe("a field typed in while the wallet draws its screen again", () => {
     await t.render({ forceRefresh: true });
     await flush();
     expect(t.app.contains(field)).toBe(false);
+  });
+});
+
+// Lena's: held as her account sent something else meanwhile, Activity didn't list what it sent for 1 to 3 minutes.
+describe("a payment held as its account sent something else while it waited", () => {
+  it("has the account's history read again as the hold comes, so Activity can list what it sent", async () => {
+    // The archive, asked where the account's history stands, as each read of it begins.
+    const asked = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, init) => {
+      if (String(init?.body ?? "").includes("lastBlockPair")) asked.push(String(url));
+      return new Response(JSON.stringify({}), { status: 200 });
+    }));
+    // The history kept on this device.
+    const { IDBFactory, IDBKeyRange } = await import("fake-indexeddb");
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] } });
+    await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0));
+    await vi.waitFor(() => expect(t.state.activity.syncing).toBeFalsy());
+    await flush();
+    asked.length = 0;
+    t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: true });
+    await flush();
+    expect(asked).toEqual([]);
+    t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
+    await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0));
   });
 });

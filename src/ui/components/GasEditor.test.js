@@ -151,6 +151,26 @@ describe("fee editor", () => {
     expect(editor.readOverrideGas(base)).toBeNull();
   });
 
+  // Lena's: an unstake's Review said "Total up to 0.01 DUSK" for the 0.1 DUSK coming back.
+  it("says what comes back as what you receive, the fee apart, whatever the gas, and nothing of an amount not known", () => {
+    const editor = dom.document.createElement("dusk-gas-editor");
+    editor.comesBack = true;
+    editor.amountLux = "100000000";
+    editor.setGas({ limit: "10000000", price: "1" });
+    dom.document.body.appendChild(editor);
+    const rows = () => editor.querySelectorAll(".gas-fee .kv").filter(isShown).map(visibleText);
+    expect(rows()).toEqual(["Network feeup to 0.01 DUSK", "You receiveabout 0.1 DUSK"]);
+    // Gas that won't do has no fee; what comes back is the same.
+    typeInto(editor.querySelectorAll("input").find((i) => accessibleName(i) === "Gas price (LUX)"), "0");
+    expect(rows()).toEqual(["Network fee—", "You receiveabout 0.1 DUSK"]);
+    // Hidden as the balance it is.
+    editor.hideTotal = true;
+    editor.amountLux = "100000000";
+    expect(rows()).toEqual(["Network fee—", "You receiveabout •••• DUSK"]);
+    editor.amountLux = "0";
+    expect(rows()).toEqual(["Network fee—"]);
+  });
+
   it("rounds the fee and the total up, as the maximums they are", () => {
     const editor = dom.document.createElement("dusk-gas-editor");
     editor.amountLux = "1000000000";

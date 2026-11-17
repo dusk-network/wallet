@@ -333,15 +333,19 @@ export function activityExportPanel(ov, { state, actions }) {
     [{ value: "all", text: "All activity" }, ...quarterChoices(), { value: "dates", text: "Choose dates" }].map(({ value, text }) => h("option", { value, text }))
   );
   periodSelect.value = period;
+  // A day chosen, by a phone's picker too (change): kept, and once both are
+  // chosen, what was said of a missing one goes (Sofía's: "Choose both days."
+  // stayed after both were set).
   const dateField = (id, label, key) => {
-    const input = h("input", {
-      type: "date",
-      id,
-      value: ex[key] ?? "",
-      oninput: (e) => {
-        ex[key] = String(e?.target?.value ?? "");
-      },
-    });
+    const chosen = (e) => {
+      ex[key] = String(e?.target?.value ?? "");
+      if (ex.error && ex.from && ex.to) {
+        ex.error = "";
+        error.textContent = "";
+        error.hidden = true;
+      }
+    };
+    const input = h("input", { type: "date", id, value: ex[key] ?? "", oninput: chosen, onchange: chosen });
     return h("div", { class: "activity-export-date" }, [fieldLabel(input, label), input]);
   };
   const error = h("div", { class: "field-error", role: "alert", hidden: !ex.error, text: ex.error ?? "" });

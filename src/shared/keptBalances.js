@@ -68,8 +68,9 @@ export async function keptBalancesOf(place) {
 /**
  * The parts of an overview that couldn't be read now, filled in from what's
  * kept, each said to be maybe out of date (`balanceStale`, `shieldedStale`,
- * `stakeStale`) with when it was read (`balanceReadAt`). What was read now
- * is kept for next time.
+ * `stakeStale`) with when it was read (`balanceReadAt`, `shieldedReadAt`,
+ * `stakeReadAt`), for the note to say. What was read now is kept for next
+ * time.
  * @param {{ nodeUrl: string, account: string }} place
  * @param {{ balance?: object | null, shieldedBalance?: object | null, staked?: object | null }} read
  * @param {{ stakeRead?: boolean }} [opts] - `stakeRead`: false where the stake was asked for and couldn't be read
@@ -81,8 +82,8 @@ export async function withKeptBalances(place, read, { stakeRead = true } = {}) {
   if (!kept) return {};
   const out = {};
   if (!read.balance && kept.balance) Object.assign(out, { balance: kept.balance, balanceStale: true, balanceReadAt: kept.balanceAt });
-  if (!read.shieldedBalance && kept.shieldedBalance) Object.assign(out, { shieldedBalance: kept.shieldedBalance, shieldedStale: true });
-  if (!stakeRead && kept.staked) Object.assign(out, { staked: kept.staked, stakeStale: true });
+  if (!read.shieldedBalance && kept.shieldedBalance) Object.assign(out, { shieldedBalance: kept.shieldedBalance, shieldedStale: true, shieldedReadAt: kept.shieldedBalanceAt });
+  if (!stakeRead && kept.staked) Object.assign(out, { staked: kept.staked, stakeStale: true, stakeReadAt: kept.stakedAt });
   return out;
 }
 

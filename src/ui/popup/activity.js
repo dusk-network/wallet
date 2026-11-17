@@ -884,18 +884,27 @@ export function activityRows(ov, state, whole = null) {
   const ours = a && key && a.key === key ? a : null;
   const { account, profileIndex } = selected(ov);
   const nodeUrl = String(ov?.nodeUrl ?? "");
-  return rowsOf({
+  const sent = Array.isArray(ov?.txs) ? ov.txs : [];
+  const rows = rowsOf({
     account,
     address: ov?.addresses?.[profileIndex],
     arrivals: keptArrivals(),
     nameCall: nameFactsFor(nodeUrl),
     names: ours?.names,
     network: networkForNode(nodeUrl),
-    pending: (Array.isArray(ov?.txs) ? ov.txs : []).map(sentOf),
+    // One chosen not to be sent is listed nowhere while it's followed, and as
+    // Sent once it went after all (txReconcile.js).
+    pending: sent.filter((tx) => !tx?.dontSendAt).map(sentOf),
     // The selected profile's activity; every profile's while locked.
     profileIndex: key ? profileIndex : null,
     public: whole?.entries ?? ours?.entries,
     shielded: whole?.shielded ?? ours?.shielded,
     state: whole?.meta ?? ours?.meta,
   });
+  // A send of the wallet's own the network never had (txReconcile.js): Not
+  // sent yet, or Not sent where another took its place, as its record says,
+  // never Pending, nor Not confirmed (Chen's).
+  const unsent = new Map(sent.filter((tx) => tx?.status === "unsent" || tx?.status === "not_sent").map((tx) => [String(tx.hash ?? "").toLowerCase(), tx.status]));
+  if (!unsent.size) return rows;
+  return rows.map((row) => (row?.source === "sent" && unsent.has(String(row.hash ?? "").toLowerCase()) ? { ...row, status: unsent.get(String(row.hash).toLowerCase()) } : row));
 }

@@ -39,6 +39,7 @@ import {
 
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { asDuskName, closeDuskName, isDuskName } from "@duskdomains/sdk/names";
+import { duskNameLookAlike } from "@dusk-network/app-core/names";
 import {
   duskNameErrorText,
   duskNameRecipient,
@@ -53,7 +54,8 @@ import { forgetRequestLink, pastedRequestNames, readPastedRequest, readRequestLi
 import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
 import { activityRows } from "../activity.js";
-import { whenAtText } from "./txRow.js";
+import { contactNames, theirMemo, whenAtText } from "./txRow.js";
+import { safeText } from "../../../shared/safeText.js";
 import { clockText } from "../../lib/time.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, linkAmount, networkMismatch } from "@dusk-network/app-core/payment-links";
@@ -231,8 +233,9 @@ export function sendFormView(ov, { state, actions } = {}) {
   const clamp0 = (v) => (v > 0n ? v : 0n);
 
   // What payments waiting to go out will take, which Max and Available leave out.
-  const waitingPublicLux = waitingLux(ov, "public");
-  const waitingShieldedLux = waitingLux(ov, "shielded");
+  const instead = String(draft.replaces ?? "");
+  const waitingPublicLux = waitingLux(ov, "public", { except: instead });
+  const waitingShieldedLux = waitingLux(ov, "shielded", { except: instead });
 
   function getMaxAmountLux() {
     if (detectedRecipientType === "address") {
@@ -894,6 +897,22 @@ export function sendFormView(ov, { state, actions } = {}) {
       return;
     }
 
+    // A .dusk name written with another point, a look-alike letter or
+    // something unseen: said as the name it looks like, at once, as it's
+    // typed, with no Review (Sofía's, Lena's, Nandini's: "? Unknown", or
+    // "Not a valid address" once the box was left). A name with a full stop
+    // after it, as a sentence ends, is offered as the name below instead.
+    const alike = duskNamesNetwork(ov?.nodeUrl) && asDuskName(v) ? null : duskNameLookAlike(v);
+    if (alike) {
+      hideRecipientBadge(toTypePill);
+      showNameBox([h("div", { class: "err", text: alike.words })]);
+      detectedRecipientType = null;
+      reviewOff(true);
+      updateContactMatch("", null);
+      updateAmountHelpers();
+      return;
+    }
+
     if (isDuskName(v)) {
       updateContactMatch("", null);
       showDuskName(v);
@@ -997,7 +1016,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
     const payment = lux ? { lux: BigInt(lux), memo: String(memo.value ?? ""), to: recipient } : null;
     // The same payment waiting to go out, else made already.
-    const waiting = payment ? sameWaiting(ov, payment) : undefined;
+    const waiting = payment ? sameWaiting(ov, payment, { except: instead }) : undefined;
     const made = payment && !waiting ? sentAlready(activityRows(ov, state), payment) : null;
     const name = ownProfileName(ov, recipient) || contactNameText(contactsIndex?.get(recipient.toLowerCase())?.name) || waiting?.toName || "";
     const words = waiting
@@ -1432,8 +1451,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // made already: moments ago, or with this memo whenever, as a request paid
   // once. Said, not stopped: it can be meant.
   const payment = { lux: safeBigInt(d.amountLux, 0n), memo: String(d.memo ?? ""), to: toAddr };
-  const waitingTwin = sameWaiting(ov, payment);
-  const madeAgain = waitingTwin ? null : sentAlready(activityRows(ov, state), payment);
+  const waitingTwin = sameWaiting(ov, payment, { except: String(d.replaces ?? "") });
+  const rows = activityRows(ov, state);
+  const madeAgain = waitingTwin ? null : sentAlready(rows, payment);
   const repeat = Boolean(waitingTwin || (madeAgain && madeAgain.time !== null));
   // Another profile of this wallet's by its own name, as the form says it: "to Profile 1".
   const againName = own ? "" : ownProfileName(ov, toAddr) || contactName() || duskName?.name || "";
@@ -1448,6 +1468,20 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         ),
       ])
     : null;
+
+  // What the recipient wrote you, where it's none of your profiles or
+  // contacts: the memo of its newest payment to you, said as Activity says a
+  // stranger's (theirMemo), on one line (Amélie's: paying back a stranger who
+  // had sent "URGENT … Send 0.1 DUSK back", Review looked as calm as paying
+  // her grandson). Said once Contacts is read: a contact is no stranger.
+  const theirsNote = h("div", { class: "callout warn review-theirs", role: "alert", hidden: true });
+  const showTheirs = () => {
+    const ab = state.addressBook;
+    const known = !own && !service && ab?.loaded && Array.isArray(ab.items) ? contactNames(state, actions, ov) : null;
+    const memo = known ? rows.filter((row) => String(row?.counterparty ?? "").trim() === toAddr).map((row) => theirMemo(row, known)?.memo).find(Boolean) : "";
+    setChildren(theirsNote, memo ? [h("div", { class: "callout-title" }, ["This address sent you: ", h("span", { class: "memo-theirs__text review-theirs__memo", text: `“${safeText(memo.trim()).text}”` }), " · not in your contacts."])] : []);
+    theirsNote.hidden = !memo;
+  };
 
   // Save to Contacts, unless it's saved already or it's this wallet's own.
   const saveContactBtn = h("button", {
@@ -1485,6 +1519,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   });
   const refreshContactUI = () => {
     showToNames();
+    showTheirs();
     saveContactBtn.hidden = own || Boolean(contactName());
   };
   refreshContactUI();
@@ -1537,7 +1572,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const paying = privacy === "shielded" ? ov?.shieldedBalance?.spendable : ov?.balance?.value;
   const pay = payGuard({
     editor: gasEditor,
-    availableLux: paying != null ? safeBigInt(paying, 0n) - waitingLux(ov, privacy) : null,
+    availableLux: paying != null ? safeBigInt(paying, 0n) - waitingLux(ov, privacy, { except: String(d.replaces ?? "") }) : null,
     sendsLux: safeBigInt(d.amountLux, 0n),
     shielded: privacy === "shielded",
     hidden: balancesHidden(ov),
@@ -1640,6 +1675,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       ].filter(Boolean)),
       // As the form said it: it goes, for a fee.
       own ? h("div", { class: "send-self-note review-self-note", text: `This is your own ${toAddr === ownAccount ? "account" : "shielded address"}. Sending to yourself only costs a fee.` }) : null,
+      theirsNote,
       againNote,
       toNameNote,
       ...serviceNotes

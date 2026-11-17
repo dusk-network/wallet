@@ -3,7 +3,8 @@ import { validateMnemonic } from "@scure/bip39";
 import { wordlist } from "@scure/bip39/wordlists/english";
 import { isTauriRuntime } from "../../platform/runtime.js";
 import { h } from "../lib/dom.js";
-import { isPhone } from "../lib/device.js";
+import { isFirefoxAndroid, isPhone } from "../lib/device.js";
+import { HOLD_TO_SHOW_TEXT, holdToShow, onPageAway } from "../lib/pageAway.js";
 import { normalizeMnemonic } from "../lib/strings.js";
 import { createWordSuggestions, underBox } from "./WordSuggestions.js";
 
@@ -77,9 +78,13 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  *   as soon as something's typed. `problem()` says the same on asking.
  * - `hint`: a line above the boxes, which describes them.
  * - `masked`, on a phone: the words typed unseen, as a password is, Show words
- *   showing them read-only and a box pressed to type in hiding them again; and
- *   each box a password's to the keyboard, so it learns nothing from them
- *   (ui.css: Firefox for Android passes no other field's "don't learn" on).
+ *   showing them read-only and a box pressed to type in hiding them again, as
+ *   does the page going out of sight or losing the focus, before a switcher
+ *   or a tab list takes its picture (pageAway.js); in Firefox for Android,
+ *   whose switcher has its picture before the page hears it's leaving, only
+ *   while Hold to show words is held; and each box a password's to the
+ *   keyboard, so it learns nothing from them (ui.css: Firefox for Android
+ *   passes no other field's "don't learn" on).
  * - In a browser no box is ever a password box, and the boxes are a form of
  *   their own: a browser's password manager offers to keep a password box's
  *   text, and takes a box before a password for its username.
@@ -368,7 +373,8 @@ export function createMnemonicInput({
 
   // Masked, the words show only read-only, where no keyboard comes up.
   let shown = false;
-  const showBtn = masked ? h("button", { class: "text-btn srp-show", type: "button", text: "Show words", "aria-pressed": "false" }) : null;
+  const hold = masked && isFirefoxAndroid();
+  const showBtn = masked ? h("button", { class: "text-btn srp-show", type: "button", text: hold ? HOLD_TO_SHOW_TEXT : "Show words", "aria-pressed": "false" }) : null;
   function setShown(next) {
     shown = Boolean(next) && masked;
     grid.classList.toggle("is-hidden", masked && !shown);
@@ -378,7 +384,7 @@ export function createMnemonicInput({
       if (passwordBoxes) input.setAttribute("type", shown ? "text" : "password");
     }
     if (showBtn) {
-      showBtn.textContent = shown ? "Hide words" : "Show words";
+      if (!hold) showBtn.textContent = shown ? "Hide words" : "Show words";
       showBtn.setAttribute("aria-pressed", String(shown));
     }
   }
@@ -424,8 +430,15 @@ export function createMnemonicInput({
 
   const box = h("div", { class: "box srp-box" }, [grid]);
   const hintEl = hint ? h("p", { class: "srp-hint", id: `srp-hint-${++hintIds}`, text: hint }) : null;
-  if (showBtn) showBtn.onclick = () => setShown(!shown);
+  if (showBtn && hold) holdToShow(showBtn, setShown);
+  else if (showBtn) showBtn.onclick = () => setShown(!shown);
   const root = h("form", { class: "mnemonic-input", novalidate: "" }, [toggleRow, hintEl, box, showBtn, clipNote].filter(Boolean));
+  // Shown words hide again the moment the page is out of sight, till Show words again.
+  if (masked) {
+    onPageAway(() => {
+      if (shown) setShown(false);
+    }, root);
+  }
   // Nothing submits it: Enter moves on to the next word, or completes them.
   root.addEventListener("submit", (e) => e.preventDefault());
   if (hintEl) root.setAttribute("aria-describedby", hintEl.id);

@@ -857,6 +857,69 @@ describe("a public payment that waited, its account having sent something else m
     }
   });
 
+  // Marek's, Lena's, Chen's: "something else" was the very same payment, sent from another device, and nothing named it.
+  it("keeps what its account sent meanwhile, as the node names it, and says so again once it's named", async () => {
+    const attempt = vi.fn().mockRejectedValueOnce(offline());
+    const other = { hash: "ab".repeat(32), to: "lucas-account", lux: "10000000", memo: "night shift 9", at: 1_794_900_000_000 };
+    host.meanwhile = vi.fn(async () => [other, { hash: "nope", to: "x", lux: "not a number" }]);
+    waitsFromNonce("s1", attempt).catch(() => {});
+    await vi.advanceTimersByTimeAsync(0);
+    network.nonce = 43n;
+    network.answers = true;
+    await askAgain();
+    await vi.advanceTimersByTimeAsync(0);
+    // From the nonce the wallet knew of last, up to the one now.
+    expect(host.meanwhile).toHaveBeenCalledWith(expect.objectContaining({ sendId: "s1" }), { after: 41n, upTo: 43n });
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", held: true, meanwhile: [other] })]);
+    expect(host.tell.mock.calls.filter(([m]) => m.held)).toHaveLength(2);
+    delete host.meanwhile;
+  });
+
+  // Chen's: Send it too paid at once, with no Review. From its Review, it's sent in the held one's place.
+  it("goes from the queue as Send it too's Review sends it in its place, said not sent there without a word", async () => {
+    const attempt = vi.fn().mockRejectedValueOnce(offline());
+    const sent = waitsFromNonce("s1", attempt).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    network.nonce = 42n;
+    network.answers = true;
+    await askAgain();
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", held: true })]);
+    // Reviewed, and sent in its place, as the account's nonce is now.
+    const again = waiting.sendWhenReachable({ sendId: "s2", record: record({ seenNonce: "42" }), attempt: vi.fn(async () => ({ hash: "h2" })), host, replaces: "s1" });
+    await expect(again).resolves.toEqual({ hash: "h2" });
+    expect((await sent).data).toEqual({ sent: false, cancelled: true, inPlace: true });
+    expect(attempt).toHaveBeenCalledOnce();
+    expect(await kept()).toEqual([]);
+  });
+
+  // Astra's: the one sent in its place was turned down before it went out (its balance, its gas), and the held
+  // payment was gone with it. Held till the other goes out, it's held again, as it was, where that one never does.
+  it("stays held while the one sent in its place is tried, and is held again where that one never goes out", async () => {
+    const attempt = vi.fn().mockRejectedValueOnce(offline());
+    const other = { hash: "ab".repeat(32), to: "lucas-account", lux: "10000000", memo: "night shift 9", at: 1_794_900_000_000 };
+    host.meanwhile = vi.fn(async () => [other]);
+    const sent = waitsFromNonce("s1", attempt).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    network.nonce = 42n;
+    network.answers = true;
+    await askAgain();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", held: true, meanwhile: [other] })]);
+    // Sent in its place, and turned down before it was handed over.
+    const refused = Object.assign(new Error("Insufficient balance"), { data: { sent: false } });
+    await expect(waiting.sendWhenReachable({ sendId: "s2", record: record({ seenNonce: "42" }), attempt: vi.fn().mockRejectedValue(refused), host, replaces: "s1" })).rejects.toBe(refused);
+    // Held still, as it was, and said so: Send it too and Don't send again.
+    expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", waiting: true, waits: false, held: true, meanwhile: [other] })]);
+    expect(host.tell).toHaveBeenLastCalledWith({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
+    // Sent in its place again, and gone out this time: it goes, said not sent in that one's place.
+    const again = waiting.sendWhenReachable({ sendId: "s3", record: record({ seenNonce: "42" }), attempt: vi.fn(async () => ({ hash: "h3" })), host, replaces: "s1" });
+    await expect(again).resolves.toEqual({ hash: "h3" });
+    expect((await sent).data).toEqual({ sent: false, cancelled: true, inPlace: true });
+    expect(attempt).toHaveBeenCalledOnce();
+    expect(await kept()).toEqual([]);
+    delete host.meanwhile;
+  });
+
   it("held, Don't send calls it off: nothing sent, nothing kept", async () => {
     const attempt = vi.fn().mockRejectedValueOnce(offline()).mockResolvedValueOnce({ hash: "h2" });
     const sent = waitsFromNonce("s1", attempt).catch((error) => error);

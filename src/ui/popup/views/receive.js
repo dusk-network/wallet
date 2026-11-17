@@ -187,7 +187,8 @@ export function receiveView(ov, { state, actions } = {}) {
 
   // The requests made here, drawn again on their own as one is kept, so what's pressed stays as it is.
   const requestsHost = h("div", { class: "receive-requests-host" });
-  const drawRequests = () => requestsHost.replaceChildren(...[requestsSection(ov, { state, actions, share: isTauriMobileLike() ? shareKept : null })].filter(Boolean));
+  const drawRequests = () =>
+    requestsHost.replaceChildren(...[requestsSection(ov, { state, actions, message: (request) => listedRequest(request)?.text ?? "", share: isTauriMobileLike() ? shareKept : null })].filter(Boolean));
   // What the form asks, as the list keeps a request.
   const askedNow = () => ({ lux: curLux, memo: curMemo, network: requestNetwork(ov), to: curRecipient });
   // When the request the form holds was paid, where it's one paid already; else null.
@@ -213,9 +214,10 @@ export function receiveView(ov, { state, actions } = {}) {
   // (app-core's requestMessage): who asks, what for, on which test network,
   // its memo, then the link. Who asks: the profile's verified .dusk name,
   // else the name given it here, else no one by name.
+  const asker = () => shownName || String(ov?.accountNames?.[String(idx)] ?? "").trim() || null;
   const requestText = () =>
     requestMessage({
-      name: shownName || String(ov?.accountNames?.[String(idx)] ?? "").trim() || null,
+      name: asker(),
       lux: curLux,
       memo: curMemo,
       link: curLink,
@@ -344,12 +346,17 @@ export function receiveView(ov, { state, actions } = {}) {
     }
     return shareOut(text, "Dusk payment request", picture);
   };
-  // One in the list, as it was asked: its words and link, and its QR code.
-  const shareKept = (request) => {
+  // One in the list, as it was asked: its words and link, which its Share and
+  // its Copy request both give, as the form's do, and its QR code's link.
+  const listedRequest = (request) => {
     const made = makePaymentLink({ to: request.to, amountLux: request.lux === null ? "" : String(request.lux), memo: request.memo, network: chainId });
-    if (!made.ok) return;
-    const text = requestMessage({ name: shownName || String(ov?.accountNames?.[String(idx)] ?? "").trim() || null, lux: request.lux === null ? null : BigInt(request.lux), memo: request.memo, link: made.https ?? made.dusk, network: testNetworkOf(ov) });
-    shareRequest({ text, qrValue: made.dusk, lux: request.lux === null ? null : BigInt(request.lux), memo: request.memo, to: request.to }).catch(() => {});
+    if (!made.ok) return null;
+    const lux = request.lux === null ? null : BigInt(request.lux);
+    return { lux, qrValue: made.dusk, text: requestMessage({ name: asker(), lux, memo: request.memo, link: made.https ?? made.dusk, network: testNetworkOf(ov) }) };
+  };
+  const shareKept = (request) => {
+    const listed = listedRequest(request);
+    if (listed) shareRequest({ text: listed.text, qrValue: listed.qrValue, lux: listed.lux, memo: request.memo, to: request.to }).catch(() => {});
   };
 
   // --- Actions ---------------------------------------------------------

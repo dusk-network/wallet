@@ -168,17 +168,19 @@ export function payGuard({ editor, availableLux, sendsLux = 0n, shielded = false
  * set it up: the gas editor for `kind` at the network's price
  * (useNetworkGas), the error above Confirm when gas won't do, and readGas:
  * the gas to send, undefined for the network's, or false once the error
- * says why it can't be sent.
+ * says why it can't be sent. An amount that comes back (`comesBack`), as an
+ * unstake's or a claim's, is said as what you receive, the fee apart.
  *
  * @param {{
- *   kind: string, gasOpts?: object, amountLux?: string, ov?: object, actions: object,
+ *   kind: string, gasOpts?: object, amountLux?: string, comesBack?: boolean, ov?: object, actions: object,
  *   gas?: { limit: string, price: string } | null, fallbackPrice?: string,
  * }} opts
  */
-export function reviewGas({ kind, gasOpts, amountLux, hideTotal = false, ov, actions, gas, fallbackPrice = "" }) {
+export function reviewGas({ kind, gasOpts, amountLux, comesBack = false, hideTotal = false, ov, actions, gas, fallbackPrice = "" }) {
   const defaultGas = getDefaultGas(kind, gasOpts);
   const editor = document.createElement("dusk-gas-editor");
   editor.hideTotal = hideTotal;
+  editor.comesBack = comesBack;
   editor.amountLux = amountLux;
   editor.maxDecimals = UI_DISPLAY_DECIMALS;
   useNetworkGas({

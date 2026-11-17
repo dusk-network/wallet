@@ -30,7 +30,7 @@ import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../.
 import { saveHandedExport } from "./activityExport.js";
 import { siteLastSeen } from "../../shared/siteRecords.js";
 import { forgetRequestLink, requestDraftOf } from "../lib/requestLink.js";
-import { keepOpenSend, takeOpenSend } from "../lib/sendDraft.js";
+import { keepOpenRequest, keepOpenSend, takeOpenRequest, takeOpenSend } from "../lib/sendDraft.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
 import { keepIncomingWatched } from "./incoming.js";
@@ -41,7 +41,7 @@ import { sendFormView, sendConfirmView } from "./views/send.js";
 import { convertFormView, convertConfirmView } from "./views/convert.js";
 import { stakeFormView, stakeConfirmView } from "./views/stake.js";
 import { readStakingAgain, sozuConfirmView } from "./views/sozu.js";
-import { noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentStatus, sentView } from "./views/sent.js";
+import { WENT_AFTER_ALL_TEXT, noteTxStatus, reviewOf, sentAnnouncement, sentIsFinal, sentStatus, sentView } from "./views/sent.js";
 import {
   assetAddTokenView,
   assetAddNftView,
@@ -87,6 +87,9 @@ try {
 }
 
 const app = document.getElementById("app");
+// The page the wallet's drawn on: the request link it was opened with goes
+// from this page's address, as its Back entries are this page's (systemBack).
+const page = globalThis.window;
 const headerActionsHost = document.getElementById("header-actions");
 // Toasts live outside #app, which scrolls and is redrawn.
 const toaster = createToaster();
@@ -306,11 +309,27 @@ const typingField = (el) =>
 function typingNow() {
   return typingField(document.activeElement) && (composing || Date.now() - typedAt < TYPING_SETTLES_MS);
 }
+// A field whose own picker the phone may have open over the page as long as
+// it's focused: a list, a date's. Swapped for its twin, its picker closes and
+// the next taps land on the page under it (Sofía's, in the app: the export's
+// dates closed by themselves within seconds, four tries for two dates). A
+// redraw of the same screen waits till it's left.
+const pickerField = (el) =>
+  Boolean(el && app?.contains?.(el)) &&
+  !el.disabled &&
+  (el.localName === "select" || (el.localName === "input" && /^(date|time|datetime-local|month|week)$/.test(String(el.getAttribute?.("type") ?? ""))));
+// A choice made in it (change) closes its picker: the redraw that choice
+// asks for, and any after it, are drawn at once till it's pressed again,
+// which may open it (Astra's: Period's own Choose dates showed no days till
+// something else was focused, as a list keeps the focus once its picker
+// closes).
+let pickerShut = null;
+const pickingNow = () => pickerField(document.activeElement) && document.activeElement !== pickerShut;
 function redrawOnceTyped() {
   clearTimeout(redrawTimer);
   redrawTimer = setTimeout(() => {
     redrawTimer = null;
-    if (typingNow()) redrawOnceTyped();
+    if (typingNow() || pickingNow()) redrawOnceTyped();
     else render({ cached: true }).catch(() => {});
   }, TYPING_SETTLES_MS);
 }
@@ -328,6 +347,14 @@ try {
   document.addEventListener("focusout", () => {
     composing = false;
   }, true);
+  document.addEventListener("change", (e) => {
+    if (pickerField(e?.target)) pickerShut = e.target;
+  }, true);
+  for (const type of ["pointerdown", "keydown"]) {
+    document.addEventListener(type, (e) => {
+      if (pickerShut && (e?.target === pickerShut || pickerShut.contains?.(e?.target))) pickerShut = null;
+    }, true);
+  }
 } catch {
   // ignore
 }
@@ -383,7 +410,7 @@ function setApp(children) {
     const shown = `${state?.overview?.isUnlocked === false ? "locked" : ""}|${screen}`;
     // The same screen, for the same wallet, profile and network, drawn again
     // while a field on it is typed in: it's drawn once the typing stops.
-    if (children !== mounted && shown === lastShown && state?.context === mountedContext && typingNow()) {
+    if (children !== mounted && shown === lastShown && state?.context === mountedContext && (typingNow() || pickingNow())) {
       redrawOnceTyped();
       return;
     }
@@ -432,7 +459,7 @@ function setApp(children) {
   // filled in goes with it, not the next Send's. Not one that opened the app
   // before it had a wallet, which waits through the setup's screens.
   if (!onLinksScreens()) {
-    forgetRequestLink();
+    forgetRequestLink(page);
     if (state.draft?.filledIn && !(state.draft.linkSetup && ONBOARD_ROUTES.has(state.route))) state.draft = null;
   }
   systemBack.sync();
@@ -850,7 +877,12 @@ function installTxStatusListener() {
             }
           }
           state.needsRefresh = true;
-          if (state.route === "home") render({ forceRefresh: true }).catch(() => {});
+          // Held, its account having sent something else meanwhile: the
+          // history's read again, so Activity lists what it sent (Lena's: it
+          // came 1 to 3 minutes after the hold), and the hold is drawn again
+          // with what the node named of it.
+          if (held) lookForPayments(state.overview, { state, render });
+          if (state.route === "home" || (held && state.route === "sent" && sent?.sendId === msg.sendId)) render({ forceRefresh: true }).catch(() => {});
           return;
         }
 
@@ -1082,7 +1114,14 @@ function sendsOnTheirWay() {
     const status = String(tx?.status ?? "").toLowerCase();
     // In its block without its fee, as a notice's news has it (DUSK_UI_TX_NOTICED): its fee is looked up.
     const feeUnread = (status === "executed" || status === "failed") && tx?.feePaid == null;
-    if ((["submitted", "mempool", "unknown"].includes(status) || feeUnread) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS) {
+    // Handed over without a clear answer and kept as it was signed, whatever
+    // its age: whether the node ever had it, or another took its nonce
+    // (Chen's: Not confirmed yet for good, 80 minutes on).
+    const signed = Boolean(tx?.signedTx) && (status === "unknown" || status === "unsent");
+    // Chosen not to be sent, its hand-over having had no clear answer: followed
+    // till its nonce is used, whatever its age (txReconcile.js).
+    const followed = Boolean(tx?.dontSendAt) && status !== "executed" && status !== "failed";
+    if (signed || followed || ((["submitted", "mempool", "unknown"].includes(status) || feeUnread) && Date.now() - Number(tx?.submittedAt ?? 0) < RESUME_SENT_WITHIN_MS)) {
       hashes.add(String(tx?.hash ?? ""));
     }
   }
@@ -1095,6 +1134,8 @@ async function lookUpSends() {
   const hashes = sendsOnTheirWay();
   if (!hashes.length) return;
   const answers = await Promise.all(hashes.map((hash) => send({ type: "DUSK_UI_RECHECK_TX", hash }).catch(() => null)));
+  // One chosen not to be sent arrived after all: Sent, and said so.
+  if (answers.some((answer) => answer?.result?.wentAfterAll)) showToast(WENT_AFTER_ALL_TEXT);
   // Looked up: what the node said shows from here on. A node that couldn't
   // be asked yet, as just back from away, said nothing: the Sent screen goes
   // on saying it's being looked up, never that it's taking long.
@@ -1300,20 +1341,30 @@ function returnAfterUnlock(ov) {
 // The app on the way to the background with Send, or its Review, open: what's
 // typed is kept on the phone as Send left open, for Android may end the app
 // meanwhile; the app opens on it again, once unlocked (reopenSend). Back in
-// front, the app wasn't ended: it's a draft as any other again.
+// front, the app wasn't ended: it's a draft as any other again. A wallet tab
+// hidden or reloading keeps its Send the same way, a link's payment with its
+// way back asking first, and the request form being filled in, in that tab
+// alone (Marek's and Amélie's: Firefox for Android's pull down at the top of
+// the page reloaded the tab, and the payment a link filled in went without a
+// word, as did a half-filled request).
 let openSendKept = false;
 function keepSendOpen() {
-  if (!isTauriRuntime() || !state.overview?.isUnlocked || !["send", "confirm"].includes(state.route)) return;
+  if (!state.overview?.isUnlocked) return;
+  // The request form: kept while it's open with something typed in it, else nothing of it.
+  if (!isTauriRuntime()) keepOpenRequest(state.route === "receive" ? state.receive : null, state.overview);
+  if (!["send", "confirm"].includes(state.route)) return;
   keepOpenSend(state.draft, state.overview);
   openSendKept = true;
 }
 let sendReopened = false;
 function reopenSend(ov) {
-  if (!isTauriRuntime() || !ov?.isUnlocked) return;
+  if (!ov?.isUnlocked) return;
   if (!sendReopened) {
     sendReopened = true;
     const values = takeOpenSend(ov);
+    const request = isTauriRuntime() ? null : takeOpenRequest(ov);
     if (values && state.route === "home") Object.assign(state, { route: "send", draft: values });
+    else if (request && state.route === "home") Object.assign(state, { route: "receive", receive: { ...request, requestOpen: true, context: state.context } });
     return;
   }
   if (openSendKept && document.visibilityState !== "hidden") {
@@ -1340,6 +1391,8 @@ try {
   window.addEventListener("pageshow", (event) => {
     if (event?.persisted) resumeWatching();
   });
+  // A tab reloading, seen or not, keeps its open Send and request form for after.
+  window.addEventListener("pagehide", keepSendOpen);
 } catch {
   // ignore
 }
@@ -1655,11 +1708,14 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
 
   if (!ov?.hasVault) {
     // A payment link that opened the app before there's a wallet: it waits
-    // through the setup, however long, and the setup screen says so.
+    // through the setup, and the setup screen says so, with when it was
+    // opened, as one behind the lock does: past LINK_WAITS_MS it goes, here
+    // or as the wallet's made (Sofía's: another's link, opened on the shared
+    // phone eleven minutes before, filled Send in right after her Import).
     if (state.draft?.filledIn === "link" && state.draft.linkUrl && !state.draft.linkSetup) {
-      const { linkAt: _linkAt, ...waits } = state.draft;
-      state.draft = { ...waits, linkSetup: true };
+      state.draft = { ...state.draft, linkAt: Number(state.draft.linkAt) || Date.now(), linkSetup: true };
     }
+    if (state.draft?.linkSetup && Date.now() - Number(state.draft.linkAt) > LINK_WAITS_MS) state.draft = null;
     if (!ONBOARD_ROUTES.has(state.route)) {
       state.route = "onboard_welcome";
     }
@@ -1861,7 +1917,7 @@ function openPaymentLink(url, { handed = false } = {}) {
   // Handed to the tab: the request it was opened with goes from its address,
   // or a reload, or Firefox bringing the tab back, would fill Send with that
   // one (Astra's).
-  if (handed) forgetRequestLink();
+  if (handed) forgetRequestLink(page);
   Object.assign(state, { draft, route: "send" });
   render()
     .then(() => {

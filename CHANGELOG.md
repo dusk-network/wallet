@@ -45,6 +45,14 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Said on Review what an address that isn't one of your contacts or profiles sent you: "This address sent you: “…” · not in your contacts."
+- Named the request list's Copy link Copy request, which copies the request's words and link, as Share does.
+- Brought This request was paid already into view as it opens, in the popup, the full tab and on a phone.
+- Made Stay the main button in Leave this payment?, and Cancel in Import's Go back?, with Leave and Go back the quiet ones.
+- Opened the payment's Review with Send it too, on a payment held as its account sent something else while it waited, rather than sending it at once, and made Send it too and Don't send the main buttons of its screen; Don't send and Cancel say Not sent. Nothing left your wallet., in no colour.
+- Named what the account sent while a held payment waited, from the chain: how much, to whom, its memo and when, saying where it looks like this same payment, and read the history again as the hold comes.
+- Hid recovery words shown in clear again the moment the page is hidden or loses the focus, on Import, Check your recovery words, a new wallet's words and the recovery phrase, until they're shown again; in Firefox for Android they show only while Hold to show words is held.
+- Kept a payment a link filled in, and a Send or a request being typed, through a reload of the wallet's tab, the phone's Back still asking Leave this payment?; and stopped a pull down at the top of the wallet's pages reloading them in Firefox for Android.
 - Held a payment that waited for the network where its account sent something else meanwhile, saying so with Send it too and Don't send, rather than sending it by itself.
 - Went on to the next box with Enter in Check your recovery words, suggestions shown or not, and checked only once every box holds a word, a word taken with Enter in the last box being only taken.
 - Made Try again the one button after a check of the recovery words that didn't match, with Show my recovery words a small link apart below it.
@@ -121,6 +129,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said when the figures were last read on every "may be out of date" note, Home's and Staking's, also once the node goes silent or the browser goes offline while the wallet shows: "Last read at 10:02".
+- Said on an unstake's and a claim's Review what you receive, with the network fee on its own, rather than a total of the fee alone; and counted your own Sozu unstake in Rewards by year once it's in its block, saying Reading… till then.
+- Said in Send's To which .dusk name one written with another point, a look-alike letter or a hidden character looks like, at once, rather than Unknown; and took a dot above, a Braille dot and spaces around a point in a profile's name for the .dusk name it imitates.
+- Read the whole of a pasted payment message, through characters that can't be seen and look-alike letters, refusing one whose amount, network or .dusk name anywhere in it isn't its link's, "You are asked" and "Please pay" read as the wallet's own line; words that state none of these may surround the link.
+- Kept a date's or a list's picker open in the Android app while the wallet draws its page again, and took "Choose both days." away once both are chosen.
+- Focused the password box as Unlock, Check your recovery words and Reset wallet open, with the keyboard up in the Android app.
+- Said on the setup screen which network a payment link that opened the app before there was a wallet is for, and when it was opened; once the wallet's made, Send says when, and a link older than ten minutes goes, as one behind the lock does.
+- Said Not sent yet, with Send it now and Don't send, of a stake, a contract call or any other public transaction of the wallet's own that the network never got as its connection went, rather than Not confirmed for good; Send it now sends the very same transaction, Don't send says it may still arrive and shows it as Sent, with a notice, if it does, and one whose place another took says Not sent.
+- Told a connected site nothing as you switch to another profile, or as its profile's name is checked again and found the same, and refused in the page itself a site's request whose parameters carry a prototype or a "__proto__" key, which the wallet was answering as an empty one.
 - Showed the Android app's notice that a payment is waiting for the network wherever the phone allows the app's notices, rather than only after Tell me when it arrives.
 - Sent a payment kept by the previous version again with Send it now, rather than saying the wallet, profile or network changed.
 - Kept notices for money coming in off in the Android app when the setting is turned on and off quickly.

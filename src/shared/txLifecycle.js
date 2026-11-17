@@ -6,6 +6,8 @@
  * less stable than finalized `tx(hash)` lookups.
  */
 
+import { parseHistoryEntry } from "@dusk-network/app-core/history";
+
 import { fetchWithTimeout } from "./networkStatus.js";
 
 function graphqlUrl(nodeUrl) {
@@ -159,35 +161,100 @@ const BLOCK_MS_AT_LEAST = 5_000;
 const BLOCKS_BEFORE = 360;
 
 /**
- * The account's transaction at `nonce`, as the chain shows it: those it sent
- * since about when the payment was made (`at`), read from the archive with
- * their nonces. Its ID, or "" where none of those read is at it.
+ * The account's transactions at `nonces`, as the chain shows them: those it
+ * sent since about when the payment was made (`at`), read from the archive
+ * with their nonces, each with what it paid and to whom, its memo and when
+ * its block was made, by nonce.
  * @param {string} nodeUrl
- * @param {{ account: string, nonce: string | bigint, at?: number }} tx
+ * @param {{ account: string, nonces: bigint[], at?: number }} tx
+ * @returns {Promise<Map<bigint, { hash: string, to: string, lux: string, memo: string, at: number | null }>>}
  */
-async function nonceTakenBy(nodeUrl, { account, nonce, at }) {
+async function sentAtNonces(nodeUrl, { account, nonces, at }) {
+  const found = new Map();
+  const want = new Set(nonces.map(String));
+  if (!want.size) return found;
   const head = await postGraphql(nodeUrl, "query { pair: lastBlockPair { json } }");
   const tip = Number(decimal(head?.pair?.json?.last_block?.[0]));
-  if (!Number.isSafeInteger(tip)) return "";
+  if (!Number.isSafeInteger(tip)) return found;
   const made = Number(at) > 0 ? Number(at) : Date.now();
   const from = Math.max(0, tip - Math.ceil(Math.max(0, Date.now() - made) / BLOCK_MS_AT_LEAST) - BLOCKS_BEFORE);
-  const want = BigInt(nonce);
-  for (let page = 1; page <= TAKEN_PAGES; page++) {
+  for (let page = 1; page <= TAKEN_PAGES && found.size < want.size; page++) {
     const args = [`sender: ${JSON.stringify(String(account))}`, `fromBlock: ${from}`, `maxCount: ${TAKEN_PAGE}`, ...(page > 1 ? [`pageCount: ${page}`] : [])];
     const rows = (await postGraphql(nodeUrl, `query { h: moonlightHistory(${args.join(", ")}) { json } }`))?.h?.json;
     const list = Array.isArray(rows) ? rows : [];
-    const hashes = [...new Set(list.map((row) => String(row?.origin ?? "").toLowerCase()).filter((id) => /^[0-9a-f]{64}$/.test(id)))];
+    const byHash = new Map(list.map((row) => [String(row?.origin ?? "").toLowerCase(), row]).filter(([id]) => /^[0-9a-f]{64}$/.test(id)));
+    const hashes = [...byHash.keys()];
     if (hashes.length) {
-      const txs = await postGraphql(nodeUrl, `query { ${hashes.map((id, i) => `t${i}: tx(hash: ${JSON.stringify(id)}) { tx { json } }`).join(" ")} }`);
+      const txs = await postGraphql(nodeUrl, `query { ${hashes.map((id, i) => `t${i}: tx(hash: ${JSON.stringify(id)}) { blockTimestamp tx { json } }`).join(" ")} }`);
       for (const [i, id] of hashes.entries()) {
         const said = txJson(txs?.[`t${i}`]?.tx?.json);
         const its = decimal(said?.nonce);
-        if (said?.type === "moonlight" && String(said?.sender ?? "") === String(account) && its !== undefined && BigInt(its) === want) return id;
+        if (said?.type !== "moonlight" || String(said?.sender ?? "") !== String(account) || its === undefined || !want.has(its)) continue;
+        const entry = parseHistoryEntry(String(account), byHash.get(id));
+        const time = Number(decimal(txs?.[`t${i}`]?.blockTimestamp));
+        found.set(BigInt(its), {
+          hash: id,
+          to: String(entry?.counterparty ?? said?.receiver ?? ""),
+          lux: String(entry?.value ?? decimal(said?.value) ?? "0"),
+          memo: String(entry?.memo ?? ""),
+          at: Number.isSafeInteger(time) && time > 0 ? time * 1000 : null,
+        });
       }
     }
     if (list.length < TAKEN_PAGE) break;
   }
-  return "";
+  return found;
+}
+
+// The account's transaction at `nonce`, as the chain shows it: its ID, or "".
+const nonceTakenBy = async (nodeUrl, { account, nonce, at }) => (await sentAtNonces(nodeUrl, { account, nonces: [BigInt(nonce)], at })).get(BigInt(nonce))?.hash ?? "";
+
+/** How many of what an account sent meanwhile are read and named, at most. */
+const MEANWHILE_NAMED = 3;
+
+/**
+ * What an account sent while a payment of its waited: its transactions at
+ * the nonces after the last one the wallet knew of (`after`) up to its nonce
+ * now (`upTo`), the first few, each with what it paid and to whom, its memo
+ * and when, from the node's mempool or the chain's history. One that can't
+ * be read is left out; an empty list where none can.
+ * @param {string} nodeUrl
+ * @param {{ account: string, after: bigint | string, upTo: bigint | string, at?: number }} range - `at`: when the payment was made
+ * @returns {Promise<Array<{ hash: string, to: string, lux: string, memo: string, at: number | null }>>}
+ */
+export async function sentMeanwhileOf(nodeUrl, { account, after, upTo, at }) {
+  const first = BigInt(String(after)) + 1n;
+  const last = BigInt(String(upTo));
+  const nonces = [];
+  for (let n = first; n <= last && nonces.length < MEANWHILE_NAMED; n++) nonces.push(n);
+  if (!account || !nonces.length) return [];
+  const sent = new Map();
+  // Waiting in the node's mempool: not on chain yet.
+  for (const tx of await queryMempoolTxs(nodeUrl).catch(() => [])) {
+    const said = txJson(tx?.json);
+    const its = decimal(said?.nonce);
+    if (said?.type !== "moonlight" || String(said?.sender ?? "") !== String(account) || its === undefined) continue;
+    const n = BigInt(its);
+    if (!nonces.includes(n)) continue;
+    sent.set(n, { hash: String(tx?.id ?? ""), to: String(said?.receiver ?? said?.sender ?? ""), lux: decimal(said?.value) ?? "0", memo: memoText(tx?.memo ?? said?.memo), at: null });
+  }
+  const unread = nonces.filter((n) => !sent.has(n));
+  if (unread.length) {
+    const onChain = await sentAtNonces(nodeUrl, { account, nonces: unread, at }).catch(() => new Map());
+    for (const [n, tx] of onChain) sent.set(n, tx);
+  }
+  return nonces.filter((n) => sent.has(n)).map((n) => sent.get(n));
+}
+
+// A memo as text where it's text: a mempool transaction's comes as hex, or as text already.
+function memoText(value) {
+  const memo = String(value ?? "");
+  if (!memo || memo.length % 2 || !/^[0-9a-f]+$/i.test(memo)) return memo;
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(Uint8Array.from(memo.match(/../g), (b) => parseInt(b, 16)));
+  } catch {
+    return memo;
+  }
 }
 
 /**

@@ -143,17 +143,20 @@ function safePost(port, msg) {
 
 /**
  * The profiles each port was told of last, as its state or a profilesChanged.
- * A site that isn't connected is told again only when they change for it, as
- * when its connection ends: one that never connected, or whose connection
- * ended, hears nothing of what the wallet does meanwhile, a switch of network
- * among it. A connected site is told as ever.
+ * A site is told again only when they change for it: its connection begins
+ * or ends, the wallet locks or unlocks, or its profile's name changes. One
+ * that never connected, or whose connection ended, hears nothing of what the
+ * wallet does meanwhile, a switch of network among it; nor does a connected
+ * one of a switch to another profile, or a name checked again and found the
+ * same (Marek's: each switch of profile posted its own profile into the page
+ * again).
  * @type {WeakMap<chrome.runtime.Port, string>}
  */
 const toldProfiles = new WeakMap();
 
-function postProfiles(port, profiles, { connected = true } = {}) {
+function postProfiles(port, profiles) {
   const said = JSON.stringify(profiles);
-  if (!connected && toldProfiles.get(port) === said) return;
+  if (toldProfiles.get(port) === said) return;
   toldProfiles.set(port, said);
   safePost(port, { type: "DUSK_PROVIDER_EVENT", name: "profilesChanged", data: profiles });
 }
@@ -365,7 +368,7 @@ export async function broadcastProfilesChangedAll() {
       names
     );
     const visible = permission.profile ? [permission.profile] : [];
-    for (const port of set) postProfiles(port, visible, { connected: permission.isValid });
+    for (const port of set) postProfiles(port, visible);
   }
 }
 
@@ -386,7 +389,7 @@ export async function broadcastProfilesChangedForOrigin(origin) {
       await namesForOrigins([origin], perms, status)
     );
   });
-  for (const port of portsByOrigin.get(origin) ?? []) postProfiles(port, permission.profile ? [permission.profile] : [], { connected: permission.isValid });
+  for (const port of portsByOrigin.get(origin) ?? []) postProfiles(port, permission.profile ? [permission.profile] : []);
 }
 
 /**

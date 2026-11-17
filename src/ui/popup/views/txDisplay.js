@@ -9,15 +9,20 @@ import { balance } from "../../components/Balance.js";
  * node took it out of its queue) and Not confirmed (the wallet stopped
  * waiting) are uncertain, so they tone as pending. Unknown is final on chain,
  * its outcome not looked up yet: nothing waits on it, so it tones neutral.
+ * Not sent yet: handed over, the node never had it, and it can go as it was
+ * signed (unsent); Not sent: another of its account's transactions took its
+ * place, and it never will (not_sent). Never Pending for either.
  * @param {string} status
  * @param {{ final?: boolean }} [opts] - `final`: the chain has it, final
- * @returns {"Pending"|"Completed"|"Failed"|"Dropped"|"Not confirmed"|"Unknown"}
+ * @returns {"Pending"|"Completed"|"Failed"|"Dropped"|"Not confirmed"|"Unknown"|"Not sent yet"|"Not sent"}
  */
 export function txStatusWord(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "Completed";
   if (s === "failed") return "Failed";
   if (s === "removed") return "Dropped";
+  if (s === "unsent") return "Not sent yet";
+  if (s === "not_sent") return "Not sent";
   if (s === "unknown") return final ? "Unknown" : "Not confirmed";
   return "Pending";
 }
@@ -45,7 +50,7 @@ export function txStatusTone(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "ok";
   if (s === "failed") return "bad";
-  if (s === "unknown" && final) return "neutral";
+  if ((s === "unknown" && final) || s === "not_sent") return "neutral";
   return "pending";
 }
 
@@ -73,6 +78,12 @@ export function txRecoveryReasonLabel(reason) {
   }
   if (key === "removed") {
     return "The node reported that this transaction was removed from the mempool.";
+  }
+  if (key === "not_reached") {
+    return "The connection went as it was sent, and the network never got it.";
+  }
+  if (key === "replaced") {
+    return "Another transaction from this account took its place.";
   }
   if (key === "node_url_missing") {
     return "The wallet could not recheck this transaction because the original node URL is missing.";

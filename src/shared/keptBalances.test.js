@@ -37,7 +37,8 @@ afterEach(() => {
 });
 
 describe("the balances read last, kept on the device", () => {
-  it("fill in what can't be read now, each said to be maybe out of date, with when the balance was read", async () => {
+  // Lena's wish, the sixth round: "may be out of date" never said when; each part kept says when it was read.
+  it("fill in what can't be read now, each said to be maybe out of date, with when each was read", async () => {
     const readAt = Date.now();
     await expect(kept.withKeptBalances(place, read)).resolves.toEqual({});
 
@@ -49,13 +50,15 @@ describe("the balances read last, kept on the device", () => {
       balanceReadAt: readAt,
       shieldedBalance: read.shieldedBalance,
       shieldedStale: true,
+      shieldedReadAt: readAt,
       staked: read.staked,
       stakeStale: true,
+      stakeReadAt: readAt,
     });
 
     // The public balance read, the stake not: the stake alone is kept and said so; the balance read now is kept.
     const now = { ...read.balance, value: "800000000" };
-    await expect(kept.withKeptBalances(place, { ...read, balance: now, staked: null }, { stakeRead: false })).resolves.toEqual({ staked: read.staked, stakeStale: true });
+    await expect(kept.withKeptBalances(place, { ...read, balance: now, staked: null }, { stakeRead: false })).resolves.toEqual({ staked: read.staked, stakeStale: true, stakeReadAt: readAt });
     await expect(kept.keptBalancesOf(place)).resolves.toMatchObject({ balance: now, balanceAt: Date.now() });
   });
 

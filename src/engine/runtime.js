@@ -30,6 +30,8 @@ import {
   cancelSend,
   resendSend,
   forgetHandedOver,
+  handedOverTx,
+  rebroadcastTx,
   sendUnderWay,
   lastOwnNonce,
   selectAccountIndex,
@@ -489,6 +491,21 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           const { txEpoch, ...resendParams } = params ?? {};
           const result = await resendSend(resendParams);
           sendResponse({ id, result: { hash: result.hash, nonce: result.nonce?.toString?.() ?? String(result.nonce) } });
+          watchTxExecuted(result.hash, Number.isInteger(txEpoch) ? txEpoch : undefined).catch(() => {});
+          return;
+        }
+
+        // Any other public send handed over without a clear answer, as it was
+        // signed, for its record; and one the node never had, sent again as
+        // it is from there, then watched as a send is.
+        case "dusk_handedOverTx": {
+          sendResponse({ id, result: handedOverTx(params ?? {}) });
+          return;
+        }
+        case "dusk_rebroadcastTx": {
+          const { txEpoch, ...again } = params ?? {};
+          const result = await rebroadcastTx(again);
+          sendResponse({ id, result });
           watchTxExecuted(result.hash, Number.isInteger(txEpoch) ? txEpoch : undefined).catch(() => {});
           return;
         }

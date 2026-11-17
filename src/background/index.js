@@ -22,7 +22,7 @@ import { applyTxDefaults, defaultGasPriceOf } from "../shared/txDefaults.js";
 import { networkNameFromNodeUrl } from "../shared/network.js";
 import { askNodeChainId, chainRefusal, listedSettings } from "../shared/nodeNetwork.js";
 import { endpointProblem, isAllowedDappOrigin } from "../shared/securityPolicy.js";
-import { accountNonce, accountNonceNow, classifyTxPresence, handedOverState } from "../shared/txLifecycle.js";
+import { accountNonce, accountNonceNow, classifyTxPresence, handedOverState, sentMeanwhileOf } from "../shared/txLifecycle.js";
 import { isShieldedTxMeta, recheckTx, reconcileTxPresence } from "../shared/txReconcile.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
 
@@ -61,13 +61,14 @@ import { noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
 import { getAccountNames } from "../shared/accountNames.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
 import {
+  forgetTxs,
   getTxEpoch,
   getTxMeta,
   patchTxMeta as patchStored,
   putTxMeta,
   listTxs,
 } from "../shared/txStore.js";
-import { sendingProfile, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
+import { sendingProfile, signedTxFields, submittedTxMeta, typedRecipientName, unclearTxMeta, walletSendFields } from "../shared/txRecord.js";
 import { beginReset, clearWalletData, endReset, finishPendingReset, finishReset } from "../shared/walletReset.js";
 import { cancelWaitingSend, checkedOnNode, dropUnsent, followHandedOver, forgetWent, noteHandingOver, reviewedParams, sendHeld, sendsReadBegins, sendWhenReachable, stopWaitingSends, waitingRecordOf, waitingSendsOf } from "../shared/waitingSends.js";
 import { withKeptBalances } from "../shared/keptBalances.js";
@@ -231,6 +232,8 @@ const waitingHost = {
   // Whether the account sent something else while one waited: its nonce on
   // the node now, and the last the wallet's own sends took.
   nonceNow: (record) => accountNonceNow(record.nodeUrl, record.account),
+  // What the account sent while one waited, as the node says it, for its hold to name.
+  meanwhile: (record, range) => sentMeanwhileOf(record.nodeUrl, { account: record.account, ...range, at: record.at }),
   chainNonce: (record) => accountNonce(record.nodeUrl, record.account),
   ownNonce: async (record) => (await engineCall("dusk_lastOwnNonce", { profileIndex: Number(record.profileIndex) || 0 }))?.nonce ?? null,
   // Handed to the node: kept as a sent one, from when it was made, and looked
@@ -525,7 +528,7 @@ async function paysFor(params, accountIndex, status) {
 }
 
 // Only the wallet's own pages' to send, whatever a content script is made to.
-const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_RECOVERY_PHRASE", "DUSK_UI_CHECK_RECOVERY_WORDS", "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE", "DUSK_UI_CANCEL_SEND", "DUSK_UI_DROP_UNSENT", "DUSK_UI_LAST_SEND"]);
+const WALLET_PAGE_COMMANDS = new Set([...SEND_PASSWORD_COMMANDS, "DUSK_UI_RECOVERY_PHRASE", "DUSK_UI_CHECK_RECOVERY_WORDS", "DUSK_UI_FORGET_SITE_RECORD", "DUSK_UI_SET_SITE_LASTS", "DUSK_UI_SET_NEW_SITE_LASTS", "DUSK_APPROVAL_SHOWN", "DUSK_APPROVAL_CLOSE", "DUSK_UI_CANCEL_SEND", "DUSK_UI_DROP_UNSENT", "DUSK_UI_RESEND_TX", "DUSK_UI_DROP_TX", "DUSK_UI_LAST_SEND"]);
 
 // For when a site last used its connection: anything but what any page can ask.
 const OPEN_TO_ALL = new Set(["dusk_getCapabilities", "dusk_chainId", "dusk_openPaymentLink"]);
@@ -1638,6 +1641,68 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         return;
       }
 
+      // Send it now, on a send of the wallet's own the node never had after a
+      // hand-over with no clear answer (Not sent yet): the very transaction
+      // signed for it, as it is, its ID and nonce the same, so it goes out
+      // once at most; then followed as a sent one. Where another took its
+      // place, Not sent. As a send is, with the wallet's lock, unlock and
+      // reset waiting for it (Astra's: locked as the node was asked of it, it
+      // still went); and where its answer is lost, it's looked up again,
+      // never said not sent before the node says it never had it.
+      if (message?.type === "DUSK_UI_RESEND_TX") {
+        const hash = String(message.hash ?? "");
+        const { meta, result } = await withStorageLock(WALLET_LIFECYCLE_LOCK, async () => {
+          const status = await getEngineStatusStrict();
+          if (!status?.isUnlocked) throw rpcError(ERROR_CODES.UNAUTHORIZED, "Wallet locked");
+          const meta = await getTxMeta(hash);
+          if (!meta?.signedTx || meta.status !== "unsent" || meta.dontSendAt || String(meta.walletId ?? "") !== String(status.accounts?.[0] ?? "")) {
+            throw rpcError(ERROR_CODES.INVALID_PARAMS, "This send can't be sent again from here.");
+          }
+          await ensureEngineConfigured();
+          const txEpoch = await getTxEpoch();
+          const result = await engineCall("dusk_rebroadcastTx", {
+            hex: meta.signedTx,
+            hash,
+            nonce: meta.nonce,
+            account: meta.account,
+            profileIndex: Number(meta.profileIndex) || 0,
+            nodeUrl: meta.nodeUrl,
+            at: meta.submittedAt,
+            txEpoch,
+          }).catch(async (error) => {
+            if (error?.data?.replaced) await patchStored(hash, { status: "not_sent", recoveryReason: "replaced", signedTx: undefined }, { epoch: txEpoch }).catch(() => {});
+            else if (error?.data?.sent === "unknown") await patchStored(hash, { status: "unknown", recoveryReason: "handover_unclear", lastCheckedAt: Date.now() }, { epoch: txEpoch }).catch(() => {});
+            throw error;
+          });
+          await patchStored(hash, { status: "submitted", lastCheckedAt: Date.now() }, { epoch: txEpoch });
+          return { meta, result };
+        });
+        await keepLastSend({ walletId: String(meta.walletId ?? ""), nodeUrl: String(meta.nodeUrl ?? ""), hash, state: "submitted" }).catch(() => {});
+        notifyTxSubmitted({ hash, origin: "Wallet", nodeUrl: String(meta.nodeUrl ?? "") }).catch(() => {});
+        sendResponse({ ok: true, result: { hash: result?.hash ?? hash } });
+        return;
+      }
+
+      // Don't send, on one of the wallet's own sends the node never had. Its
+      // hand-over had no clear answer, so it may still arrive: never sent
+      // again from here, it's followed till its nonce is used, and shows as
+      // Sent if it went after all (txReconcile.js). One another took the
+      // place of goes.
+      if (message?.type === "DUSK_UI_DROP_TX") {
+        const hash = String(message.hash ?? "");
+        const meta = await getTxMeta(hash);
+        if (meta?.status === "unsent" && !meta.dontSendAt) {
+          // As the record is when it's written: one that went meanwhile isn't marked.
+          const stored = await patchStored(hash, { dontSendAt: Date.now(), signedTx: undefined });
+          sendResponse({ ok: true, result: stored?.dontSendAt ? { dropped: true, followed: true } : { dropped: false, went: stored?.status === "executed" || stored?.status === "failed" } });
+          return;
+        }
+        const dropped = meta?.status === "not_sent";
+        if (dropped) await forgetTxs([hash]);
+        sendResponse({ ok: true, result: { dropped } });
+        return;
+      }
+
       // Don't send on a payment from Send that wasn't sent.
       if (message?.type === "DUSK_UI_DROP_UNSENT") {
         sendResponse({ ok: true, result: { dropped: await dropUnsent(String(message.sendId ?? "")) } });
@@ -1730,7 +1795,10 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
             const hash = error?.data?.sent === "unknown" ? String(error.data.hash ?? "") : "";
             if (hash && !(sendId && checkedOnNode(baseParams))) {
               const sent = { walletId: String(status.accounts?.[0] ?? ""), origin: "Wallet", nodeUrl, profileIndex: sendingProfile(baseParams, status, await getSettings()) };
-              await putTxMeta(hash, unclearTxMeta(baseParams, sent, walletSendFields(baseParams, message)), { epoch: txEpoch }).catch(() => {});
+              // A public one as it was signed: asked of the node by its nonce,
+              // and sent again as it is where the node never had it (txReconcile.js).
+              const signed = await engineCall("dusk_handedOverTx", { hash }).catch(() => null);
+              await putTxMeta(hash, unclearTxMeta(baseParams, sent, { ...walletSendFields(baseParams, message), ...signedTxFields(signed) }), { epoch: txEpoch }).catch(() => {});
               await keepLastSend({ walletId: sent.walletId, nodeUrl, hash, state: "unknown" }).catch(() => {});
             }
             throw error;

@@ -223,7 +223,14 @@ describe("setting up and unlocking", () => {
     }
     body = show(onboardingCreateConfirmView({ state, actions: acts }));
     expect(names()).toEqual(places.map((p) => `Word ${p}`));
-    expect(body.querySelectorAll("button").filter(isShown).map((b) => b.textContent)).toEqual(["← Back", "Check", "Skip for now"]);
+    // Check the main button, and Skip for now never: the outline one under it (Amélie's, in the web wallet: Skip
+    // for now was the big black button, after a wrong answer too).
+    const asking = [
+      ["← Back", expect.any(String)],
+      ["Check", "btn-primary btn-full"],
+      ["Skip for now", "btn-outline btn-full"],
+    ];
+    expect(body.querySelectorAll("button").filter(isShown).map((b) => [b.textContent, b.className])).toEqual(asking);
 
     // Lena's: nothing checked, and nothing said, till every box holds a word.
     expect(button(body, "Check").disabled).toBe(true);
@@ -246,11 +253,12 @@ describe("setting up and unlocking", () => {
       ]);
       expect([body.querySelector(".srp-grid"), wordBoxes(body)]).toEqual([null, []]);
       expect([state.route, state.onboard.reveal, acts.send.mock.calls]).toEqual(["onboard_create_confirm", false, []]);
-      // Try again: the same three, empty, the first to type in.
+      // Try again: the same three, empty, the first to type in, Skip for now back under Check.
       button(body, "Try again").click();
       expect(names()).toEqual(places.map((p) => `Word ${p}`));
       expect(wordBoxes(body).map((i) => i.value)).toEqual(["", "", ""]);
       expect(dom.document.activeElement).toBe(wordBoxes(body)[0]);
+      expect(body.querySelectorAll("button").filter(isShown).map((b) => [b.textContent, b.className])).toEqual(asking);
     }
 
     // Show my recovery words, apart: back to the words, hidden till Reveal, with nothing said over them.
@@ -318,6 +326,34 @@ describe("setting up and unlocking", () => {
     await settle();
     expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC }));
     expect(acts.showToast).toHaveBeenCalledWith("Your recovery words match.");
+  });
+
+  // Marek's: words shown in clear stayed in Android's app switcher and in Firefox's tab list.
+  it("hides the words shown in Check your recovery words on a phone the moment the page is hidden, left or loses the focus", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) AppleWebKit/537.36 Chrome/156.0 Mobile Safari/537.36" });
+    dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
+    const state = { route: "onboard_create_confirm", onboard: { ...onboard(), checkPlaces: [3, 6, 9] } };
+    const body = show(onboardingCreateConfirmView({ state, actions: actions() }));
+    const grid = body.querySelector(".srp-grid");
+    const show_ = button(body, "Show words");
+    typeInto(wordBoxes(body)[0], "abandon");
+    for (const away of [
+      () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      },
+      () => dom.window.dispatchEvent(fakeEvent("pagehide")),
+      () => dom.window.dispatchEvent(fakeEvent("blur")),
+    ]) {
+      dom.document.visibilityState = "visible";
+      show_.click();
+      expect([grid.classList.contains("is-hidden"), show_.textContent]).toEqual([false, "Hide words"]);
+      away();
+      expect([grid.classList.contains("is-hidden"), show_.textContent, show_.getAttribute("aria-pressed")]).toEqual([true, "Show words", "false"]);
+      dom.document.visibilityState = "visible";
+      dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      expect(grid.classList.contains("is-hidden")).toBe(true);
+    }
   });
 
   // Lena's: a whole word typed in the first box, no suggestion showing, and Enter checked at once, two boxes empty,
@@ -448,7 +484,14 @@ describe("setting up and unlocking", () => {
     button(body, "← Back").click();
     await settle();
     const dialog = body.querySelector("[role=alertdialog]");
-    expect(visibleText(dialog)).toBe("Go back?This clears the recovery phrase and password you typed.CancelGo back");
+    expect(visibleText(dialog)).toBe("Go back?This clears the recovery phrase and password you typed.Go backCancel");
+    // As Leave this payment? (Amélie's and Chen's): what keeps the words is the main button, the wide one under
+    // the thumb, with the focus; Go back the quiet one before it.
+    expect(dialog.querySelectorAll("button").map((b) => [b.textContent, b.className])).toEqual([
+      ["Go back", "btn-outline"],
+      ["Cancel", "btn-primary"],
+    ]);
+    expect(dom.document.activeElement).toBe(button(dialog, "Cancel"));
     button(dialog, "Cancel").click();
     await settle();
     expect(state.route).toBe("onboard_import");
@@ -485,6 +528,57 @@ describe("a new recovery phrase", () => {
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
     expect(css).toMatch(/\.review-actions \{\s*position: sticky;/);
     expect(Number(/\.srp-word-text \{[^}]*font-size: (\d+)px/.exec(css)?.[1])).toBeGreaterThanOrEqual(18);
+  });
+
+  // Marek's: the words in clear stayed in Android's app switcher and in Firefox's tab list.
+  it("hides its revealed words the moment the page is hidden, left or loses the focus, till Reveal again", () => {
+    for (const away of [
+      () => {
+        dom.document.visibilityState = "hidden";
+        dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      },
+      () => dom.window.dispatchEvent(fakeEvent("pagehide")),
+      () => dom.window.dispatchEvent(fakeEvent("blur")),
+    ]) {
+      dom.document.visibilityState = "visible";
+      const state = { route: "onboard_create_phrase", onboard: { ...emptyFlow(), mnemonic: MNEMONIC, reveal: true } };
+      const acts = actions();
+      const body = show(onboardingCreatePhraseView({ state, actions: acts }));
+      const blurred = (page) => page.querySelector(".srp-grid").classList.contains("srp-grid--blur");
+      expect([blurred(body), Boolean(button(body, "Hide"))]).toEqual([false, true]);
+      away();
+      // At once, before any redraw: hidden, and Reveal to see them.
+      expect([blurred(body), Boolean(button(body, "Reveal")), state.onboard.reveal]).toEqual([true, true, false]);
+      expect(acts.render).toHaveBeenCalled();
+      // Back in sight, drawn again: still hidden, Copy off, till Reveal.
+      dom.document.visibilityState = "visible";
+      dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      const again = show(onboardingCreatePhraseView({ state, actions: acts }));
+      expect([blurred(again), again.querySelectorAll(".phrase-tools button").map((b) => b.disabled)]).toEqual([true, [false, true]]);
+      button(again, "Reveal").click();
+      expect(state.onboard.reveal).toBe(true);
+    }
+  });
+
+  // Marek's: in Firefox for Android the app switcher took its picture before the page heard it was leaving.
+  it("shows its words in Firefox for Android only while Hold to show words is held, with no Copy", () => {
+    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+    const state = { route: "onboard_create_phrase", onboard: { ...emptyFlow(), mnemonic: MNEMONIC, reveal: true } };
+    const acts = actions();
+    const body = show(onboardingCreatePhraseView({ state, actions: acts }));
+    const blurred = () => body.querySelector(".srp-grid").classList.contains("srp-grid--blur");
+    expect([blurred(), body.querySelectorAll(".phrase-tools button").map((b) => b.textContent)]).toEqual([true, ["Hold to show words"]]);
+    const hold = button(body, "Hold to show words");
+    hold.click();
+    expect([blurred(), state.onboard.reveal]).toEqual([true, false]);
+    hold.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 1 }));
+    expect(blurred()).toBe(false);
+    hold.dispatchEvent(fakeEvent("pointerup", { button: 0, pointerId: 1 }));
+    expect(blurred()).toBe(true);
+    hold.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 2 }));
+    dom.document.visibilityState = "hidden";
+    dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    expect([blurred(), acts.render.mock.calls.length]).toEqual([true, 0]);
   });
 
   it("keeps its words through Back to the password and forward again", async () => {
@@ -855,6 +949,21 @@ describe("fingerprint unlock", () => {
     await vi.waitFor(() => expect(asked.filter(([action]) => action === "unlock")).toHaveLength(2));
   });
 
+  // Chen's, Lena's: the app opened, or a link opened it, on Unlock with the box not focused and the keyboard down.
+  it("focuses the password box as Unlock opens without the fingerprint, with the keyboard up in the app on a phone", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const { asked } = phone({ available: true, on: false });
+    let body = show(lockedView({ state: {}, actions: actions() }));
+    await vi.waitFor(() => expect(dom.document.activeElement).toBe(field(body, "Password")));
+    await vi.waitFor(() => expect(asked.map(([action]) => action)).toEqual(["status", "keyboard"]));
+    // Outside the app: focused, and nothing asked of a keyboard.
+    delete dom.window.__TAURI_INTERNALS__;
+    dom.document.activeElement?.blur?.();
+    body = show(lockedView({ state: {}, actions: actions() }));
+    await vi.waitFor(() => expect(dom.document.activeElement).toBe(field(body, "Password")));
+    expect(asked.map(([action]) => action)).toEqual(["status", "keyboard"]);
+  });
+
   it("asks nothing of a phone without it, nor outside the app", async () => {
     const { asked } = phone({ available: false, on: false });
     const body = show(lockedView({ state: {}, actions: actions() }));
@@ -874,6 +983,11 @@ describe("fingerprint unlock", () => {
     await vi.waitFor(() => expect(dom.document.body.querySelector("[role=alertdialog]")).toBeTruthy());
     expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_UNLOCK", password: "typed password" });
     expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toContain("Turn fingerprint unlock on again?");
+    // An offer, which throws nothing away: Turn on stays its main button.
+    expect(dom.document.body.querySelectorAll("[role=alertdialog] button").map((b) => [b.textContent, b.className])).toEqual([
+      ["Cancel", "btn-outline"],
+      ["Turn on", "btn-primary"],
+    ]);
     button(dom.document.body, "Turn on").click();
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["enable", "typed password"]));
   });
