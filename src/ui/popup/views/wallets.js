@@ -17,6 +17,7 @@ import { isExtensionRuntime } from "../../../platform/runtime.js";
 import { platform } from "../../../platform/index.js";
 import { switchContext } from "../context.js";
 import { fingerprintPassword, fingerprintStatus, showKeyboard, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
+import { focusOnOpen } from "../../lib/focusOnOpen.js";
 
 // A wrong password, or one that has to wait, is said under the password.
 const passwordRefusal = (message) => /^Incorrect password$|^Too many attempts/.test(String(message ?? ""));
@@ -200,6 +201,7 @@ export function resetWalletView(ov, { state, actions } = {}) {
       if (on && pwd.input.isConnected) fingerBtn.hidden = false;
     })
     .catch(() => {});
+  focusOnOpen(pwd.input);
 
   return Object.assign([
     subnav({ title: "Reset wallet", onBack: () => backToSettings(state, actions) }),
@@ -479,6 +481,7 @@ export function checkWordsView(ov, { state, actions } = {}) {
     .catch(() => {});
 
   page.replaceChildren(h("p", { class: "auth-lead", text: "Your password, to check this wallet's recovery words." }), ...pwd.els, err.el, btn, fingerBtn);
+  focusOnOpen(pwd.input);
   return Object.assign([subnav({ title: "Check your recovery words", onBack: () => backToSettings(state, actions) }), page], { busy: () => busy && state.context === asked });
 }
 

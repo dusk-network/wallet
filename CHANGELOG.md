@@ -125,6 +125,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept a date's or a list's picker open in the Android app while the wallet draws its page again, and took "Choose both days." away once both are chosen.
+- Focused the password box as Unlock, Check your recovery words and Reset wallet open, with the keyboard up in the Android app.
 - Said on the setup screen which network a payment link that opened the app before there was a wallet is for, and when it was opened; once the wallet's made, Send says when, and a link older than ten minutes goes, as one behind the lock does.
 - Said Not sent yet, with Send it now and Don't send, of a stake, a contract call or any other public transaction of the wallet's own that the network never got as its connection went, rather than Not confirmed for good; Send it now sends the very same transaction, Don't send says it may still arrive and shows it as Sent, with a notice, if it does, and one whose place another took says Not sent.
 - Told a connected site nothing as you switch to another profile, or as its profile's name is checked again and found the same, and refused in the page itself a site's request whose parameters carry a prototype or a "__proto__" key, which the wallet was answering as an empty one.

@@ -622,7 +622,31 @@ describe("settings", () => {
     expect(view.actions.send).not.toHaveBeenCalled();
     finger().click();
     await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_RESET_WALLET", password: "the password" }));
-    expect(asked.filter((action) => action !== "status")).toEqual(["unlock", "disable"]);
+    // The password box focused as the screen opened, the keyboard up (R14), then the fingerprint as asked.
+    expect(asked[asked.findIndex((action) => action !== "status")]).toBe("keyboard");
+    expect(asked.filter((action) => action !== "status" && action !== "keyboard")).toEqual(["unlock", "disable"]);
+  });
+
+  // Chen's, Lena's and Sofía's, in the app: on Unlock, Check your recovery words and Reset wallet the password box
+  // wasn't focused, and the keyboard stayed down till it was tapped.
+  it("focuses the password box with the keyboard up as Check your recovery words and Reset wallet open, in the app", async () => {
+    const asked = [];
+    dom.window.__TAURI_INTERNALS__ = {
+      invoke: vi.fn(async (cmd, args) => {
+        if (cmd === "fingerprint") asked.push(args.action);
+        return cmd === "fingerprint" && args.action === "status" ? { ok: true, available: true, on: false } : { ok: true };
+      }),
+    };
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const view = await settings({}, { app: true });
+    const { checkWordsView, resetWalletView } = await import("./popup/views/wallets.js");
+    for (const screen of [checkWordsView, resetWalletView]) {
+      asked.length = 0;
+      dom.document.body.replaceChildren(...screen(view.ov, { state: view.state, actions: view.actions }));
+      const password = dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with");
+      await vi.waitFor(() => expect(dom.document.activeElement).toBe(password));
+      await vi.waitFor(() => expect(asked).toContain("keyboard"));
+    }
   });
 
   it("starts each switch of profile, network or wallet before asking the wallet, so a check begun before it can tell", async () => {

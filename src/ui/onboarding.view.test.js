@@ -934,6 +934,21 @@ describe("fingerprint unlock", () => {
     await vi.waitFor(() => expect(asked.filter(([action]) => action === "unlock")).toHaveLength(2));
   });
 
+  // Chen's, Lena's: the app opened, or a link opened it, on Unlock with the box not focused and the keyboard down.
+  it("focuses the password box as Unlock opens without the fingerprint, with the keyboard up in the app on a phone", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
+    const { asked } = phone({ available: true, on: false });
+    let body = show(lockedView({ state: {}, actions: actions() }));
+    await vi.waitFor(() => expect(dom.document.activeElement).toBe(field(body, "Password")));
+    await vi.waitFor(() => expect(asked.map(([action]) => action)).toEqual(["status", "keyboard"]));
+    // Outside the app: focused, and nothing asked of a keyboard.
+    delete dom.window.__TAURI_INTERNALS__;
+    dom.document.activeElement?.blur?.();
+    body = show(lockedView({ state: {}, actions: actions() }));
+    await vi.waitFor(() => expect(dom.document.activeElement).toBe(field(body, "Password")));
+    expect(asked.map(([action]) => action)).toEqual(["status", "keyboard"]);
+  });
+
   it("asks nothing of a phone without it, nor outside the app", async () => {
     const { asked } = phone({ available: false, on: false });
     const body = show(lockedView({ state: {}, actions: actions() }));

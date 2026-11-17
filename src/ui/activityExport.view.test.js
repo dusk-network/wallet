@@ -321,6 +321,27 @@ describe("Activity's Export", () => {
     expect(button("Save CSV").disabled).toBe(false);
   });
 
+  // Sofía's, in the app: "Choose both days." stayed after both days were set.
+  it("takes Choose both days. away once both are chosen, by a phone's picker too", async () => {
+    page("/full.html");
+    setup();
+    button("Export").click();
+    pickPeriod("dates");
+    button("Save CSV").click();
+    await settle();
+    expect(fieldError()).toBe("Choose both days.");
+    const pick = (id, value) => {
+      const input = body().querySelector(`#${id}`);
+      input.value = value;
+      // A phone's date picker says it with change.
+      input.dispatchEvent(new Event("change"));
+    };
+    pick("activity-export-from", "2026-10-01");
+    expect(fieldError()).toBe("Choose both days.");
+    pick("activity-export-to", "2026-10-23");
+    expect(fieldError()).toBe("");
+  });
+
   it("holds any dates, both days whole, and says what's wrong with them", async () => {
     page("/full.html");
     setup();

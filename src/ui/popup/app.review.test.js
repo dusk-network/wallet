@@ -2095,6 +2095,37 @@ describe("a field typed in while the wallet draws its screen again", () => {
     expect(t.app.textContent).toContain("Nothing in your activity matches that.");
   });
 
+  // Sofía's, in the app: the export's dates closed by themselves within seconds, as polls drew the page again, and her
+  // next taps landed on the page under them.
+  it("stays a list or a date whose picker may be open, till it's left; the screen follows then", async () => {
+    const t = await popupOn("activity", { addressBook: { loaded: true, items: [] }, activityExport: { open: true, period: "dates", withContacts: false } });
+    for (const selector of ["#activity-export-from", "#activity-export-period"]) {
+      const field = t.app.querySelector(selector);
+      expect(field).toBeTruthy();
+      field.focus();
+      await t.render({ forceRefresh: true });
+      await t.render({ forceRefresh: true });
+      await flush();
+      expect([t.app.querySelector(selector), t.dom.document.activeElement]).toEqual([field, field]);
+      // Left: drawn again.
+      field.blur();
+      await vi.waitFor(() => expect(t.app.querySelector(selector)).not.toBe(field), { timeout: 3000 });
+    }
+  });
+
+  // Astra's, the second time: Period's own choice, Choose dates, showed no days till something else was focused, as
+  // a list keeps the focus once its picker closes. A choice made in it closes it: what it asks for is drawn at once.
+  it("draws what a choice in a list asks for at once, the choice having closed its picker", async () => {
+    const t = await popupOn("activity", { addressBook: { loaded: true, items: [] }, activityExport: { open: true, period: "all", withContacts: false } });
+    const period = t.app.querySelector("#activity-export-period");
+    expect(t.app.querySelector("#activity-export-from")).toBeNull();
+    period.focus();
+    period.value = "dates";
+    period.dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(t.app.querySelector("#activity-export-from")).toBeTruthy(), { timeout: 3000 });
+    expect(t.app.querySelector("#activity-export-period").value).toBe("dates");
+  });
+
   it("is drawn again at once on another wallet or a lock, typed in or not", async () => {
     const t = await popupOn("activity", { addressBook: { loaded: true, items: [] } });
     const field = t.app.querySelector(".activity-search");

@@ -306,11 +306,27 @@ const typingField = (el) =>
 function typingNow() {
   return typingField(document.activeElement) && (composing || Date.now() - typedAt < TYPING_SETTLES_MS);
 }
+// A field whose own picker the phone may have open over the page as long as
+// it's focused: a list, a date's. Swapped for its twin, its picker closes and
+// the next taps land on the page under it (Sofía's, in the app: the export's
+// dates closed by themselves within seconds, four tries for two dates). A
+// redraw of the same screen waits till it's left.
+const pickerField = (el) =>
+  Boolean(el && app?.contains?.(el)) &&
+  !el.disabled &&
+  (el.localName === "select" || (el.localName === "input" && /^(date|time|datetime-local|month|week)$/.test(String(el.getAttribute?.("type") ?? ""))));
+// A choice made in it (change) closes its picker: the redraw that choice
+// asks for, and any after it, are drawn at once till it's pressed again,
+// which may open it (Astra's: Period's own Choose dates showed no days till
+// something else was focused, as a list keeps the focus once its picker
+// closes).
+let pickerShut = null;
+const pickingNow = () => pickerField(document.activeElement) && document.activeElement !== pickerShut;
 function redrawOnceTyped() {
   clearTimeout(redrawTimer);
   redrawTimer = setTimeout(() => {
     redrawTimer = null;
-    if (typingNow()) redrawOnceTyped();
+    if (typingNow() || pickingNow()) redrawOnceTyped();
     else render({ cached: true }).catch(() => {});
   }, TYPING_SETTLES_MS);
 }
@@ -328,6 +344,14 @@ try {
   document.addEventListener("focusout", () => {
     composing = false;
   }, true);
+  document.addEventListener("change", (e) => {
+    if (pickerField(e?.target)) pickerShut = e.target;
+  }, true);
+  for (const type of ["pointerdown", "keydown"]) {
+    document.addEventListener(type, (e) => {
+      if (pickerShut && (e?.target === pickerShut || pickerShut.contains?.(e?.target))) pickerShut = null;
+    }, true);
+  }
 } catch {
   // ignore
 }
@@ -383,7 +407,7 @@ function setApp(children) {
     const shown = `${state?.overview?.isUnlocked === false ? "locked" : ""}|${screen}`;
     // The same screen, for the same wallet, profile and network, drawn again
     // while a field on it is typed in: it's drawn once the typing stops.
-    if (children !== mounted && shown === lastShown && state?.context === mountedContext && typingNow()) {
+    if (children !== mounted && shown === lastShown && state?.context === mountedContext && (typingNow() || pickingNow())) {
       redrawOnceTyped();
       return;
     }
