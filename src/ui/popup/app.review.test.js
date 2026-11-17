@@ -1702,16 +1702,47 @@ describe("a payment link that opens the app before there's a wallet in it", () =
     return note ? visibleText(note) : "";
   };
 
-  it("says on the setup screen that a payment link waits, to set up or import a wallet to pay it, or open it in the browser", async () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("says on the setup screen that a payment link waits, for which network and since when, to set up or import a wallet to pay it, or open it in the browser", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(2026, 10, 17, 7, 2));
     const { t } = await opened(WEB, { open_in_browser: true });
     expect(t.state.route).toBe("onboard_welcome");
-    expect(waiting(t)).toBe("A payment link is waitingSet up or import a wallet to pay it.Open in browser instead");
+    // Chen's: it didn't say Testnet; Sofía's: nor when it was opened.
+    expect(waiting(t)).toBe("A payment link is waitingFor Testnet, opened at 07:02. Set up or import a wallet to pay it.Open in browser instead");
     expect(t.state.draft).toMatchObject({ to: B, memo: "Les tulipes", linkSetup: true });
     // Open in browser instead: handed to the phone's browser, never to the app, which Android gives these links to.
     t.app.querySelectorAll("button").find((b) => b.textContent === "Open in browser instead").click();
     await flush();
     expect(t.dom.window.__TAURI_INTERNALS__.invoke).toHaveBeenCalledWith("open_in_browser", { url: WEB }, undefined);
     expect([waiting(t), t.state.draft]).toEqual(["", null]);
+  });
+
+  // Sofía's: another's link, opened on the shared phone, filled Send in right after her Import eleven minutes on, with
+  // no time; and again with her own after Reset.
+  it("says on Send when it was opened once the wallet's made within ten minutes, and goes past them", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    for (const [minutes, shown] of [
+      [8, "Filled in from the link, to pay on Testnet. Check it before you send. From a link opened at 07:02."],
+      [11, null],
+    ]) {
+      vi.setSystemTime(new Date(2026, 10, 17, 7, 2));
+      const { t } = await opened(WEB);
+      expect(t.state.draft).toMatchObject({ linkSetup: true });
+      // The wallet made: Send, the link's, as the setup leaves it.
+      vi.setSystemTime(new Date(2026, 10, 17, 7, 2 + minutes));
+      t.send.mockImplementation(async (message) => (message.type === "DUSK_UI_OVERVIEW" ? { ...t.open, nodeUrl: "https://testnet.nodes.dusk.network" } : message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { ok: true, result: { min: "1", median: "1", max: "1" } } : { ok: true, result: null }));
+      t.state.route = "send";
+      await t.render({ forceRefresh: true });
+      await flush();
+      if (shown) {
+        expect(t.state.route).toBe("send");
+        expect(t.app.querySelector(".send-filled-note")?.textContent).toBe(shown);
+      } else {
+        expect([t.state.route, t.state.draft]).toEqual(["home", null]);
+      }
+    }
   });
 
   it("offers a dusk: link to the browser as its web wallet's link", async () => {

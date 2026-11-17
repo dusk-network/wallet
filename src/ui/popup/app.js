@@ -1681,11 +1681,14 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
 
   if (!ov?.hasVault) {
     // A payment link that opened the app before there's a wallet: it waits
-    // through the setup, however long, and the setup screen says so.
+    // through the setup, and the setup screen says so, with when it was
+    // opened, as one behind the lock does: past LINK_WAITS_MS it goes, here
+    // or as the wallet's made (Sofía's: another's link, opened on the shared
+    // phone eleven minutes before, filled Send in right after her Import).
     if (state.draft?.filledIn === "link" && state.draft.linkUrl && !state.draft.linkSetup) {
-      const { linkAt: _linkAt, ...waits } = state.draft;
-      state.draft = { ...waits, linkSetup: true };
+      state.draft = { ...state.draft, linkAt: Number(state.draft.linkAt) || Date.now(), linkSetup: true };
     }
+    if (state.draft?.linkSetup && Date.now() - Number(state.draft.linkAt) > LINK_WAITS_MS) state.draft = null;
     if (!ONBOARD_ROUTES.has(state.route)) {
       state.route = "onboard_welcome";
     }

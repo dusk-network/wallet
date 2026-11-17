@@ -19,7 +19,8 @@ import { NETWORK_PRESETS } from "../../../shared/networkPresets.js";
 import { detectPresetId } from "../../../shared/network.js";
 import { fingerprintStatus, turnFingerprintOff, turnFingerprintOn } from "../../../platform/fingerprint.js";
 import { openInPhoneBrowser } from "../../../platform/native.js";
-import { makePaymentLink } from "@dusk-network/app-core/payment-links";
+import { chainLabel, makePaymentLink } from "@dusk-network/app-core/payment-links";
+import { clockText } from "../../lib/time.js";
 import { readRequestLink } from "../../lib/requestLink.js";
 
 function generateMnemonic12() {
@@ -155,9 +156,14 @@ function webLinkOf(url) {
 function linkWaiting(state, actions) {
   if (!state.draft?.linkSetup) return null;
   const web = webLinkOf(state.draft.linkUrl);
+  // Which network it pays on, and when it was opened: it goes ten minutes
+  // after (Chen's: it didn't say Testnet; Sofía's: nor when).
+  const network = state.draft.requestChainId ? chainLabel(state.draft.requestChainId) : "";
+  const at = Number(state.draft.linkAt) > 0 ? `opened at ${clockText(Number(state.draft.linkAt))}` : "";
+  const said = [network ? `For ${network}` : "", at].filter(Boolean).join(", ");
   return h("div", { class: "callout onboard-link", role: "status" }, [
     h("div", { class: "callout-title", text: "A payment link is waiting" }),
-    h("p", { class: "muted onboard-link__note", text: "Set up or import a wallet to pay it." }),
+    h("p", { class: "muted onboard-link__note", text: `${said ? `${said.charAt(0).toUpperCase()}${said.slice(1)}. ` : ""}Set up or import a wallet to pay it.` }),
     web
       ? h("button", {
           class: "btn-outline onboard-link__browser",
