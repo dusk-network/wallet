@@ -12,6 +12,7 @@ import {
 } from "../../../shared/amount.js";
 import { chainIdForNode, networkKeyOf } from "../../../shared/nodeNetwork.js";
 import { POSITION_WORDS, sozuPosition, sozuRate, sozuRateLine, sozuYear } from "@dusk-network/app-core/sozu";
+import { FACTS_WAIT_MS } from "@dusk-network/app-core/export";
 import { SOZU_FN, feePercent, leastSozuStake, parsePool, sozuStake, sozuUnstakeAllowed } from "@dusk-network/networks/sozu";
 
 import {
@@ -40,7 +41,7 @@ import { reviewActions, submitOnGasEnter } from "../../components/FormControls.j
 import { gasFeeLux, payGuard, startingGas, useNetworkGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
-import { activityKey, activityRows, keptRatesOf, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
+import { SOZU_FACT_SOON_MS, activityKey, activityRows, keptRatesOf, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 import { whenAtText } from "./txRow.js";
 
@@ -418,10 +419,54 @@ function sozuHistory(ov, st, { state, actions }) {
   wholeActivity(ov, { state, publicOnly: true })
     .then(async (whole) => {
       const rows = activityRows(ov, state, whole);
-      done({ rows, facts: await sozuFactsOf(ov, rows), whole: true });
+      done({ rows, facts: await factsOfRows(ov, rows), whole: true });
     })
     .catch(() => done({}));
   return history;
+}
+
+/**
+ * The stakes and unstakes with Sozu in `rows` that went through in a block
+ * the wallet knows, in the last FACTS_WAIT_MS, whose facts `facts` doesn't
+ * have: app-core leaves those out of rewards by year till they're read
+ * (`reading`), and counts an older one without them as not known.
+ * @param {object[]} rows
+ * @param {Map<string, object> | undefined} facts
+ */
+function unreadInBlock(rows, facts, now = Date.now()) {
+  return (rows ?? []).filter(
+    (row) =>
+      row?.sozu &&
+      row.status === "executed" &&
+      Number.isSafeInteger(row.blockHeight) &&
+      row.blockHeight > 0 &&
+      typeof row.time === "number" &&
+      now - row.time <= FACTS_WAIT_MS &&
+      !facts?.has(row.hash)
+  );
+}
+
+/**
+ * What each stake and unstake with Sozu in `rows` did, as its pool's event
+ * says it: as the archive's history lists it, else, for one that went through
+ * in a block the wallet knows (unreadInBlock), from that block's events, as
+ * its Completed screen reads it. The archive's history lists a transaction
+ * only once its block is final, a little after: one just made is the wallet's
+ * own record till then (Lena's, the fourth round: the popup reopened at
+ * Completed, Rewards by year kept the "taken out" from before her unstake for
+ * 20 to 25 s, beside a "grown" that had moved). Undefined where none could
+ * be read.
+ * @param {object} ov - the overview
+ * @param {object[]} rows - the account's rows
+ * @returns {Promise<Map<string, object> | undefined>}
+ */
+async function factsOfRows(ov, rows) {
+  const facts = await sozuFactsOf(ov, rows);
+  const early = unreadInBlock(rows, facts);
+  if (!early.length) return facts;
+  // Each as the archive's history will list it, in its block.
+  const inBlock = await sozuFactsOf(ov, early.map((row) => ({ ...row, source: "public" })), { inBlock: true });
+  return inBlock?.size ? new Map([...(facts ?? []), ...inBlock]) : facts;
 }
 
 /**
@@ -436,10 +481,10 @@ export function stakingHistory(ov, { state, actions }) {
 /**
  * A stake or an unstake with Sozu went through, or failed: what Staking read
  * of the profile's history goes, and Rewards by year reads it again as it
- * next draws, the new one counted as on its way till the archive lists it
- * (Lena's, the third round: right after the extension's own unstake, the year
- * kept the "taken out" from before it for 25 s, beside a "grown" that had
- * moved, as what was read before the unstake stood).
+ * next draws, the new one from its block's events (factsOfRows) till the
+ * archive lists it (Lena's, the third round: right after the extension's own
+ * unstake, the year kept the "taken out" from before it for 25 s, beside a
+ * "grown" that had moved, as what was read before the unstake stood).
  * @param {object} state - the popup's state
  */
 export function readStakingAgain(state) {
@@ -450,30 +495,38 @@ export function readStakingAgain(state) {
 
 /** How long Sozu's facts wait before they're read again, while some aren't on the archive. */
 export const FACTS_AGAIN_MS = 20_000;
+// While one in a block the wallet knows isn't read, as its block's events can
+// come a moment after it: read again this many times, as often as its
+// Completed screen asks (SOZU_FACT_SOON_MS).
+const FACTS_SOON_TRIES = 10;
 
 /**
  * A stake's or an unstake's facts come from the archive a little after its
- * block, and only once its history lists it there, with its block: one just
- * made is the wallet's own record of it till then, whose facts nothing reads.
- * While rewards by year wait on some (app-core's `reading`), the whole history
- * is read again 20 seconds on, as the web wallet reads it, and its facts with
- * it, one read at a time, and the screen drawn again after each read, what
- * came or not (`factsRead`): rewards by year are worked out again, and while
- * some are still read, read again 20 seconds on.
+ * block: from its block's events once the archive has them, and from its
+ * history once that lists it (factsOfRows). While rewards by year wait on
+ * some (app-core's `reading`), the whole history is read again, and its facts
+ * with it: 3 seconds on, a few times, while one in a block the wallet knows
+ * isn't read, else 20 seconds on, as the web wallet reads it; one read at a
+ * time, and the screen drawn again after each read, what came or not
+ * (`factsRead`): rewards by year are worked out again, and while some are
+ * still read, read again.
  */
 export function readSozuFactsAgain(ov, { state, actions }) {
   const st = sozuState(state);
   const history = st.history;
   if (!history || history.reading || history.againTimer) return;
+  const soon = unreadInBlock(history.rows, history.facts).length > 0 && (history.soonReads ?? 0) < FACTS_SOON_TRIES;
+  if (soon) history.soonReads = (history.soonReads ?? 0) + 1;
   history.againTimer = setTimeout(() => {
     wholeActivity(ov, { state, publicOnly: true })
       .then((whole) => activityRows(ov, state, whole))
       .catch(() => history.rows)
       .then(async (rows) => {
-        const facts = await sozuFactsOf(ov, rows);
+        const facts = await factsOfRows(ov, rows);
         if (st.history !== history) return;
         history.rows = rows;
-        if (facts) history.facts = facts;
+        // What's read now, over what was: a read that fails takes nothing away.
+        if (facts) history.facts = new Map([...(history.facts ?? []), ...facts]);
       })
       .catch(() => {})
       .finally(() => {
@@ -482,7 +535,7 @@ export function readSozuFactsAgain(ov, { state, actions }) {
         history.factsRead = (history.factsRead ?? 0) + 1;
         actions?.render?.()?.catch?.(() => {});
       });
-  }, FACTS_AGAIN_MS);
+  }, soon ? SOZU_FACT_SOON_MS : FACTS_AGAIN_MS);
 }
 
 /**
@@ -1065,7 +1118,10 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
   gasEditor.hideTotal = amountMasked;
-  gasEditor.amountLux = "0";
+  // A stake's total is its deposit and fee; what an unstake brings back is
+  // what you receive, the fee apart (Lena's: "Total up to 0.01 DUSK" for 0.1).
+  gasEditor.comesBack = !isStake;
+  gasEditor.amountLux = isStake ? "0" : draftNeeds.toString();
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
   gasEditor.setGas(draft?.gas ?? null);
   // The contract the call goes to, Sozu's pool as its hub named it, with the

@@ -460,10 +460,15 @@ function rewardYears(ov, { state, actions, hidden, status }) {
       .catch(() => {});
   }
   // Sozu's part as it is, or null where it couldn't be read, which is said.
-  const years = state.rewardYears.years.filter((year) => anyOf(year.claimed) || anyOf(year.sozu) || anyOf(year.sozuGrown) || year.sozu === null || year.sozuGrown === null);
+  // While a stake's or an unstake's facts are read (app-core's `reading`),
+  // "Reading…" in place of what it moves, never a figure from before it beside
+  // one after it (Lena's: the "taken out" from before her unstake, beside a
+  // "grown" that had moved, for 20 to 25 s, with no word that it was read).
+  const years = state.rewardYears.years.filter((year) => year.reading > 0 || anyOf(year.claimed) || anyOf(year.sozu) || anyOf(year.sozuGrown) || year.sozu === null || year.sozuGrown === null);
   if (!years.length) return null;
-  const line = (label, sum) => {
+  const line = (label, sum, reading = false) => {
     if (sum === null) return [`${label}: couldn't be read`];
+    if (reading) return [`${label}: `, h("span", { class: "muted", text: "Reading…" })];
     if (!anyOf(sum)) return null;
     const worth = valued ? worthText(sum, currency) : "";
     return [`${label}: `, ...amountParts(hidden, sum.lux), worth ? h("span", { class: "kv-muted" }, [" · ", balance(hidden, worth)]) : null].filter(Boolean);
@@ -481,13 +486,14 @@ function rewardYears(ov, { state, actions, hidden, status }) {
     h("span", { text: `Add each reward's value in ${currencyName(currency)}, from CoinGecko's prices` }),
   ]);
   // Sozu's two lines, how they're counted, in both wallets' words (app-core).
-  const sozuShown = years.some(({ sozu, sozuGrown }) => sozu === null || sozuGrown === null || anyOf(sozu) || anyOf(sozuGrown));
+  const sozuShown = years.some(({ sozu, sozuGrown, reading }) => reading > 0 || sozu === null || sozuGrown === null || anyOf(sozu) || anyOf(sozuGrown));
   return [
     h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
-    h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown }) =>
+    h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown, reading }) =>
       kvRow(
         String(year),
-        [line(REWARD_WORDS.claimed, claimed), line(REWARD_WORDS.sozuGrown, sozuGrown), line(REWARD_WORDS.sozu, sozu)]
+        // What grew moves with each stake and unstake; what was taken out, where some was, with an unstake.
+        [line(REWARD_WORDS.claimed, claimed), line(REWARD_WORDS.sozuGrown, sozuGrown, reading > 0), line(REWARD_WORDS.sozu, sozu, reading > 0 && anyOf(sozu))]
           .filter(Boolean)
           .map((parts) => h("span", { class: "stake-year-part" }, parts))
       )
@@ -1065,24 +1071,28 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
 
   const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
 
-  const gasPrivacy = d.payment === FUNDING_SHIELDED ? "shielded" : "public";
-  // The network's gas price by default; Custom fee for gas of your own.
-  const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
-    kind,
-    gasOpts: { privacy: gasPrivacy },
-    amountLux: kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : "0",
-    hideTotal: kind === TX_KIND.STAKE && balancesHidden(ov) && Boolean(d.amountMasked),
-    ov,
-    actions,
-    gas: d?.gas,
-  });
-
   // What moves: the amount staked, or all of the stake or the rewards. The
   // stake and the rewards are balances, hidden with Hide balances; an amount
   // typed in for a stake shows, as on every Review; what Max filled in doesn't.
   const shownLux = kind === TX_KIND.STAKE ? d.amountLux : d.amountLux || d.displayLux;
   const allText = kind === TX_KIND.UNSTAKE ? "All stake" : kind === TX_KIND.WITHDRAW_REWARD ? "All rewards" : "—";
   const hideAmount = (kind !== TX_KIND.STAKE || Boolean(d.amountMasked)) && balancesHidden(ov);
+
+  const gasPrivacy = d.payment === FUNDING_SHIELDED ? "shielded" : "public";
+  // The network's gas price by default; Custom fee for gas of your own. A
+  // stake's total is it and its fee; what an unstake or a claim brings back
+  // is what you receive, the fee apart (Lena's: "Total up to" the fee alone).
+  const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
+    kind,
+    gasOpts: { privacy: gasPrivacy },
+    amountLux: kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : String(shownLux ?? "0"),
+    comesBack: kind !== TX_KIND.STAKE,
+    hideTotal: hideAmount,
+    ov,
+    actions,
+    gas: d?.gas,
+  });
+
   const amountLine = () =>
     shownLux && safeBigInt(shownLux, 0n) > 0n ? [balance(hideAmount, formatDuskExact(shownLux)), " DUSK"] : [allText];
 

@@ -1,4 +1,4 @@
-import { UI_DISPLAY_DECIMALS, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
+import { UI_DISPLAY_DECIMALS, formatDusk, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { h, setChildren } from "../lib/dom.js";
 import { GAS_PRICE_BUSY } from "../../shared/txDefaults.js";
 import { balance } from "./Balance.js";
@@ -6,17 +6,19 @@ import { fieldLabel, integerInput } from "./FormControls.js";
 
 // The one fee editor, on every Review and in the approval windows: the
 // network fee and the total, then "Custom fee" for a gas limit and price of
-// your own. By default a Review sets the network's gas price and a limit that
-// suits the transaction (NetworkGas.js); a limit under the transaction's
-// minimum, or a price of 0, says so while it's typed, and the fee it comes to
-// shows in DUSK under the fields. While the gas won't do, `error` says why
-// and a "dusk-gas-validity" event tells the page (submitOnGasEnter keeps its
-// button off). A "dusk-gas-fee" event gives the most the gas comes to as it
-// changes, `detail.feeLux`, null while the gas won't do or isn't set, for a
-// page that shows it elsewhere too. Where the network is busy (`busyMedian`,
-// the mempool's median over the default price's ceiling), it says so under
-// the fee while the price in use is under that median, and that the price can
-// be raised for it to go out sooner.
+// your own. Where the amount comes back to the account (`comesBack`), as an
+// unstake's or a claim's does, it says what you receive in place of the
+// total, the fee its own row. By default a Review sets the network's gas
+// price and a limit that suits the transaction (NetworkGas.js); a limit under
+// the transaction's minimum, or a price of 0, says so while it's typed, and
+// the fee it comes to shows in DUSK under the fields. While the gas won't do,
+// `error` says why and a "dusk-gas-validity" event tells the page
+// (submitOnGasEnter keeps its button off). A "dusk-gas-fee" event gives the
+// most the gas comes to as it changes, `detail.feeLux`, null while the gas
+// won't do or isn't set, for a page that shows it elsewhere too. Where the
+// network is busy (`busyMedian`, the mempool's median over the default
+// price's ceiling), it says so under the fee while the price in use is under
+// that median, and that the price can be raised for it to go out sooner.
 
 function maxFeeFromGasStrings(limitStr, priceStr) {
   const l = String(limitStr ?? "").trim();
@@ -49,6 +51,7 @@ export class DuskGasEditor extends HTMLElement {
 
   #amountLux = 0n;
   #hideTotal = false;
+  #comesBack = false;
   #extraLux = [];
   #maxDecimals = UI_DISPLAY_DECIMALS;
   #helpText = "Max fee = gas limit × gas price. Clear both to use the wallet's defaults.";
@@ -66,6 +69,8 @@ export class DuskGasEditor extends HTMLElement {
   #lastError = "";
   #lastFee = undefined;
   #feeValue = null;
+  #totalLabel = null;
+  #totalRow = null;
   #totalValue = null;
   #details = null;
   #helpNode = null;
@@ -83,9 +88,19 @@ export class DuskGasEditor extends HTMLElement {
   }
 
   // An amount Max filled in stays hidden with the balances, and the total
-  // gives it away.
+  // gives it away; so does what you receive, for an amount that's a balance.
   set hideTotal(v) {
     this.#hideTotal = Boolean(v);
+  }
+
+  /**
+   * Whether `amountLux` comes back to the account, as an unstake's or a
+   * claim's does: "You receive" says it in place of the total, which would
+   * be the fee again (Lena's: "Total up to 0.01 DUSK" for 0.1 coming back).
+   */
+  set comesBack(v) {
+    this.#comesBack = Boolean(v);
+    this.updatePreview();
   }
 
   set amountLux(v) {
@@ -275,9 +290,11 @@ export class DuskGasEditor extends HTMLElement {
       ]),
     ]);
 
+    this.#totalLabel = h("span", { class: "kv-label", text: "Total" });
+    this.#totalRow = h("div", { class: "kv" }, [this.#totalLabel, this.#totalValue]);
     const group = h("div", { class: "group gas-fee" }, [
       h("div", { class: "kv" }, [h("span", { class: "kv-label", text: "Network fee" }), this.#feeValue]),
-      h("div", { class: "kv" }, [h("span", { class: "kv-label", text: "Total" }), this.#totalValue]),
+      this.#totalRow,
     ]);
 
     this.#busyNote = h("p", { class: "muted gas-busy", role: "note", hidden: true, text: GAS_PRICE_BUSY });
@@ -307,7 +324,7 @@ export class DuskGasEditor extends HTMLElement {
   }
 
   updatePreview() {
-    if (!this.#feeValue || !this.#totalValue) return;
+    if (!this.#feeValue || !this.#totalValue || !this.#totalRow) return;
 
     const { limit, price } = this.getGasInputs();
     const feeLux = maxFeeFromGasStrings(limit, price);
@@ -336,20 +353,29 @@ export class DuskGasEditor extends HTMLElement {
     this.#maxLine.textContent = feeLux !== null && !error ? `At most ${formatDuskExact(feeLux)} DUSK` : "";
     this.#maxLine.hidden = !this.#maxLine.textContent;
 
+    // What comes back is what you receive, whatever the gas: never added to
+    // the fee as a total. An amount not known says nothing.
+    this.#totalLabel.textContent = this.#comesBack ? "You receive" : "Total";
+    this.#totalRow.hidden = this.#comesBack && this.#amountLux <= 0n;
+    const total = (value) => {
+      this.#totalValue.title = "";
+      if (this.#comesBack) setChildren(this.#totalValue, [h("span", {}, ["about ", balance(this.#hideTotal, formatDusk(this.#amountLux.toString())), " DUSK"])]);
+      else if (typeof value === "string") this.#totalValue.textContent = value;
+      else setChildren(this.#totalValue, [value]);
+    };
+
     // Gas that won't do has no fee or total to show.
     if (error) {
       this.#feeValue.textContent = "—";
       this.#feeValue.title = "";
-      this.#totalValue.textContent = "—";
-      this.#totalValue.title = "";
+      total("—");
       return;
     }
 
     if (feeLux === null) {
       this.#feeValue.textContent = "Set by the network";
       this.#feeValue.title = "";
-      this.#totalValue.textContent = "—";
-      this.#totalValue.title = "";
+      total("—");
       return;
     }
 
@@ -360,9 +386,7 @@ export class DuskGasEditor extends HTMLElement {
     for (const x of this.#extraLux) totalLux += x;
 
     // A maximum too, so it rounds up as the fee does.
-    if (this.#hideTotal) setChildren(this.#totalValue, [h("span", {}, ["up to ", balance(true, ""), " DUSK"])]);
-    else this.#totalValue.textContent = `up to ${formatFee(totalLux, { max: true })} DUSK`;
-    this.#totalValue.title = "";
+    total(this.#hideTotal ? h("span", {}, ["up to ", balance(true, ""), " DUSK"]) : `up to ${formatFee(totalLux, { max: true })} DUSK`);
   }
 
   /**

@@ -129,6 +129,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said on an unstake's and a claim's Review what you receive, with the network fee on its own, rather than a total of the fee alone; and counted your own Sozu unstake in Rewards by year once it's in its block, saying Reading… till then.
 - Said in Send's To which .dusk name one written with another point, a look-alike letter or a hidden character looks like, at once, rather than Unknown; and took a dot above, a Braille dot and spaces around a point in a profile's name for the .dusk name it imitates.
 - Read the whole of a pasted payment message, through characters that can't be seen and look-alike letters, refusing one whose amount, network or .dusk name anywhere in it isn't its link's, "You are asked" and "Please pay" read as the wallet's own line; words that state none of these may surround the link.
 - Kept a date's or a list's picker open in the Android app while the wallet draws its page again, and took "Choose both days." away once both are chosen.
