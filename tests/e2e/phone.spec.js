@@ -117,11 +117,20 @@ test("shows Send's recipient whole, start to end, rather than its end alone", as
   await popupOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "", memo: "" } });
   const to = page.locator(".to-input-wrap textarea");
   await expect(to).toHaveValue(TO);
-  const box = await to.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight, wide: el.scrollWidth - el.clientWidth, line: parseFloat(getComputedStyle(el).lineHeight) }));
-  // On more than one line, with nothing of it out of view.
-  expect(box.client).toBeGreaterThan(box.line * 2);
-  expect(box.scroll).toBeLessThanOrEqual(box.client + 1);
-  expect(box.wide).toBeLessThanOrEqual(0);
+  // Send is drawn again as the history comes in, its field anew: measured in the page, from what's drawn then,
+  // and again till that holds, as the chip's test below does. Found first and measured after, the field could be
+  // the one just taken away, with no size or style at all (0 against NaN, 1 run in 3 here, 5 in 6 on main).
+  await expect(async () => {
+    const box = await page.evaluate(() => {
+      const el = document.querySelector(".to-input-wrap textarea");
+      return el ? { scroll: el.scrollHeight, client: el.clientHeight, wide: el.scrollWidth - el.clientWidth, line: parseFloat(getComputedStyle(el).lineHeight) } : null;
+    });
+    expect(box).not.toBeNull();
+    // On more than one line, with nothing of it out of view.
+    expect(box.client).toBeGreaterThan(box.line * 2);
+    expect(box.scroll).toBeLessThanOrEqual(box.client + 1);
+    expect(box.wide).toBeLessThanOrEqual(0);
+  }).toPass();
   // Enter goes on to the amount, never a line break.
   await to.focus();
   await to.press("Enter");
