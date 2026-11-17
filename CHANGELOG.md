@@ -123,6 +123,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Told a connected site nothing as you switch to another profile, or as its profile's name is checked again and found the same, and refused in the page itself a site's request whose parameters carry a prototype or a "__proto__" key, which the wallet was answering as an empty one.
 - Showed the Android app's notice that a payment is waiting for the network wherever the phone allows the app's notices, rather than only after Tell me when it arrives.
 - Sent a payment kept by the previous version again with Send it now, rather than saying the wallet, profile or network changed.
 - Kept notices for money coming in off in the Android app when the setting is turned on and off quickly.

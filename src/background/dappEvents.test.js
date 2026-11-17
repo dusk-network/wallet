@@ -84,6 +84,12 @@ describe("dappEvents", () => {
     engineStatus = { isUnlocked: true, accounts: ["acct0", "acct1"], addresses: ["addr0", "addr1"] };
     verifiedNames = {};
     vi.resetModules();
+    // The names module afresh with the code under test, so it reads the chain IDs that code notes, not an
+    // earlier test's.
+    vi.doMock("../shared/verifiedNames.js", async (importOriginal) => ({
+      ...(await importOriginal()),
+      readVerifiedNames: vi.fn(async () => verifiedNames),
+    }));
   });
 
   it("tells each site of a switch of wallet, and shows none of them the other wallet", async () => {
@@ -142,6 +148,40 @@ describe("dappEvents", () => {
     expect(left.messages).toEqual([]);
     // The one connected hears of each switch.
     expect(events(one).filter(([name]) => name === "chainChanged").map(([, chain]) => chain)).toEqual(["dusk:1", "dusk:2", "dusk:1"]);
+  });
+
+  // Marek's: connected to Profile 1, each switch to Profile 2 and back posted a profilesChanged with Profile 1 into
+  // the page, which told it when the wallet switched.
+  it("tells a connected site nothing of a switch to another profile, nor of a name checked again and found the same", async () => {
+    permissions = { "https://dapp.example": { profileId: "account:0:acct0", accountIndex: 0, grants: { publicAccount: true }, updatedAt: 1 } };
+    const checked = (at) => ({ testnet: { acct0: { name: null, at }, acct1: { name: "bob.dusk", at } } });
+    verifiedNames = checked(Date.now() - 2 * 60_000);
+    const ev = await import("./dappEvents.js");
+    const port = new FakePort("https://dapp.example");
+    ev.registerDappPort(port);
+    await new Promise((r) => setTimeout(r, 0));
+    port.messages = [];
+
+    // The switch: Profile 2 picked, both profiles' names checked again as they show, found as before; and a
+    // profile update to every site meanwhile.
+    for (const index of [1, 0]) {
+      const before = { ...settings };
+      settings = { ...settings, selectedAccountIndex: index };
+      await ev.handleSettingsDiff(before, settings);
+      const old = verifiedNames;
+      verifiedNames = checked(Date.now());
+      await ev.handleVerifiedNamesDiff(old, verifiedNames);
+      await ev.broadcastProfilesChangedAll();
+    }
+    expect(port.messages).toEqual([]);
+
+    // Its own profile's name, found since, still reaches it.
+    const old = verifiedNames;
+    verifiedNames = { testnet: { ...old.testnet, acct0: { name: "alice.dusk", at: Date.now() } } };
+    await ev.handleVerifiedNamesDiff(old, verifiedNames);
+    expect(port.messages).toEqual([
+      { type: "DUSK_PROVIDER_EVENT", name: "profilesChanged", data: [{ profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" }] },
+    ]);
   });
 
   it("does not leak all profiles when accountIndex is out of bounds", async () => {
@@ -273,11 +313,8 @@ describe("dappEvents", () => {
       name: "connect",
       data: { chainId: "dusk:2" },
     });
-    expect(port.messages).toContainEqual({
-      type: "DUSK_PROVIDER_EVENT",
-      name: "profilesChanged",
-      data: [{ profileId: "account:0:acct0", account: "acct0" }],
-    });
+    // Its profile it had in its first state already: not told again.
+    expect(port.messages.filter((m) => m?.name === "profilesChanged")).toEqual([]);
   });
 
   it("emits profilesChanged when an origin's selected profile changes", async () => {
@@ -477,11 +514,9 @@ describe("dappEvents", () => {
     await ev.broadcastProfilesChangedForOrigin("https://evil.example");
     await ev.broadcastProfilesChangedForOrigin("https://dapp.example");
 
-    const profileMsgs = port.messages.filter(
-      (m) => m?.type === "DUSK_PROVIDER_EVENT" && m?.name === "profilesChanged"
-    );
-    expect(profileMsgs).toHaveLength(1);
-    expect(profileMsgs[0].data).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+    // Its own profile, from its first state, and never the other origin's.
+    expect(port.messages.find((m) => m?.type === "DUSK_PROVIDER_STATE")?.state.profiles).toEqual([{ profileId: "account:0:acct0", account: "acct0" }]);
+    expect(JSON.stringify(port.messages)).not.toMatch(/acct1/);
   });
 
   it("uses HELLO only as a fallback when sender origin is unavailable", async () => {
@@ -571,10 +606,9 @@ describe("dappEvents", () => {
         { profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" },
       ]);
 
+      // Read again the same, it's told nothing.
       await ev.broadcastProfilesChangedAll();
-      expect(profileEvents(port).at(-1)?.data).toEqual([
-        { profileId: "account:0:acct0", account: "acct0", name: "alice.dusk" },
-      ]);
+      expect(profileEvents(port)).toEqual([]);
 
       // A name checked over ten minutes ago, or on another network, isn't sent.
       verifiedNames = {
@@ -713,7 +747,6 @@ describe("dappEvents", () => {
       permissions = { "https://dapp.example": connected(0) };
       const ev = await import("./dappEvents.js");
       const port = await openPort(ev);
-      port.messages = [];
 
       // A check adds the name, and its update waits for the permissions while
       // a later check removes the name.
@@ -758,7 +791,8 @@ describe("dappEvents", () => {
     const bob = { profileId: "account:1:acct1", account: "acct1", name: "bob.dusk" };
     it.each([
       ["a new page's first state", (ev, page) => ev.registerDappPort(page), []],
-      ["an update to every site", (ev) => ev.broadcastProfilesChangedAll(), [[bob]]],
+      // The other site's profile is as it was: nothing to tell it.
+      ["an update to every site", (ev) => ev.broadcastProfilesChangedAll(), []],
       ["an update to the site", (ev) => ev.broadcastProfilesChangedForOrigin("https://dapp.example"), []],
     ])("never sends %s with a name removed while it read the names", async (_, read, otherGets) => {
       permissions = { "https://dapp.example": connected(0), "https://other.example": connected(1) };
@@ -781,7 +815,7 @@ describe("dappEvents", () => {
       await settle();
 
       // It is read again: the site's pages end without the name and never get
-      // it back, and an update to every site still reaches the other site.
+      // it back, and the other site hears only of a change of its own.
       for (const p of [open, page].filter((p) => p.messages.length)) {
         expect(nameCameBack(p)).toBe(false);
         expect(given(p).at(-1)).toEqual([plain]);
@@ -811,16 +845,11 @@ describe("dappEvents", () => {
     });
 
     it.each([
-      ["locks", lock, [], 2],
+      ["locks", lock, []],
       // Its connection ended: told once, and nothing again while it isn't connected.
-      ["revokes the site's grant", regrant({}), [], 1],
-      [
-        "switches the site's profile",
-        regrant({ "https://dapp.example": connected(1) }),
-        [{ profileId: "account:1:acct1", account: "acct1" }],
-        2,
-      ],
-    ])("sends sites only profiles read after the wallet %s", async (_, change, profiles, told) => {
+      ["revokes the site's grant", regrant({}), []],
+      ["switches the site's profile", regrant({ "https://dapp.example": connected(1) }), [{ profileId: "account:1:acct1", account: "acct1" }]],
+    ])("sends sites only profiles read after the wallet %s", async (_, change, profiles) => {
       permissions = { "https://dapp.example": connected(0) };
       verifiedNames = { testnet: { acct0: check("alice.dusk") } };
       const ev = await import("./dappEvents.js");
@@ -843,9 +872,9 @@ describe("dappEvents", () => {
       await Promise.all(updates);
 
       // The update to every site and the first state are read again, so each
-      // page only gets the profiles the change left it: from the change, and,
-      // while it's connected, from the update read again.
-      expect(profileEvents(port).map((event) => event.data)).toEqual(Array.from({ length: told }, () => profiles));
+      // page only gets the profiles the change left it, once: the update read
+      // again finds what the change told it.
+      expect(profileEvents(port).map((event) => event.data)).toEqual([profiles]);
       const states = () =>
         late.messages.filter((m) => m?.type === "DUSK_PROVIDER_STATE").map((m) => m.state.profiles);
       await vi.waitFor(() => expect(states()).toEqual([profiles]));
