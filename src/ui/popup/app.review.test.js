@@ -2291,4 +2291,30 @@ describe("a payment held as its account sent something else while it waited", ()
     t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
     await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0));
   });
+
+  // Round 40's review: as the hold came, Sent was drawn from the overview it had, where the payment wasn't held yet:
+  // Send it too and Don't send were on, saying "something else", while what the account sent was still being read.
+  it("says it checks, its answers off, till an overview that holds it comes", async () => {
+    const record = { sendId: "s1", to: B, lux: "10000000", feeLux: "0", memo: "", profileIndex: 0, privacy: "public", at: Date.now() - 5_000 };
+    let later = null;
+    const answer = async (message) => (message.type === "DUSK_UI_OVERVIEW" && later ? later.promise : undefined);
+    const sending = { phase: "sending", sendId: "s1", waits: true, title: "Send", amountLux: "10000000", startedAt: Date.now() - 5_000 };
+    const t = await popupOn("sent", { addressBook: { loaded: true, items: [] }, sent: sending }, answer);
+    t.open = { ...t.open, waitingSends: [record] };
+    await t.render({ forceRefresh: true });
+    await flush();
+    const shown = () => [
+      t.app.textContent.includes("Checking what your account sent…"),
+      ...["Send it too", "Don't send"].map((text) => t.app.querySelectorAll("button").find((b) => b.textContent === text)?.disabled),
+    ];
+    later = Promise.withResolvers();
+    t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
+    await flush();
+    expect([t.state.route, ...shown()]).toEqual(["sent", true, true, true]);
+    // The overview that holds it, read: its answers.
+    later.resolve({ ...t.open, waitingSends: [{ ...record, held: true }] });
+    later = null;
+    await flush();
+    expect([t.state.route, ...shown()]).toEqual(["sent", false, false, false]);
+  });
 });

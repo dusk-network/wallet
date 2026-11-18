@@ -869,6 +869,8 @@ function installTxStatusListener() {
           const held = Boolean(msg.held);
           if (sent?.sendId && sent.sendId === msg.sendId && sent.phase === "sending" && (sent.waits !== Boolean(msg.waits) || handedOver || Boolean(sent.held) !== held)) {
             sent.waits = Boolean(msg.waits);
+            // Held from now: what its account sent is read from now on (sent.js).
+            if (held && !sent.held) sent.heldAt = Date.now();
             sent.held = held;
             if (handedOver) sent.handedOver = true;
             if (state.route === "sent") {

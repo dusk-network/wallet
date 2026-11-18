@@ -430,8 +430,14 @@ describe("after Confirm", () => {
     const actionsShown = () => body.querySelectorAll(".sent-actions button").map((b) => [visibleText(b), b.className.split(" ")[0]]);
     expect(note()).toBeNull();
 
-    // What its account sent meanwhile, as the node named it: this same payment, Don't send leading.
+    // While what its account sent is read: it says so, Send it too and Don't send off till it's known.
     const held = { sendId: state.sent.sendId, to: OTHER, lux: dusk(1500), memo: "Lunch", profileIndex: 0, privacy: "public", waiting: true, held: true };
+    ov.waitingSends = [{ ...held, checking: Date.now() }];
+    app.draw();
+    expect(steps()[0]).toEqual(["unknown", "Not sent yet", "Checking what your account sent…"]);
+    expect(body.querySelectorAll(".sent-actions button").map((b) => [visibleText(b), b.disabled])).toEqual([["Send it too", true], ["Don't send", true], ["Done", false]]);
+
+    // What its account sent meanwhile, as the node named it: this same payment, Don't send leading.
     ov.waitingSends = [{ ...held, meanwhile: [{ hash: "ef".repeat(32), to: OTHER, lux: dusk(1500), memo: "Lunch", at: Date.now() }] }];
     app.draw();
     expect(steps()[0][2]).toMatch(/^Your account sent 1,?500 DUSK to .+ at \d\d:\d\d with the memo “Lunch” while this waited\. That looks like this same payment\.$/);

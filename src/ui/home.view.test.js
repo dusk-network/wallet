@@ -490,6 +490,16 @@ describe("payments from Send waiting for the network, on Home", () => {
     ]);
     // Nothing named: the plain sentence.
     expect(shown(undefined)[0]).toBe("Your account sent something else while this waited.");
+
+    // Chen's, Marek's: "something else", Send it too live, for the seconds before it named this same payment.
+    // While it's read, it says so, its answers off; past the node's time, what's known.
+    const checking = (since) => {
+      document.body.replaceChildren(...homeView(ov([send({ waits: false, held: true, checking: since })], { accounts: ["mine", OWN_2] }), { state, actions }));
+      const box = document.body.querySelector(".home-waiting--held");
+      return [visibleText(box.querySelector(".home-waiting__note")), box.querySelectorAll("button").map((b) => [b.textContent, b.disabled])];
+    };
+    expect(checking(at(2, 40) - 3_000)).toEqual(["Checking what your account sent…", [["Send it too", true], ["Don't send", true]]]);
+    expect(checking(at(2, 40) - 60_000)).toEqual(["Your account sent something else while this waited.", [["Send it too", false], ["Don't send", false]]]);
   });
 
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent

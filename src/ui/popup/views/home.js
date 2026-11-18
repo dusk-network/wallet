@@ -11,7 +11,7 @@ import { balance, balancesHidden, shieldedLuxOf } from "../../components/Balance
 import { keptSendDraft } from "../../lib/sendDraft.js";
 import { shortAddress } from "../../lib/strings.js";
 import { contactNameText } from "../../lib/contactNames.js";
-import { againDraft, sameSentMeanwhile, sentMeanwhileText, unsentOf, waitingOf, wentOf } from "../../lib/waiting.js";
+import { againDraft, checksMeanwhile, sameSentMeanwhile, sentMeanwhileText, unsentOf, waitingOf, wentOf } from "../../lib/waiting.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
@@ -359,11 +359,12 @@ function waitingSection(ov, { state, actions } = {}) {
     state.needsRefresh = true;
     actions?.render?.({ forceRefresh: true })?.catch?.(() => {});
   };
-  const button = (text, onclick, className = "btn-outline") =>
+  const button = (text, onclick, className = "btn-outline", { disabled = false } = {}) =>
     h("button", {
       class: `${className} home-waiting__btn`,
       type: "button",
       text,
+      disabled,
       onclick: async (event) => {
         if (event?.currentTarget) event.currentTarget.disabled = true;
         await onclick();
@@ -411,20 +412,24 @@ function waitingSection(ov, { state, actions } = {}) {
     state.route = "confirm";
     actions?.render?.()?.catch?.(() => {});
   };
+  // While what it sent is read, it says so, its answers off (Chen's,
+  // Marek's: "something else", Send it too live, before it named this same
+  // payment).
   const heldBox = (send) =>
     h("div", { class: "callout warn home-waiting home-waiting--held", role: "status" }, [
       h("div", { class: "callout-title" }, ["Not sent yet: ", ...what(send)]),
       madeLine(send),
       h("p", { class: "muted home-waiting__note", text: meanwhile(send) }),
       h("div", { class: "home-waiting__actions" }, [
-        button("Send it too", sendItToo(send), sameSentMeanwhile(send) ? "btn-outline" : "btn-primary"),
+        button("Send it too", sendItToo(send), sameSentMeanwhile(send) ? "btn-outline" : "btn-primary", { disabled: checksMeanwhile(send) }),
         button(
           "Don't send",
           async () => {
             cancelled(await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
             refresh();
           },
-          sameSentMeanwhile(send) ? "btn-primary" : "btn-outline"
+          sameSentMeanwhile(send) ? "btn-primary" : "btn-outline",
+          { disabled: checksMeanwhile(send) }
         ),
       ]),
     ]);
