@@ -30,7 +30,7 @@ import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../.
 import { saveHandedExport } from "./activityExport.js";
 import { siteLastSeen } from "../../shared/siteRecords.js";
 import { forgetRequestLink, requestDraftOf } from "../lib/requestLink.js";
-import { keepOpenRequest, keepOpenSend, takeOpenRequest, takeOpenSend } from "../lib/sendDraft.js";
+import { asKept, holdsPayment, keepOpenRequest, keepOpenSend, keepSendDraft, loadKeptSend, takeOpenRequest, takeOpenSend } from "../lib/sendDraft.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
 import { keepIncomingWatched } from "./incoming.js";
@@ -1333,6 +1333,8 @@ function returnAfterUnlock(ov) {
     state.returnTo = null;
     if (back.context === state.context && state.route === "home") state.route = back.route;
   }
+  // A Send the lock came over, typed in or filled in: your unfinished payment.
+  if (unlockedNow && (state.route === "send" || state.route === "confirm") && holdsPayment(state.draft)) state.draft = asKept(state.draft);
   if (unlockedNow) setTimeout(resumeWatching, 0);
   // A notice of money that came in, tapped while it was locked: its payment now.
   if (unlockedNow && incomingTap) setTimeout(() => openIncoming(incomingTap).catch(() => {}), 0);
@@ -1340,20 +1342,24 @@ function returnAfterUnlock(ov) {
 
 // The app on the way to the background with Send, or its Review, open: what's
 // typed is kept on the phone as Send left open, for Android may end the app
-// meanwhile; the app opens on it again, once unlocked (reopenSend). Back in
-// front, the app wasn't ended: it's a draft as any other again. A wallet tab
-// hidden or reloading keeps its Send the same way, a link's payment with its
-// way back asking first, and the request form being filled in, in that tab
-// alone (Marek's and Amélie's: Firefox for Android's pull down at the top of
-// the page reloaded the tab, and the payment a link filled in went without a
-// word, as did a half-filled request).
+// meanwhile; the app opens on it again, once unlocked (reopenSend), saying
+// it's your unfinished payment. Back in front, the app wasn't ended: it's
+// kept no more. A wallet tab hidden or reloading keeps its Send the same way,
+// a link's payment with its way back asking first, and the request form being
+// filled in, in that tab alone (Marek's and Amélie's: Firefox for Android's
+// pull down at the top of the page reloaded the tab, and the payment a link
+// filled in went without a word, as did a half-filled request); the page
+// going, a popup closed as a tab closed, keeps its Send for the next page
+// too (sendDraft.js's pastPage). One the app can't open on at once, as a
+// notice's payment opened first, waits for Home's Send, unless a link filled
+// it in.
 let openSendKept = false;
-function keepSendOpen() {
+function keepSendOpen(event) {
   if (!state.overview?.isUnlocked) return;
   // The request form: kept while it's open with something typed in it, else nothing of it.
   if (!isTauriRuntime()) keepOpenRequest(state.route === "receive" ? state.receive : null, state.overview);
   if (!["send", "confirm"].includes(state.route)) return;
-  keepOpenSend(state.draft, state.overview);
+  keepOpenSend(state.draft, state.overview, { pastPage: event?.type === "pagehide" });
   openSendKept = true;
 }
 let sendReopened = false;
@@ -1363,8 +1369,9 @@ function reopenSend(ov) {
     sendReopened = true;
     const values = takeOpenSend(ov);
     const request = isTauriRuntime() ? null : takeOpenRequest(ov);
-    if (values && state.route === "home") Object.assign(state, { route: "send", draft: values });
+    if (values && state.route === "home") Object.assign(state, { route: "send", draft: asKept(values) });
     else if (request && state.route === "home") Object.assign(state, { route: "receive", receive: { ...request, requestOpen: true, context: state.context } });
+    else if (values && !values.filledIn) keepSendDraft(values, ov, { pastPage: true });
     return;
   }
   if (openSendKept && document.visibilityState !== "hidden") {
@@ -1648,6 +1655,8 @@ export async function render({ forceRefresh = false, cached = false } = {}) {
   }
   keepContactsToTheirWallet(ov);
   returnAfterUnlock(ov);
+  // What the page before this one kept as it went, read before Send can open on it.
+  if (!sendReopened) await loadKeptSend();
   reopenSend(ov);
   try {
     document.body.dataset.walletReady = ov?.hasVault && ov?.isUnlocked ? "true" : "false";

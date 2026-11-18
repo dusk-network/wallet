@@ -651,3 +651,27 @@ describe("contacts", () => {
     expect(visibleText(dom.document.body.querySelector(".contact-hero"))).toBe("SShopalice-shop.dusk26FCH7…Tck927Public");
   });
 });
+
+// Round 40's review: from Review, Save to Contacts under another address than the payment's kept what a link put in,
+// its amount and memo, and went straight back to Review and Confirm.
+describe("a contact saved from Review", () => {
+  const saveAs = async (draft, address) => {
+    const view = mount({ mode: "pick", fromRoute: "confirm", pickReturnRoute: "confirm", view: "edit", editId: null, prefillAddress: ACCOUNT, editAddress: ACCOUNT });
+    view.state.draft = { ...draft };
+    typeInto(view.field("Name"), "Landlord");
+    typeInto(view.field("Address"), address);
+    view.button("Save").click();
+    await settle();
+    const { route, draft: d } = view.state;
+    return [route, d.to, d.amountDusk, d.amountLux, d.memo, d.filledIn ?? ""];
+  };
+
+  it("under another address than a link's goes back to Send, without what the link put in", async () => {
+    const link = { to: ACCOUNT, privacy: "public", amountLux: "150000000", amountDusk: "0.15", memo: "r40 link", filledFrom: "link", filledIn: "link", carried: ["amount", "memo"], carriedTo: ACCOUNT };
+    expect(await saveAs(link, ACCOUNT)).toEqual(["confirm", ACCOUNT, "0.15", "150000000", "r40 link", "link"]);
+    expect(await saveAs(link, ADDRESS)).toEqual(["send", ADDRESS, "", undefined, "", ""]);
+    // What the person typed is theirs, for whichever recipient: Review, for the address saved.
+    const typed = { to: ACCOUNT, privacy: "public", amountLux: "150000000", amountDusk: "0.15", memo: "rent" };
+    expect(await saveAs(typed, ADDRESS)).toEqual(["confirm", ADDRESS, "0.15", "150000000", "rent", ""]);
+  });
+});

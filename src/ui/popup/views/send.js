@@ -59,7 +59,7 @@ import { safeText } from "../../../shared/safeText.js";
 import { clockText } from "../../lib/time.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, linkAmount, networkMismatch } from "@dusk-network/app-core/payment-links";
-import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
+import { carriedDropped, forgetSendDraft, holdsPayment } from "../../lib/sendDraft.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
 import { reviewContextOf, sameWaiting, waitingLux } from "../../lib/waiting.js";
 import { homeView } from "./home.js";
@@ -89,6 +89,10 @@ export function draftDuskName(draft) {
   const name = draft?.duskName;
   return name && typeof draft.to === "string" && name.to === draft.to ? name : undefined;
 }
+
+// What a Send kept on purpose says under the recipient: through a reload, a
+// lock, or the app ended in the background.
+const KEPT_TEXT = "Your unfinished payment.";
 
 // What a request link or a QR code filled in says under the recipient, until
 // it changes, with the network it pays on: a plain link says none.
@@ -135,6 +139,8 @@ function waitingAgainWords(ov, { lux, masked, to, memo, name = "", time }) {
 let pasteReading = null;
 
 export function sendFormView(ov, { state, actions } = {}) {
+  // While it's drawn, and then while it's on the page (liveForm).
+  let drawing = true;
   // A request for another network leaves nothing of itself here, whether it
   // opened this page or the network changed under it: the form says why.
   if (state.draft?.requestChainId && chainMismatchText(state.draft.requestChainId, ov?.nodeUrl)) {
@@ -151,6 +157,15 @@ export function sendFormView(ov, { state, actions } = {}) {
     value: draftDuskName(draft)?.name || (typeof draft.to === "string" ? draft.to : ""),
     onEnter: () => amount.focus(),
   });
+  // This form, as it's drawn and while it's on the page: once another takes
+  // its place there, as a link opening Send anew, what this one still waited
+  // for (its contacts, a name's lookup, a QR code) leaves the draft alone
+  // (round 40's review: an older form's contacts, read late, cleared what a
+  // new link filled in); and one drawn but never put on the page, as while a
+  // field is typed in (app.js), is no form of the person's (its second
+  // review: the one on the page then kept a link's amount for another
+  // recipient).
+  const liveForm = () => drawing || Boolean(to.isConnected);
 
   // Optional inline contact badge (shown when the recipient matches a saved contact).
   const toChip = recipientBadge({
@@ -223,6 +238,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     masked: hidden && Boolean(draft.amountMasked),
     onInput: () => {
       stopReading();
+      typedOver("amount");
       checkAmount();
       syncDraft();
     },
@@ -261,6 +277,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       const maxLux = getMaxAmountLux();
       if (maxLux == null || maxLux <= 0n) return;
       stopReading();
+      typedOver("amount");
       // The real amount, which gets sent, shown as dots with balances hidden.
       field.setValue(formatLuxForInput(maxLux), { masked: hidden });
       checkAmount();
@@ -375,16 +392,37 @@ export function sendFormView(ov, { state, actions } = {}) {
     chainNote.hidden = !text;
   };
   const filledNote = h("p", { class: "field-hint send-filled-note", role: "status", hidden: true });
-  // Whether Back asks first, said to the phone's Back as a link or a QR code fills the form in.
+  // Whether Back asks first, said to the phone's Back as the form fills in.
   let markAsks = () => {};
   // A link that waited behind the lock says when it was opened (Sofía's: one
-  // from long before filled Send in after an unlock, with no word of it).
+  // from long before filled Send in after an unlock, with no word of it). A
+  // Send kept on purpose, through a reload, a lock or the app ended, says
+  // it's your unfinished payment.
   const sayFilled = (from) => {
     const said = filledText(from, ov?.nodeUrl);
     const linkAt = Number(state.draft?.linkAt) || 0;
-    filledNote.textContent = said && from === "link" && linkAt ? `${said} From a link opened at ${clockText(linkAt)}.` : said;
+    filledNote.textContent = said && from === "link" && linkAt ? `${said} From a link opened at ${clockText(linkAt)}.` : said || (state.draft?.kept ? KEPT_TEXT : "");
     filledNote.hidden = !filledNote.textContent;
     markAsks();
+  };
+  // What a link or a kept Send put in Amount and Memo is for the recipient it
+  // came with: another chosen, typed, pasted or picked, they go, and with
+  // them that it was that payment (Amélie's: the 0,1 of an abandoned payment
+  // back to a stranger stayed as she chose Chen). Typed over, they're yours.
+  const dropCarried = (recipient) => {
+    const d = state.draft;
+    const changes = liveForm() ? carriedDropped(d, recipient) : null;
+    if (!changes) return;
+    if ("amountDusk" in changes) field.setValue("");
+    if ("memo" in changes) memo.value = "";
+    Object.assign(d, changes);
+    if ("memo" in changes) checkMemo();
+    checkAmount();
+    sayFilled(d.filledFrom);
+  };
+  const typedOver = (name) => {
+    const d = state.draft;
+    if (Array.isArray(d?.carried)) d.carried = d.carried.filter((each) => each !== name);
   };
   sayRefused({ chainId: state.draft?.refusedChainId, problem: state.draft?.refusedProblem });
   sayFilled(state.draft?.filledFrom);
@@ -413,6 +451,8 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     const req = read.link;
     const isDuskReq = req.form === "dusk" || req.form === "https";
+    dropCarried(req.to);
+    const carriedBefore = state.draft?.carriedTo === req.to && Array.isArray(state.draft?.carried) ? state.draft.carried : [];
 
     // Update DOM values
     to.value = req.to;
@@ -440,6 +480,10 @@ export function sendFormView(ov, { state, actions } = {}) {
       if (req.amountDusk) nextDraft.amountDusk = amount.value;
       if (req.memo) nextDraft.memo = memo.value;
     }
+    // What it put in Amount and Memo, for its recipient alone.
+    const filled = [amount.value && (isDuskReq || req.amountDusk) ? "amount" : "", memo.value && (isDuskReq || req.memo) ? "memo" : ""];
+    nextDraft.carried = [...new Set([...(isDuskReq ? [] : carriedBefore), ...filled.filter(Boolean)])];
+    nextDraft.carriedTo = req.to;
 
     nextDraft.requestChainId = req.chainId || undefined;
     nextDraft.refusedChainId = undefined;
@@ -559,6 +603,8 @@ export function sendFormView(ov, { state, actions } = {}) {
       listAddressBook()
         .then((items) => {
           contactsLoading = false;
+          // Another form drawn since reads them itself.
+          if (!liveForm()) return;
           try {
             // Cache in shared state so other views (review, contacts picker) can reuse.
             state.addressBook = {
@@ -682,6 +728,13 @@ export function sendFormView(ov, { state, actions } = {}) {
   const nameChoices = { ...draft.nameChoices };
   const pickedShielded = (result) => nameChoices[result.name] === true;
   const nameRecipient = (result) => duskNameRecipient(result, { shielded: pickedShielded(result) });
+  // A name's recipient, for what a link or a kept Send carried: the address of
+  // its card picked, or any, where the link named the name itself (round 40's
+  // review: a name with the link's shielded address and an account kept the
+  // link's amount and memo with its account picked, or picked after).
+  const dropCarriedFor = (result) => {
+    if (String(state.draft?.carriedTo ?? "") !== result.name) dropCarried(nameRecipient(result));
+  };
 
   // The resolved name the form shows while the field holds it. Contacts saves
   // the address it sends to, never the name.
@@ -787,6 +840,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     shownName = result;
+    dropCarriedFor(result);
     // The name's cards show the transfer type, and pick it when the name has
     // both addresses, so the pill stays off.
     hideRecipientBadge(toTypePill);
@@ -798,6 +852,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       shieldedDisabled: !shieldedCovers,
       onChoose: (shielded) => {
         nameChoices[result.name] = shielded;
+        dropCarriedFor(result);
         syncDraft();
         choice.set(shielded);
         showNameAddress(result);
@@ -853,7 +908,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     updateAmountHelpers();
     showNameBox([h("div", { class: "muted", text: `Looking up ${v}…` })]);
     lookup.promise.then((result) => {
-      if (latest()) applyNameResult(v, result);
+      if (latest() && liveForm()) applyNameResult(v, result);
     });
   };
 
@@ -932,6 +987,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     if (t === "account" || t === "address") {
+      dropCarried(v);
       setRecipientBadge(toTypePill, {
         ...recipientTypeBadgeOptions(t),
         className: "recipient-type-badge",
@@ -1043,6 +1099,8 @@ export function sendFormView(ov, { state, actions } = {}) {
       // preserve any gas edits the user may have made on the confirm screen
       gas: state.draft?.gas,
     };
+    // Anything in it now, Back asks first.
+    markAsks();
   };
 
   // What To held before this input, to tell a link put in whole from one typed.
@@ -1069,6 +1127,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   to.addEventListener("input", onRecipientInput);
   memo.addEventListener("input", () => {
     stopReading();
+    typedOver("memo");
     checkMemo();
     syncDraft();
   });
@@ -1105,7 +1164,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           title: "Scan request",
           hint: "Scan a Dusk request QR or choose an image.",
         });
-        if (!payload) return;
+        if (!payload || !liveForm()) return;
         const ok = maybeDecodeRequest(payload, { source: "qr" });
         if (!ok) setErr("This QR code isn't a Dusk account, address or request.");
         toBefore = String(to.value ?? "");
@@ -1232,6 +1291,10 @@ export function sendFormView(ov, { state, actions } = {}) {
           filledFrom: state.draft?.filledFrom,
           filledIn: state.draft?.filledIn,
           linkAt: state.draft?.linkAt,
+          // What a link or a kept Send put in, for the recipient it came with, and that it was kept.
+          carried: state.draft?.carried,
+          carriedTo: state.draft?.carriedTo,
+          kept: state.draft?.kept,
           reviewedFor: reviewedFor(ov),
           // Sent again from Home's Send it now, back from its Review: still in
           // the place of the one Home said wasn't sent, while it's that payment
@@ -1270,19 +1333,21 @@ export function sendFormView(ov, { state, actions } = {}) {
     })
     .catch(() => {});
 
-  // Kept for Send's next opening: Back on a phone is pressed by the way. Not
-  // what a link or a QR code filled in, edited since or not: it isn't the next
-  // payment's, so Back asks first (Amélie's and Chen's: a phone's Back threw
-  // a link's payment away without a word). Stay keeps it, as the question's
+  // Left with Back, it goes, never to come back in a later Send (Amélie's: a
+  // payment back to a stranger, left with Back twice, was there again with
+  // its 0,1 the next time). Anything in it, Back asks first, a phone's Back
+  // being pressed by the way (Amélie's and Chen's: a phone's Back threw a
+  // link's payment away without a word). Stay keeps it, as the question's
   // own Back does.
   const leave = async () => {
-    if (state.draft?.filledIn) {
-      const from = state.draft.filledIn === "qr" ? "QR code" : "link";
-      const go = await askConfirm({ title: "Leave this payment?", text: `This clears the payment the ${from} filled in.`, action: "Leave", cancel: "Stay", destructive: true });
+    const d = state.draft;
+    if (d?.filledIn || holdsPayment(d)) {
+      const text = d?.filledIn ? `This clears the payment the ${d.filledIn === "qr" ? "QR code" : "link"} filled in.` : "This clears your unfinished payment.";
+      const go = await askConfirm({ title: "Leave this payment?", text, action: "Leave", cancel: "Stay", destructive: true });
       // Stayed, or the screen went elsewhere meanwhile.
       if (!go || state.route !== "send") return;
-      forgetSendDraft();
-    } else keepSendDraft(state.draft, ov);
+    }
+    forgetSendDraft();
     state.route = "home";
     state.draft = null;
     actions?.render?.().catch(() => {});
@@ -1290,9 +1355,10 @@ export function sendFormView(ov, { state, actions } = {}) {
   const nav = subnav({ title: "Send", onBack: leave });
   // A phone's Back keeps an entry for the question's own Back (systemBack.js).
   const backBtn = nav.querySelector(".subnav-back");
-  markAsks = () => (state.draft?.filledIn ? backBtn?.setAttribute("data-back-asks", "") : backBtn?.removeAttribute("data-back-asks"));
+  markAsks = () => (state.draft?.filledIn || holdsPayment(state.draft) ? backBtn?.setAttribute("data-back-asks", "") : backBtn?.removeAttribute("data-back-asks"));
   markAsks();
 
+  drawing = false;
   return [
     nav,
     h("div", { class: "row send-form" }, [

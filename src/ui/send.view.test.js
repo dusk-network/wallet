@@ -19,6 +19,7 @@ import { parseDuskQrPayload } from "./components/QrScanModal.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
 import { reviewOf } from "./popup/views/sent.js";
 import { activityKey } from "./popup/activity.js";
+import { asKept, keepOpenSend, takeOpenSend } from "./lib/sendDraft.js";
 
 vi.mock("./components/QrScanModal.js", () => ({
   openQrScanModal: vi.fn(),
@@ -184,6 +185,7 @@ function mount(state, ov = overview(), send = async () => ({})) {
     actions,
     to: $(".to-input-wrap textarea"),
     amount: $("input.amount-field__input"),
+    memo: $(".send-form > input"),
     review: $("button.btn-primary"),
     radios,
     picked: () => radios().map((r) => r.getAttribute("aria-checked")),
@@ -2297,7 +2299,8 @@ describe("a request link", () => {
   });
 
   // Sofía's, in the app: Chen picked from Contacts in place of the link's recipient, and the line stayed.
-  it("stops saying it filled the recipient in once another is picked from Contacts, keeping the amount and memo", async () => {
+  // Amélie's: the 0,1 of a payment back to a stranger stayed in Send as she chose Chen from Contacts.
+  it("stops saying it filled the recipient in once another is picked from Contacts, and clears the amount and memo it filled in", async () => {
     const state = newState();
     const form = mount(state);
     paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
@@ -2315,10 +2318,106 @@ describe("a request link", () => {
     expect(state.route).toBe("send");
 
     const picked = mount(state);
-    expect([picked.to.value, picked.amount.value, state.draft.memo]).toEqual([BOB.account, "0.03", "Invoice 2026-120"]);
+    expect([picked.to.value, picked.amount.value, picked.memo.value, state.draft.amountDusk, state.draft.memo]).toEqual([BOB.account, "", "", "", ""]);
     expect(filled()).toBe("");
     // The link's network went with its recipient, as when one is typed.
     expect(state.draft.requestChainId).toBeUndefined();
+
+    // What's typed over the link's is yours: it stays with another recipient, and only the link's own goes.
+    const again = mount(newState());
+    paste(again, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    typeInto(again.amount, "0.05");
+    typeInto(again.to, BOB.account);
+    expect([again.to.value, again.amount.value, again.memo.value]).toEqual([BOB.account, "0.05", ""]);
+    // Its address half edited and put back as it was, nothing goes.
+    const same = mount(newState());
+    paste(same, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    typeInto(same.to, ALICE.account.slice(0, -2));
+    typeInto(same.to, ALICE.account);
+    expect([same.to.value, same.amount.value, same.memo.value]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+  });
+
+  // Round 40's review: a name with the link's shielded address and an account kept the link's amount and memo with its
+  // account picked, as either address matched; and a card picked after was never checked.
+  it("clears what a link filled in for one of a name's addresses once the name's other is picked", async () => {
+    const values = (form) => [form.amount.value, form.memo.value];
+    // The link's shielded address, then the name, its account picked as it opens.
+    const shielded = mount(newState());
+    paste(shielded, httpsLink(`to=${ALICE.address}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    expect(values(shielded)).toEqual(["0.03", "Invoice 2026-120"]);
+    typeInto(shielded.to, "alice.dusk");
+    await settle();
+    expect(shielded.picked()).toEqual(["true", "false"]);
+    expect(values(shielded)).toEqual(["", ""]);
+    // The link's account, then the name: kept on its account, cleared once its shielded address is picked.
+    const account = mount(newState());
+    paste(account, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    typeInto(account.to, "alice.dusk");
+    await settle();
+    expect(values(account)).toEqual(["0.03", "Invoice 2026-120"]);
+    account.radios()[1].click();
+    await settle();
+    expect(values(account)).toEqual(["", ""]);
+  });
+
+  // Round 40's review: a link's payment with To cleared, kept as a reload keeps Send, opened on what it had for no one,
+  // and whoever was chosen next kept the link's amount and memo.
+  it("clears what a link filled in once another recipient is chosen after a reload, To cleared before it", async () => {
+    let state = newState();
+    let form = mount(state);
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    typeInto(form.to, "");
+    keepOpenSend(state.draft, overview());
+    state = { ...newState(), draft: asKept(takeOpenSend(overview())) };
+    form = mount(state);
+    expect([form.to.value, form.amount.value, form.memo.value]).toEqual(["", "0.03", "Invoice 2026-120"]);
+    typeInto(form.to, BOB.account);
+    expect([form.to.value, form.amount.value, form.memo.value]).toEqual([BOB.account, "", ""]);
+    // Its own recipient again: the link's payment, as it was.
+    state = { ...newState(), draft: asKept({ to: "", amountDusk: "0.03", memo: "Invoice 2026-120", carried: ["amount", "memo"], carriedTo: ALICE.account }) };
+    form = mount(state);
+    typeInto(form.to, ALICE.account);
+    expect([form.to.value, form.amount.value, form.memo.value]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+  });
+
+  // Round 40's review: a link opened Send anew while the form before it still read Contacts; read, that older form took
+  // its own recipient for the new link's, and cleared what the link filled in.
+  it("keeps what a new link filled in from what the form it replaced still waited for", async () => {
+    const { listAddressBook } = await import("../shared/addressBook.js");
+    const { requestDraftOf } = await import("./lib/requestLink.js");
+    let read;
+    listAddressBook.mockImplementationOnce(() => new Promise((resolve) => (read = resolve)));
+    const state = { route: "send", draft: null, addressBook: { loaded: false, items: null } };
+    const old = mount(state);
+    typeInto(old.to, BOB.account);
+    // The link, opened: Send drawn anew for it.
+    state.draft = requestDraftOf(`?link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`))}`);
+    const form = mount(state);
+    expect([form.to.value, form.amount.value, form.memo.value]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+    read([]);
+    await settle();
+    expect([state.draft.to, state.draft.amountDusk, state.draft.memo]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+    const again = mount(state);
+    expect([again.to.value, again.amount.value, again.memo.value]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+  });
+
+  // Round 40's second review: a form drawn while a field was typed in, which the popup puts on the page only once the
+  // typing stops, counted in place of the one on the page: there, another recipient kept the link's amount and memo.
+  it("clears what a link filled in on the form on the page, another drawn meanwhile but not put there", async () => {
+    const state = newState();
+    const form = mount(state);
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    // Drawn again as To is typed in, and not put on the page.
+    sendFormView(overview(), { state, actions: form.actions });
+    typeInto(form.to, BOB.account);
+    await settle();
+    expect([form.to.value, form.amount.value, form.memo.value, state.draft.amountDusk, state.draft.memo]).toEqual([BOB.account, "", "", "", ""]);
   });
 
   it("refuses one for another network, and goes as far as Review only with what Send takes", async () => {
@@ -2477,7 +2576,6 @@ describe("a request link", () => {
     dom.document.body.querySelector("button[aria-label='Scan QR']").click();
     await settle();
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "0.03"]);
-    typeInto(form.to, BOB.account);
     // Back asks first, the scan's: Leave goes.
     dom.document.body.querySelector(".subnav-back").click();
     expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears the payment the QR code filled in.LeaveStay");
@@ -2493,13 +2591,29 @@ describe("a request link", () => {
     expect(state.route).toBe("home");
     expect(keptSendDraft(overview())).toBeNull();
 
-    // What's typed by hand is still kept for the next Send.
+    // A recipient typed over it: nothing of the scan is left, and Back asks of what is.
+    const over = newState();
+    const typedOver = mount(over);
+    openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:2?amount=0.03&memo=Invoice+2026-120`);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    typeInto(typedOver.to, BOB.account);
+    expect([typedOver.to.value, typedOver.amount.value, typedOver.memo.value]).toEqual([BOB.account, "", ""]);
+    dom.document.body.querySelector(".subnav-back").click();
+    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears your unfinished payment.LeaveStay");
+    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    await settle();
+    expect([over.route, keptSendDraft(overview())]).toEqual(["home", null]);
+
+    // Amélie's: what's typed by hand, left with Back, isn't kept for the next Send either.
     keepSendDraft({ to: BOB.account, amountDusk: "0.02", memo: "satay" }, overview());
     const typed = { ...newState(), draft: keptSendDraft(overview()) };
     const again = mount(typed);
     expect([again.to.value, again.amount.value]).toEqual([BOB.account, "0.02"]);
     dom.document.body.querySelector(".subnav-back").click();
-    expect(keptSendDraft(overview())).toMatchObject({ to: BOB.account, amountDusk: "0.02", memo: "satay" });
+    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    await settle();
+    expect([typed.route, keptSendDraft(overview())]).toEqual(["home", null]);
   });
 
   it("is no request when it goes anywhere else, or names no recipient", async () => {
