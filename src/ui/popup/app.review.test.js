@@ -49,7 +49,24 @@ const flush = async () => {
 
 // The popup on `route` with wallet A open; `t.open` is what the wallet's
 // overview says, `t.deliver` the wallet's own messages to the popup.
-async function popupOn(route, extra = {}, answer = async () => undefined, { history, tauri, mount = false, tab } = {}) {
+// The extension's session store, which outlives a popup: what's in `kept`, as browser.storage.session holds it.
+const sessionArea = (kept) => ({
+  get: async (key) => Object.fromEntries([key].flat().filter((k) => kept.has(k)).map((k) => [k, structuredClone(kept.get(k))])),
+  set: async (items) => {
+    for (const [k, v] of Object.entries(items)) kept.set(k, structuredClone(v));
+  },
+  remove: async (key) => {
+    for (const k of [key].flat()) kept.delete(k);
+  },
+});
+
+// A page's own sessionStorage: a new one for each popup, the same for a tab that reloads.
+const pageSession = (kept = new Map()) => {
+  vi.stubGlobal("sessionStorage", { getItem: (key) => kept.get(key) ?? null, setItem: (key, value) => kept.set(key, String(value)), removeItem: (key) => kept.delete(key) });
+  return kept;
+};
+
+async function popupOn(route, extra = {}, answer = async () => undefined, { history, tauri, mount = false, tab, session } = {}) {
   const dom = installFakeDom({ pathname: "/popup.html" });
   if (history) dom.window.history = history(dom.window);
   // The app on an Android phone: Tauri's bridge to the wrapper.
@@ -68,6 +85,8 @@ async function popupOn(route, extra = {}, answer = async () => undefined, { hist
     runtime: { id: "dusk-wallet", sendMessage: () => {}, onMessage: { addListener: (fn) => (onMessage = fn) } },
     // `tab`: the page in a tab of its own, as the extension's full page.
     ...(tab ? { tabs: { getCurrent: async () => tab } } : {}),
+    // `session`: the extension's session store, as it outlives the page.
+    ...(session ? { storage: { session: sessionArea(session) } } : {}),
   });
   vi.resetModules();
   const { send } = await import("../../wallet/bus.js");
@@ -431,15 +450,19 @@ describe("the phone's Back button", () => {
       { history: (win) => (history = pageHistory(win)) }
     );
     const button = (text) => t.app.querySelectorAll("button").find((b) => b.textContent === text);
-    button("Review").click();
+    // Send with a payment in it stands on one entry more, for its question's own Back, once drawn again.
+    await t.render();
     await flush();
     expect(history.at).toBe(2);
+    button("Review").click();
+    await flush();
+    expect(history.at).toBe(3);
     button("← Back").click();
     await flush();
-    expect([t.state.route, history.at]).toEqual(["send", 1]);
+    expect([t.state.route, history.at]).toEqual(["send", 2]);
     button("Review").click();
     await flush();
-    expect(history.at).toBe(2);
+    expect(history.at).toBe(3);
 
     // The person's Back, then the wallet drawing again on its own: no entry goes up,
     // which a WebView would skip, closing the app on the next Back.
@@ -447,7 +470,7 @@ describe("the phone's Back button", () => {
     await flush();
     await t.render({ forceRefresh: true });
     await flush();
-    expect([t.state.route, history.at]).toEqual(["send", 1]);
+    expect([t.state.route, history.at]).toEqual(["send", 2]);
   });
 
   // Amélie's: on Import opened from Firefox's menu, Back closed the wallet with 12 typed words.
@@ -498,23 +521,32 @@ describe("the phone's Back button", () => {
     const { app, state } = t;
     const button = (text) => app.querySelectorAll("button").find((b) => b.textContent === text);
     const memo = () => app.querySelectorAll("input").find((i) => accessibleName(i) === "Memo");
-    // A screen with a way back stands one entry above the page's own.
-    expect(history.at).toBe(1);
+    // A screen with a way back stands one entry above the page's own, and one more where a payment's in it, for its
+    // question's own Back.
+    await t.render();
+    await flush();
+    expect(history.at).toBe(2);
     memo().value = "Lunch for Léa";
     memo().dispatchEvent(fakeEvent("input"));
+    await flush();
+    expect(history.at).toBe(2);
     button("Review").click();
     await flush();
     expect(state.route).toBe("confirm");
     // A step in: one entry more.
-    expect(history.at).toBe(2);
+    expect(history.at).toBe(3);
 
     history.back();
     await flush();
     expect(state.route).toBe("send");
     expect([app.querySelector(".to-input-wrap textarea").value, memo().value]).toEqual([B, "Lunch for Léa"]);
-    expect([history.at, history.closed]).toEqual([1, false]);
+    expect([history.at, history.closed]).toEqual([2, false]);
 
+    // Back on the payment asks first; Leave goes Home.
     history.back();
+    await flush();
+    expect(visibleText(t.dom.document.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears your unfinished payment.LeaveStay");
+    [...t.dom.document.querySelectorAll("[role=alertdialog] button")].find((b) => b.textContent === "Leave").click();
     await flush();
     expect(state.route).toBe("home");
     // Home has no way back: Back leaves the wallet, as before.
@@ -543,13 +575,80 @@ describe("a payment that waited, on Home", () => {
   });
 });
 
+// Amélie's: Wi-Fi off at Confirm, the browser closed; opened again, Home said "Not sent … Send it now". Send it now
+// opened its Review, she closed the popup, and it opened again on a filled Send form, with no word of that payment.
+describe("a payment Home says wasn't sent, its Review closed", () => {
+  it("opens again on Home's word for it, Send it now and all, not on a filled Send", async () => {
+    // Each popup a page of its own; the extension's session store outlives them.
+    const session = new Map();
+    pageSession();
+    const unsent = { sendId: "send-0301", walletId: A, nodeUrl: "https://testnet.nodes.dusk.network", profileIndex: 0, privacy: "public", to: B, lux: "10000000", feeLux: "2500000", memo: "Wi-Fi coupé", at: Date.now() - 60_000, waiting: false, waits: false, ended: "closed" };
+    const first = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { session });
+    first.open = { ...first.open, waitingSends: [unsent] };
+    await first.render({ forceRefresh: true });
+    first.app.querySelectorAll(".home-waiting--unsent button").find((b) => b.textContent === "Send it now").click();
+    await flush();
+    expect(first.state.route).toBe("confirm");
+    first.dom.window.dispatchEvent(fakeEvent("pagehide"));
+    await flush();
+
+    pageSession();
+    const again = await popupOn("home", { addressBook: { loaded: true, items: [] } }, async (message, t) => (message.type === "DUSK_UI_OVERVIEW" ? { ...t.open, waitingSends: [unsent] } : undefined), { session });
+    expect(again.state.route).toBe("home");
+    expect(again.app.querySelector(".home-waiting--unsent")?.textContent).toContain("Not sent: ");
+    expect(again.app.querySelectorAll(".home-waiting--unsent button").map((b) => b.textContent)).toEqual(["Send it now", "Don't send"]);
+  });
+
+  // Round 40's review: back from Send it now's Review, the payment changed, the popup closed before Review again: the
+  // changes went, and Home only had the payment as it was. Changed, it's a payment of its own, kept as any Send is;
+  // as it was, Home's word for it stands.
+  it("keeps it as your unfinished payment once it's changed back from its Review, and not while it's as it was", async () => {
+    const session = new Map();
+    const unsent = { sendId: "send-0302", walletId: A, nodeUrl: "https://testnet.nodes.dusk.network", profileIndex: 0, privacy: "public", to: B, lux: "10000000", feeLux: "2500000", memo: "Wi-Fi coupé", at: Date.now() - 60_000, waiting: false, waits: false, ended: "closed" };
+    const withUnsent = async (message, t) => (message.type === "DUSK_UI_OVERVIEW" ? { ...t.open, waitingSends: [unsent] } : undefined);
+    const field = (t, name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const backFromReview = async (edit) => {
+      pageSession();
+      const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, withUnsent, { session });
+      t.app.querySelectorAll(".home-waiting--unsent button").find((b) => b.textContent === "Send it now").click();
+      await flush();
+      expect(t.state.route).toBe("confirm");
+      t.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+      await flush();
+      expect(t.state.route).toBe("send");
+      if (edit) {
+        field(t, "Amount").value = "0.2";
+        field(t, "Amount").dispatchEvent(fakeEvent("input"));
+      }
+      // The popup closed: out of sight, then gone.
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      t.dom.window.dispatchEvent(fakeEvent("pagehide"));
+      await flush();
+      pageSession();
+      return popupOn("home", { addressBook: { loaded: true, items: [] } }, withUnsent, { session });
+    };
+    const asWas = await backFromReview(false);
+    expect(asWas.state.route).toBe("home");
+    expect(asWas.app.querySelectorAll(".home-waiting--unsent button").map((b) => b.textContent)).toEqual(["Send it now", "Don't send"]);
+    const changed = await backFromReview(true);
+    expect(changed.state.route).toBe("send");
+    expect(["To", "Amount", "Memo"].map((name) => field(changed, name).value)).toEqual([B, "0.2", "Wi-Fi coupé"]);
+    expect(visibleText(changed.app.querySelector(".send-filled-note"))).toBe("Your unfinished payment.");
+  });
+});
+
 // Chen's: Amelie and 0.02 typed, Back, Back, and Send again was empty, nothing asked.
 describe("a half-typed Send, left with Back", () => {
-  it("is there again as Send opens from Home, for the same wallet, profile and network, and goes once it's sent", async () => {
+  // Amélie's: a payment back to a stranger, his address and 0,1, left with Back twice, was there again the
+  // next time Send opened; then she chose Chen from Contacts, and the 0,1 stayed.
+  it("asks first, and once left it's gone: the next Send opens empty; Stay keeps it", async () => {
     let history;
     const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { history: (win) => (history = pageHistory(win)) });
     const button = (text) => t.app.querySelectorAll("button").find((b) => b.textContent === text);
     const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const values = () => ["To", "Amount", "Memo"].map((name) => field(name).value);
+    const question = () => t.dom.document.querySelector("[role=alertdialog]");
     const type = (name, value) => {
       field(name).value = value;
       field(name).dispatchEvent(fakeEvent("input"));
@@ -561,27 +660,105 @@ describe("a half-typed Send, left with Back", () => {
     };
     await openSend();
     type("To", B);
-    type("Amount", "0.02");
-    type("Memo", "satay");
+    type("Amount", "0.1");
+    button("Review").click();
+    await flush();
+    expect(t.state.route).toBe("confirm");
+    button("← Back").click();
+    await flush();
+    expect([t.state.route, ...values()]).toEqual(["send", B, "0.1", ""]);
     history.back();
+    await flush();
+    expect(visibleText(question())).toBe("Leave this payment?This clears your unfinished payment.LeaveStay");
+    [...question().querySelectorAll("button")].find((b) => b.textContent === "Stay").click();
+    await flush();
+    expect([question(), t.state.route, ...values()]).toEqual([null, "send", B, "0.1", ""]);
+    button("← Back").click();
+    await flush();
+    [...question().querySelectorAll("button")].find((b) => b.textContent === "Leave").click();
     await flush();
     expect(t.state.route).toBe("home");
     await openSend();
-    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.02", "satay"]);
+    expect(values()).toEqual(["", "", ""]);
+    expect(t.app.querySelector(".send-filled-note").hidden).toBe(true);
 
-    // Another profile: not its own, so nothing.
+    // Nothing in it: Back goes at once.
     button("← Back").click();
     await flush();
-    t.open = { ...t.open, selectedAccountIndex: 1 };
-    await t.render({ forceRefresh: true });
-    await openSend();
-    expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual(["", "", ""]);
+    expect([question(), t.state.route]).toEqual([null, "home"]);
+  });
 
-    // Sent: gone for good.
-    button("← Back").click();
+  it("comes back as your unfinished payment once the tab reloads, and choosing another recipient clears what it held", async () => {
+    pageSession();
+    const field = (t, name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const values = (t) => ["To", "Amount", "Memo"].map((name) => field(t, name).value);
+    const typed = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: null });
+    for (const [name, value] of [["To", B], ["Amount", "0.1"], ["Memo", "Send 0.1 DUSK back"]]) {
+      field(typed, name).value = value;
+      field(typed, name).dispatchEvent(fakeEvent("input"));
+    }
+    typed.dom.window.dispatchEvent(fakeEvent("pagehide"));
+
+    const back = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null });
+    expect([back.state.route, ...values(back)]).toEqual(["send", B, "0.1", "Send 0.1 DUSK back"]);
+    expect(visibleText(back.app.querySelector(".send-filled-note"))).toBe("Your unfinished payment.");
+    // Another recipient: what it held for the first goes, and so does what it said.
+    const CHEN = "26JfWKvhYdVY71bdSPVLNJ51Buy4GjimCT7zcsoxNQtydDbdoH2AwZaH8W7rjcAc9riAu39Vw9Lx1w7yrkBgotSjWmUdkSyQuaTKDZWVCKp9g1GxiEnnksv3W3onToB5NsNi";
+    field(back, "To").value = CHEN;
+    field(back, "To").dispatchEvent(fakeEvent("input", { inputType: "insertFromPaste" }));
     await flush();
-    t.open = { ...t.open, selectedAccountIndex: 0 };
-    await t.render({ forceRefresh: true });
+    expect(values(back)).toEqual([CHEN, "", ""]);
+    expect(back.app.querySelector(".send-filled-note").hidden).toBe(true);
+  });
+
+  // Round 40's review: a toolbar popup closed and opened again is a page of its own, its sessionStorage new, and what
+  // the first kept there was gone. The extension's session store keeps it for the next page, till it's taken or left.
+  it("comes back as your unfinished payment in the next popup, a page of its own, and not once it's left with Back", async () => {
+    const session = new Map();
+    const field = (t, name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const values = (t) => ["To", "Amount", "Memo"].map((name) => field(t, name).value);
+    pageSession();
+    const typed = await popupOn("send", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { session });
+    for (const [name, value] of [["To", B], ["Amount", "0.1"], ["Memo", "Send 0.1 DUSK back"]]) {
+      field(typed, name).value = value;
+      field(typed, name).dispatchEvent(fakeEvent("input"));
+    }
+    typed.dom.document.visibilityState = "hidden";
+    typed.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+    typed.dom.window.dispatchEvent(fakeEvent("pagehide"));
+    await flush();
+
+    pageSession();
+    const back = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { session });
+    expect(back.state.route).toBe("send");
+    expect(values(back)).toEqual([B, "0.1", "Send 0.1 DUSK back"]);
+    expect(visibleText(back.app.querySelector(".send-filled-note"))).toBe("Your unfinished payment.");
+    // Left with Back, and Leave: no popup after it opens on it.
+    back.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+    await flush();
+    back.dom.document.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    await flush();
+    expect(back.state.route).toBe("home");
+    back.dom.window.dispatchEvent(fakeEvent("pagehide"));
+    await flush();
+    pageSession();
+    const next = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { session });
+    expect([next.state.route, session.size]).toEqual(["home", 0]);
+  });
+
+  it("is gone once it's sent", async () => {
+    const t = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null });
+    const button = (text) => t.app.querySelectorAll("button").find((b) => b.textContent === text);
+    const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const type = (name, value) => {
+      field(name).value = value;
+      field(name).dispatchEvent(fakeEvent("input"));
+    };
+    const openSend = async () => {
+      t.app.querySelectorAll("button").find((b) => b.textContent === "Send" && b.closest(".action-bar, .dashboard-top-actions")).click();
+      await flush();
+      expect(t.state.route).toBe("send");
+    };
     await openSend();
     type("To", B);
     type("Amount", "0.02");
@@ -1067,14 +1244,20 @@ describe("the app on a phone", () => {
     typed.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
     expect(JSON.stringify([...kept.values()])).not.toMatch(/password/i);
 
-    // Android ends the app; opened again, it's a new page, on Home.
+    // Android ends the app; opened again, it's a new page, on Home: Send, as your unfinished payment.
     const back = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
     expect(back.state.route).toBe("send");
     expect(values(back)).toEqual([B, "0,02", "satay"]);
+    expect(visibleText(back.app.querySelector(".send-filled-note"))).toBe("Your unfinished payment.");
 
-    // Left with Back, it's kept for Send, but the app opens on Home after that.
+    // Left with Back, once Leave is pressed, it's gone: the next Send is empty, and the app opens on Home after that.
     back.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
     await flush();
+    [...back.dom.document.querySelectorAll("[role=alertdialog] button")].find((b) => b.textContent === "Leave").click();
+    await flush();
+    back.app.querySelectorAll("button.action-btn").find((b) => b.textContent.trim() === "Send").click();
+    await flush();
+    expect(values(back)).toEqual(["", "", ""]);
     const later = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
     expect(later.state.route).toBe("home");
   });
@@ -1602,6 +1785,8 @@ describe("the app on a phone", () => {
     await unlock();
     expect(t.state.route).toBe("send");
     expect(["To", "Amount", "Memo"].map((name) => field(name).value)).toEqual([B, "0.02", "Invoice 2026-120"]);
+    // Kept through the lock on purpose, it says so.
+    expect(visibleText(t.app.querySelector(".send-filled-note"))).toBe("Your unfinished payment.");
 
     // Receive, a request filled in, then Files to find its picture.
     t.state.route = "receive";
@@ -2168,5 +2353,31 @@ describe("a payment held as its account sent something else while it waited", ()
     expect(asked).toEqual([]);
     t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
     await vi.waitFor(() => expect(asked.length).toBeGreaterThan(0));
+  });
+
+  // Round 40's review: as the hold came, Sent was drawn from the overview it had, where the payment wasn't held yet:
+  // Send it too and Don't send were on, saying "something else", while what the account sent was still being read.
+  it("says it checks, its answers off, till an overview that holds it comes", async () => {
+    const record = { sendId: "s1", to: B, lux: "10000000", feeLux: "0", memo: "", profileIndex: 0, privacy: "public", at: Date.now() - 5_000 };
+    let later = null;
+    const answer = async (message) => (message.type === "DUSK_UI_OVERVIEW" && later ? later.promise : undefined);
+    const sending = { phase: "sending", sendId: "s1", waits: true, title: "Send", amountLux: "10000000", startedAt: Date.now() - 5_000 };
+    const t = await popupOn("sent", { addressBook: { loaded: true, items: [] }, sent: sending }, answer);
+    t.open = { ...t.open, waitingSends: [record] };
+    await t.render({ forceRefresh: true });
+    await flush();
+    const shown = () => [
+      t.app.textContent.includes("Checking what your account sent…"),
+      ...["Send it too", "Don't send"].map((text) => t.app.querySelectorAll("button").find((b) => b.textContent === text)?.disabled),
+    ];
+    later = Promise.withResolvers();
+    t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
+    await flush();
+    expect([t.state.route, ...shown()]).toEqual(["sent", true, true, true]);
+    // The overview that holds it, read: its answers.
+    later.resolve({ ...t.open, waitingSends: [{ ...record, held: true }] });
+    later = null;
+    await flush();
+    expect([t.state.route, ...shown()]).toEqual(["sent", false, false, false]);
   });
 });

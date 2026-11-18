@@ -61,7 +61,7 @@ export function pastedRequestNames(text, nodeUrl) {
  * Send refuses for another network. One that can't be read fills in nothing and says
  * why. Null for no link, or what isn't one.
  * @param {string} search - the page's query
- * @returns {{ to: string, amountDusk: string, memo: string, requestChainId?: string, refusedProblem?: string, filledFrom?: "link", filledIn?: "link" } | null}
+ * @returns {{ to: string, amountDusk: string, memo: string, requestChainId?: string, refusedProblem?: string, filledFrom?: "link", filledIn?: "link", carried?: string[], carriedTo?: string } | null}
  */
 export function requestDraftOf(search) {
   const read = readRequestLink(new URLSearchParams(search).get("link") ?? "");
@@ -69,7 +69,10 @@ export function requestDraftOf(search) {
   if (!read.link) return { to: "", amountDusk: "", memo: "", refusedProblem: read.problem };
   const { link } = read;
   // Its amount as typing reads it (app-core's linkAmount): a link's 2.125 asks, as typed 2.125 does.
-  return { to: link.to, amountDusk: linkAmount(link).field, memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: "link" };
+  const amountDusk = linkAmount(link).field;
+  // What it put in Amount and Memo is for its recipient alone: another chosen, they go.
+  const carried = [amountDusk ? "amount" : "", link.memo ? "memo" : ""].filter(Boolean);
+  return { to: link.to, amountDusk, memo: link.memo, requestChainId: link.chainId || undefined, filledFrom: "link", filledIn: "link", carried, carriedTo: link.to };
 }
 
 // The pages whose request link went, paid or left (forgetRequestLink).

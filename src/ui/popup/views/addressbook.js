@@ -22,6 +22,7 @@ import { ownProfileName } from "../../components/ProfileName.js";
 import { HIDDEN_NAME_NOTE, HIDDEN_NAME_ROW, contactAlikeText, contactNameText, profilesOf } from "../../lib/contactNames.js";
 import { parseDuskQrPayload } from "../../components/QrScanModal.js";
 import { activityRows } from "../activity.js";
+import { carriedDropped } from "../../lib/sendDraft.js";
 import { contactNames, describeTx, recentText, txRowEl, whenText } from "./txRow.js";
 
 import {
@@ -187,12 +188,18 @@ export function addressBookView(ov, { state, actions } = {}) {
 
   // Picks a recipient for the screen Contacts was opened from, and goes back.
   // Another recipient than a link or a QR code filled in, as one typed: what
-  // that request said of it, its network and "Filled in from…", goes.
+  // that request said of it, its network and "Filled in from…", goes, and so
+  // does what it, or a kept Send, put in Amount and Memo for its own
+  // recipient (carriedDropped); from Review, that's Send again, for what to
+  // pay this one (round 40's review: a contact saved from Review under
+  // another address kept the link's amount and memo, Confirm and all).
   const pick = (address) => {
     const before = state.draft || {};
     const other = String(before.to ?? "") !== address;
-    state.draft = { ...before, to: address, ...(other ? { requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: undefined } : {}) };
-    state.route = ab.pickReturnRoute || backRoute || "send";
+    const dropped = other ? carriedDropped(before, address) : null;
+    state.draft = { ...before, to: address, ...(other ? { requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: undefined } : {}), ...dropped };
+    const back = ab.pickReturnRoute || backRoute || "send";
+    state.route = dropped && back === "confirm" ? "send" : back;
     ab.view = "list";
     rerender();
   };

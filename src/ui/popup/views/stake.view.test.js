@@ -207,6 +207,260 @@ describe("staking while it loads", () => {
   });
 });
 
+// Lena's, in the app: offline, Staking only said "Loading staking…", for more than a minute, twice, with no figure
+// and no time, while Home showed its last read balance and when it was read.
+describe("staking with a node that doesn't answer", () => {
+  // Staking drawn with what the node says: never an answer, unless `answer` gives one.
+  const silent = (state, { answer = null } = {}) => {
+    const actions = {
+      send: vi.fn((message) => {
+        if (["DUSK_UI_GET_MINIMUM_STAKE", "DUSK_UI_GET_STAKE_OWNER_STATUS", "DUSK_UI_GET_SOZU_STATUS"].includes(message.type)) return answer ? Promise.resolve(answer(message)) : new Promise(() => {});
+        return Promise.resolve({});
+      }),
+      render: vi.fn(async () => draw()),
+      showToast: vi.fn(),
+    };
+    const draw = () => body.replaceChildren(...stakeFormView(ov(), { state, actions }));
+    draw();
+    return actions;
+  };
+  const shown = () => [visibleText(body.querySelector(".stake-sum") ?? body).includes("2,000"), body.querySelectorAll(".stake-stale, .stake-unread, .waiting").filter(isShown).map(visibleText)];
+  // What's with Sozu, as Staking's summary says it.
+  const withSozu = () => /With Sozu\s*3 DUSK/i.test(visibleText(body.querySelector(".stake-sum") ?? body));
+
+  it("shows the figures read last on this device, with when, and never a spinner past the node's time", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    vi.setSystemTime(Date.UTC(2026, 10, 18, 0, 30));
+    vi.stubGlobal("localStorage", memoryStorage());
+    // Read once, while the node answered: kept for next time.
+    const read = owner({ hasStake: true, info: { amount: { value: dusk(2000), locked: "0", eligibility: "4687000", total: dusk(2000) }, reward: dusk(3), faults: 0, hardFaults: 0 } });
+    const held = sozu({ position: { poolBalanceLux: dusk(3), stDuskBalanceLux: dusk(1) } });
+    const answers = { DUSK_UI_GET_MINIMUM_STAKE: dusk(1000), DUSK_UI_GET_STAKE_OWNER_STATUS: read, DUSK_UI_GET_SOZU_STATUS: { ...held.status, pool: held.pool, position: held.position } };
+    silent({ route: "stake" }, { answer: (m) => ({ ok: true, result: answers[m.type] }) });
+    await vi.advanceTimersByTimeAsync(0);
+    expect([shown()[0], withSozu()]).toEqual([true, true]);
+    const readAt = Date.now();
+
+    // Later, the node silent: the figures read then, Sozu's too once the node's had its time, said to be maybe out
+    // of date, with when.
+    vi.setSystemTime(readAt + 30 * 60_000);
+    silent({ route: "stake" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown()).toEqual([true, [`Your stake may be out of date. Last read ${whenAtText(readAt)}.`]]);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(shown()).toEqual([true, [`Your stake may be out of date. Last read ${whenAtText(readAt)}.`]]);
+    expect(withSozu()).toBe(true);
+
+    // Nothing kept: what's said once the node's had its time, offline at once.
+    vi.stubGlobal("localStorage", memoryStorage());
+    silent({ route: "stake" });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(shown()).toEqual([false, ["Loading staking…"]]);
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(shown()).toEqual([false, ["Staking can't be read now: the network isn't answering. It's read again once it does."]]);
+    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    silent({ route: "stake" });
+    expect(shown()).toEqual([false, ["Staking can't be read until you're back online."]]);
+  });
+});
+
+// Round 40's review: Staking's figures were the profile index's, read for whichever wallet asked, and a stake whose
+// read failed came as none at all.
+describe("staking's figures, read for a profile", () => {
+  const STAKED = { amount: { value: dusk(2000), locked: "0", eligibility: "4687000", total: dusk(2000) }, reward: dusk(3), faults: 0, hardFaults: 0 };
+  // Staking drawn for `shownOv`, each owner status asked kept for the test to answer.
+  const asking = (state) => {
+    const answers = [];
+    const view = { ov: ov(), answers };
+    const actions = {
+      send: vi.fn((message) => {
+        if (message.type === "DUSK_UI_GET_MINIMUM_STAKE") return Promise.resolve({ ok: true, result: dusk(1000) });
+        if (message.type === "DUSK_UI_GET_STAKE_OWNER_STATUS") return new Promise((resolve) => answers.push(resolve));
+        if (message.type === "DUSK_UI_GET_SOZU_STATUS") return new Promise(() => {});
+        return Promise.resolve({});
+      }),
+      render: vi.fn(async () => view.draw()),
+      showToast: vi.fn(),
+    };
+    view.draw = () => body.replaceChildren(...stakeFormView(view.ov, { state, actions }));
+    return view;
+  };
+  const staked = () => visibleText(body.querySelector(".stake-sum") ?? body).includes("2,000");
+  const stale = () => body.querySelectorAll(".stake-stale").filter(isShown).map(visibleText);
+
+  it("draws another wallet's Profile 1 with its own figures, never those read for the wallet before it", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    const state = { route: "stake" };
+    const view = asking(state);
+    view.draw();
+    // Another wallet, its Profile 1 as the first's was, while the first's figures are read.
+    view.ov = ov({ accounts: [OTHER] });
+    view.draw();
+    expect(view.answers).toHaveLength(2);
+    view.answers[0]({ ok: true, result: owner({ hasStake: true, info: STAKED }) });
+    await settle();
+    expect(staked()).toBe(false);
+    view.answers[1]({ ok: true, result: owner({ account: OTHER }) });
+    await settle();
+    expect([staked(), state.staking.ownerStatus.account]).toEqual([false, OTHER]);
+  });
+
+  it("keeps the stake read before, said to be maybe out of date with when, where the stake itself couldn't be read", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.UTC(2026, 10, 18, 9, 30));
+    vi.stubGlobal("localStorage", memoryStorage());
+    const state = { route: "stake" };
+    const view = asking(state);
+    view.draw();
+    view.answers[0]({ ok: true, result: owner({ hasStake: true, info: STAKED, infoRead: true }) });
+    await settle();
+    expect([staked(), stale()]).toEqual([true, []]);
+    const readAt = Date.now();
+    // Read again later, the stake's own request timed out: "no stake" from it is no reading.
+    vi.setSystemTime(readAt + 20 * 60_000);
+    state.staking.loaded = false;
+    view.draw();
+    view.answers[1]({ ok: true, result: owner({ infoRead: false }) });
+    await settle();
+    expect([staked(), stale()]).toEqual([true, [`Your stake may be out of date. Last read ${whenAtText(readAt)}.`]]);
+    // Opened anew, nothing on the screen: what's kept on this device.
+    const again = { route: "stake" };
+    const fresh = asking(again);
+    fresh.draw();
+    fresh.answers[0]({ ok: true, result: owner({ infoRead: false }) });
+    await settle();
+    await settle();
+    expect([staked(), stale()]).toEqual([true, [`Your stake may be out of date. Last read ${whenAtText(readAt)}.`]]);
+  });
+
+  it("keeps what's with Sozu, read before, where a read of it brings no position, and takes nothing held as read", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.UTC(2026, 10, 18, 9, 30));
+    vi.stubGlobal("localStorage", memoryStorage());
+    const held = sozu({ position: { poolBalanceLux: dusk(3), stDuskBalanceLux: dusk(1) } });
+    let position = held.position;
+    const state = { route: "stake" };
+    const actions = {
+      send: vi.fn(async (message) => {
+        if (message.type === "DUSK_UI_GET_MINIMUM_STAKE") return { ok: true, result: dusk(1000) };
+        if (message.type === "DUSK_UI_GET_STAKE_OWNER_STATUS") return { ok: true, result: owner() };
+        if (message.type === "DUSK_UI_GET_SOZU_STATUS") return { ok: true, result: { ...held.status, pool: held.pool, position } };
+        return {};
+      }),
+      render: vi.fn(async () => draw()),
+      showToast: vi.fn(),
+    };
+    const draw = () => body.replaceChildren(...stakeFormView(ov(), { state, actions }));
+    const withSozu = () => /With Sozu\s*3 DUSK/i.test(visibleText(body.querySelector(".stake-sum") ?? body));
+    draw();
+    await settle();
+    expect([withSozu(), stale()]).toEqual([true, []]);
+    const readAt = Date.now();
+    // Read again later, its position not read: the one read before, with when.
+    vi.setSystemTime(readAt + 20 * 60_000);
+    position = null;
+    state.sozu.loaded = false;
+    draw();
+    await settle();
+    expect([withSozu(), stale()]).toEqual([true, [`Your stake may be out of date. Last read ${whenAtText(readAt)}.`]]);
+    // Opened anew, none in hand: the one kept on this device.
+    const opened = state.sozu;
+    delete state.sozu;
+    delete state.staking;
+    draw();
+    await settle();
+    await settle();
+    expect([withSozu(), stale()]).toEqual([true, [`Your stake may be out of date. Last read ${whenAtText(readAt)}.`]]);
+    expect(state.sozu).not.toBe(opened);
+    // Read as nothing held: nothing held, as read.
+    position = { poolBalanceLux: "0", stDuskBalanceLux: "0" };
+    state.sozu.loaded = false;
+    draw();
+    await settle();
+    expect([withSozu(), stale()]).toEqual([false, []]);
+  });
+
+  // Its second review: with the stake unread and nothing kept, the error drew Staking again, which asked again at once,
+  // over and over, and "can't be read" never stayed; and a status read for another wallet's profile, as another window
+  // switched wallets, was shown and kept as this one's.
+  it("keeps saying Staking can't be read, asking no more till the overview's read again, and takes no other account's", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    const { keptBalancesOf } = await import("../../../shared/keptBalances.js");
+    let asked = 0;
+    let answer = owner({ infoRead: false });
+    const state = { route: "stake" };
+    const actions = {
+      send: vi.fn((message) => {
+        if (message.type === "DUSK_UI_GET_MINIMUM_STAKE") return Promise.resolve({ ok: true, result: dusk(1000) });
+        if (message.type === "DUSK_UI_GET_STAKE_OWNER_STATUS") return ++asked > 5 ? new Promise(() => {}) : Promise.resolve({ ok: true, result: answer });
+        if (message.type === "DUSK_UI_GET_SOZU_STATUS") return new Promise(() => {});
+        return Promise.resolve({});
+      }),
+      render: vi.fn(async () => draw()),
+      showToast: vi.fn(),
+    };
+    const draw = () => body.replaceChildren(...stakeFormView(ov(), { state, actions }));
+    const said = () => body.querySelectorAll(".err").filter(isShown).map(visibleText);
+    const settled = async () => {
+      for (let i = 0; i < 10; i++) await settle();
+    };
+    draw();
+    await settled();
+    expect([asked, said()]).toEqual([1, ["Staking can't be read now: the network isn't answering. It's read again once it does."]]);
+    draw();
+    await settled();
+    expect(asked).toBe(1);
+    // The overview read again: asked again, and answered for another wallet's Profile 1.
+    answer = owner({ account: OTHER, hasStake: true, info: STAKED });
+    Object.assign(state.staking, { loaded: false, error: null });
+    draw();
+    await settled();
+    expect([asked, staked(), said()]).toEqual([2, false, ["Staking can't be read now."]]);
+    expect((await keptBalancesOf({ nodeUrl: ov().nodeUrl, account: ACCOUNT }))?.staking).toBeUndefined();
+  });
+
+  // Its second review: a profile's account is the same on Testnet and Mainnet; switched to Mainnet, a read that brought
+  // no position took Testnet's, which Liquid staking offered to unstake.
+  it("never takes one network's position with Sozu for another's, the same account on both", async () => {
+    vi.stubGlobal("localStorage", memoryStorage());
+    const held = sozu({ position: { poolBalanceLux: dusk(3), stDuskBalanceLux: dusk(1) } });
+    let answer = { ...held.status, pool: held.pool, position: held.position };
+    const state = { route: "stake" };
+    const actions = {
+      send: vi.fn(async (message) => {
+        if (message.type === "DUSK_UI_GET_MINIMUM_STAKE") return { ok: true, result: dusk(1000) };
+        if (message.type === "DUSK_UI_GET_STAKE_OWNER_STATUS") return { ok: true, result: owner() };
+        if (message.type === "DUSK_UI_GET_SOZU_STATUS") return { ok: true, result: answer };
+        return {};
+      }),
+      render: vi.fn(async () => draw()),
+      showToast: vi.fn(),
+    };
+    let shownOv = ov();
+    const draw = () => body.replaceChildren(...stakeFormView(shownOv, { state, actions }));
+    const withSozu = () => /With Sozu\s*3 DUSK/i.test(visibleText(body.querySelector(".stake-sum") ?? body));
+    draw();
+    await settle();
+    expect(withSozu()).toBe(true);
+    // Mainnet, the same account, its position not read: nothing of Testnet's.
+    shownOv = ov({ nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" });
+    state.context = "mainnet";
+    answer = { ...held.status, networkKey: "mainnet", pool: held.pool, position: null };
+    draw();
+    await settle();
+    await settle();
+    expect([withSozu(), state.sozu.position]).toEqual([false, null]);
+  });
+
+  it("says on Liquid staking that Sozu's figures read last may be out of date, with when", () => {
+    const readAt = Date.UTC(2026, 10, 18, 9, 0);
+    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) }, readAt, kept: true }) };
+    const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn() };
+    body.replaceChildren(...stakeFormView(ov(), { state, actions }));
+    expect(stale()).toEqual([`Your stake may be out of date. Last read ${whenAtText(readAt)}.`]);
+  });
+});
+
 describe("staking overview", () => {
   it("opens Liquid staking on Stake, also after an unstake left it on Unstake, as Lena's stake again", async () => {
     const state = { route: "stake", staking: staking(), sozu: sozu({ position: { poolBalanceLux: dusk(3), stDuskBalanceLux: dusk(1) } }) };

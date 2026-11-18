@@ -2,18 +2,37 @@
 // the public and shielded balances and what's staked, with when they were
 // read, never a key or a phrase. Where one can't be read now, as when the
 // wallet opens with no signal or the node doesn't answer, Home shows the one
-// kept, said to be maybe out of date, rather than a dash. A reset forgets them
-// all, and removing a wallet its own (walletReset.js).
+// kept, said to be maybe out of date, rather than a dash; Staking its figures
+// the same way (`staking`: its stake's owner status and the minimum stake;
+// `sozu`: Sozu's status, with what the profile holds there).
+// A reset forgets them all, and removing a wallet its own (walletReset.js).
 
 import { storage, STORAGE_KEYS } from "./storage.js";
+import { withStorageLock } from "./storageLock.js";
 
 const KEY = STORAGE_KEYS.KEPT_BALANCES;
+
+// Each part under the key of whoever writes it: the overview's (balance,
+// shieldedBalance, staked: the wallet's own context) under KEY, Staking's
+// and Sozu's (the page's) under keys of their own, so that one's read, then
+// write, never takes away what another wrote meanwhile (round 40's review:
+// the popup and the wallet each queued their own writes to the one object,
+// and the one written last dropped the other's figures).
+const KEY_OF = { balance: KEY, shieldedBalance: KEY, staked: KEY, staking: `${KEY}_staking`, sozu: `${KEY}_sozu` };
+const KEYS = [...new Set(Object.values(KEY_OF))];
+
+// Each key's map read, changed and written under its lock, which every page
+// and the wallet's own context take alike: none reads the map another is
+// writing, to write its own over it (round 40's second review: two windows'
+// Staking each wrote back the map it read, and the one written last dropped
+// the other's account).
+const underLock = (key, fn) => withStorageLock(key, fn);
 
 // One profile's on one node.
 const placeOf = ({ nodeUrl, account }) => `${String(nodeUrl ?? "")}\n${String(account ?? "")}`;
 
-async function readAll() {
-  const all = (await storage.get(KEY))?.[KEY];
+async function readAll(key = KEY) {
+  const all = (await storage.get(key))?.[key];
   return all && typeof all === "object" && !Array.isArray(all) ? all : {};
 }
 
@@ -25,30 +44,33 @@ let writes = Promise.resolve();
  * kept: a part not read now (null) keeps its last reading. Written only
  * when what's kept changes.
  * @param {{ nodeUrl: string, account: string }} place
- * @param {{ balance?: object | null, shieldedBalance?: object | null, staked?: object | null }} read
+ * @param {{ balance?: object | null, shieldedBalance?: object | null, staked?: object | null, staking?: object | null, sozu?: object | null }} read
  */
-export function keepBalances(place, { balance = null, shieldedBalance = null, staked = null }) {
+export function keepBalances(place, read) {
   if (!place?.nodeUrl || !place?.account) return Promise.resolve();
   const next = writes.then(async () => {
-    const all = await readAll();
-    const key = placeOf(place);
-    const was = all[key] ?? {};
+    const at = placeOf(place);
     const now = Date.now();
-    const kept = { ...was };
-    // A part read now, with when: written as it changes, and once a minute
-    // at most while it doesn't, so when it was read stays near enough.
-    const take = (name, value) => {
-      if (!value || typeof value !== "object") return;
-      if (JSON.stringify(value) === JSON.stringify(was[name]) && now - Number(was[`${name}At`] ?? 0) < 60_000) return;
-      kept[name] = value;
-      kept[`${name}At`] = now;
-    };
-    take("balance", balance);
-    take("shieldedBalance", shieldedBalance);
-    take("staked", staked);
-    if (JSON.stringify(kept) === JSON.stringify(was)) return;
-    all[key] = kept;
-    await storage.set({ [KEY]: all });
+    for (const key of KEYS) {
+      // The parts read now that are kept under this key.
+      const parts = Object.keys(KEY_OF).filter((name) => KEY_OF[name] === key && read?.[name] && typeof read[name] === "object");
+      if (!parts.length) continue;
+      await underLock(key, async () => {
+        const all = await readAll(key);
+        const was = all[at] ?? {};
+        const kept = { ...was };
+        // A part read now, with when: written as it changes, and once a minute
+        // at most while it doesn't, so when it was read stays near enough.
+        for (const name of parts) {
+          if (JSON.stringify(read[name]) === JSON.stringify(was[name]) && now - Number(was[`${name}At`] ?? 0) < 60_000) continue;
+          kept[name] = read[name];
+          kept[`${name}At`] = now;
+        }
+        if (JSON.stringify(kept) === JSON.stringify(was)) return;
+        all[at] = kept;
+        await storage.set({ [key]: all });
+      });
+    }
   });
   writes = next.catch(() => {});
   return next;
@@ -62,7 +84,9 @@ export function keepBalances(place, { balance = null, shieldedBalance = null, st
 export async function keptBalancesOf(place) {
   if (!place?.nodeUrl || !place?.account) return null;
   await writes;
-  return (await readAll())[placeOf(place)] ?? null;
+  const at = placeOf(place);
+  const parts = (await Promise.all(KEYS.map(async (key) => (await readAll(key))[at]))).filter((part) => part && typeof part === "object");
+  return parts.length ? Object.assign({}, ...parts) : null;
 }
 
 /**
@@ -94,17 +118,21 @@ export async function withKeptBalances(place, read, { stakeRead = true } = {}) {
 export async function forgetKeptBalances(accounts) {
   await writes;
   if (!accounts) {
-    await storage.remove(KEY);
+    await Promise.all(KEYS.map((key) => underLock(key, () => storage.remove(key))));
     return;
   }
-  const all = await readAll();
   const gone = new Set(accounts.map(String));
-  let changed = false;
-  for (const key of Object.keys(all)) {
-    if (gone.has(key.split("\n")[1])) {
-      delete all[key];
-      changed = true;
-    }
+  for (const key of KEYS) {
+    await underLock(key, async () => {
+      const all = await readAll(key);
+      let changed = false;
+      for (const at of Object.keys(all)) {
+        if (gone.has(at.split("\n")[1])) {
+          delete all[at];
+          changed = true;
+        }
+      }
+      if (changed) await storage.set({ [key]: all });
+    });
   }
-  if (changed) await storage.set({ [KEY]: all });
 }

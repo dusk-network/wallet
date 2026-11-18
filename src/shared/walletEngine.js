@@ -2230,6 +2230,9 @@ async function loadStakePosition(profile, profileIndex) {
   return {
     profileIndex,
     account,
+    // Whether the stake itself was read: not where its request failed or
+    // timed out, which leaves no stake to tell from none.
+    infoRead: !info?.__error,
     publicBalance: safeBalance
       ? {
           nonce: safeBalance.nonce?.toString?.() ?? String(safeBalance.nonce ?? 0),
@@ -2260,6 +2263,10 @@ export async function getStakeOwnerStatus({ profileIndex } = {}) {
     profileIndex: idx,
     account: selected.account,
     hasStake: selected.hasStake,
+    // Every profile's stake read, as the stakes it owns are found among them
+    // (round 40's second review: another profile's that failed went from
+    // relatedStakes, said read all the same).
+    infoRead: positions.every((pos) => pos.infoRead !== false),
     info: selected.info,
     keys: selected.keys,
     ownerKind: selected.ownerKind,

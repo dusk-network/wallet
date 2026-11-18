@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import bip39Vectors from "../../shared/fixtures/bip39-vectors.json";
 import { compose, fakeEvent, installFakeDom, isShown, press, typeInto, typeKeys } from "../testing/fakeDom.js";
+import { HOLD_LONGEST_MS } from "../lib/pageAway.js";
 import { createMnemonicInput } from "./MnemonicInput.js";
 
 // Public BIP39 test phrases only.
@@ -92,6 +93,15 @@ describe("on a phone", () => {
         dom.document.visibilityState = "hidden";
         dom.document.dispatchEvent(fakeEvent("visibilitychange"));
       } }],
+      [{ type: "pointerdown", button: 0, pointerId: 5 }, { page: () => dom.window.dispatchEvent(fakeEvent("pagehide")) }],
+      // Marek's: a second touch while it's held, anywhere on the page.
+      [{ type: "pointerdown", button: 0, pointerId: 6 }, { page: () => dom.document.body.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 7 })) }],
+      [{ type: "pointerdown", button: 0, pointerId: 8 }, { page: () => dom.document.body.dispatchEvent(fakeEvent("touchstart", { touches: [{}, {}] })) }],
+      [{ type: "pointerdown", button: 0, pointerId: 9 }, { type: "pointerdown", button: 0, pointerId: 10 }],
+      // Let go off the button, or a menu over the page.
+      [{ type: "pointerdown", button: 0, pointerId: 11 }, { page: () => dom.document.body.dispatchEvent(fakeEvent("pointerup", { pointerId: 11 })) }],
+      [{ type: "pointerdown", button: 0, pointerId: 12 }, { page: () => dom.document.body.dispatchEvent(fakeEvent("contextmenu")) }],
+      [{ type: "pointerdown", button: 0, pointerId: 13 }, { type: "lostpointercapture", pointerId: 13 }],
     ]) {
       dom.document.visibilityState = "visible";
       const { type, ...props } = press;
@@ -105,9 +115,69 @@ describe("on a phone", () => {
       expect(seen()).toBe(false);
     }
     // Its long press is the hold, never the browser's menu.
+    show.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 14 }));
     const menu = fakeEvent("contextmenu");
     show.dispatchEvent(menu);
-    expect(menu.defaultPrevented).toBe(true);
+    expect([menu.defaultPrevented, seen()]).toEqual([true, true]);
+    show.dispatchEvent(fakeEvent("pointerup", { pointerId: 14 }));
+    expect(seen()).toBe(false);
+  });
+
+  // Amélie's: she'd write the words down holding still, a thumb Firefox hears nothing of till it moves about 0.8 mm.
+  // Marek's: holding, then touching Firefox's toolbar with another finger, Firefox told the page nothing of the
+  // hold's end, and all twelve words stayed on screen with no finger down: one hold shows them for a minute at most.
+  it("keeps the words for a still hold, hides them a minute into one hold, and a press after a hold whose end it never heard shows nothing", () => {
+    vi.useFakeTimers();
+    try {
+      vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0 (Android 15; Mobile; rv:159.0) Gecko/159.0 Firefox/159.0" });
+      const { input, box } = mount();
+      paste(box(1), TWELVE);
+      const grid = input.el.querySelector(".srp-grid");
+      const show = input.el.querySelectorAll("button").find((b) => b.textContent === "Hold to show words");
+      const seen = () => !grid.classList.contains("is-hidden");
+      const finger = (type, pointerId, more = {}) => show.dispatchEvent(fakeEvent(type, { button: 0, pointerId, pointerType: "touch", ...more }));
+
+      // Held still for 5 seconds, the page hearing nothing of the finger: shown all along.
+      finger("pointerdown", 1);
+      vi.advanceTimersByTime(5_000);
+      expect(seen()).toBe(true);
+      vi.advanceTimersByTime(54_000);
+      expect(seen()).toBe(true);
+      // 61 seconds into the one hold: hidden. Its late end changes nothing; holding again shows them again.
+      vi.advanceTimersByTime(2_000);
+      expect([seen(), HOLD_LONGEST_MS]).toEqual([false, 60_000]);
+      finger("pointerup", 1);
+      finger("pointerdown", 2);
+      expect(seen()).toBe(true);
+      // Taken away, or a second touch anywhere: hidden at once, as ever.
+      finger("pointercancel", 2);
+      expect(seen()).toBe(false);
+      finger("pointerdown", 3);
+      expect(seen()).toBe(true);
+      dom.document.body.dispatchEvent(fakeEvent("pointerdown", { button: 0, pointerId: 4, pointerType: "touch" }));
+      expect(seen()).toBe(false);
+      finger("pointerup", 3);
+
+      // A hold whose end never came, and a new press that reuses its pointer: the hold is over, and that press
+      // shows nothing; the one after it does.
+      finger("pointerdown", 0);
+      finger("pointerdown", 0);
+      expect(seen()).toBe(false);
+      finger("pointerup", 0);
+      finger("pointerdown", 0);
+      expect(seen()).toBe(true);
+      finger("pointerup", 0);
+
+      // A key held for a minute: hidden too.
+      show.dispatchEvent(fakeEvent("keydown", { key: " " }));
+      vi.advanceTimersByTime(HOLD_LONGEST_MS - 1);
+      expect(seen()).toBe(true);
+      vi.advanceTimersByTime(1);
+      expect(seen()).toBe(false);
+      show.dispatchEvent(fakeEvent("keyup", { key: " " }));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   // Marek's: with Show words on, Firefox's tab list and Android's app switcher kept a picture of the twelve words in clear.

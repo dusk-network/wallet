@@ -2097,6 +2097,36 @@ describe("walletEngine", () => {
     );
   });
 
+  // Round 40's review: a stake whose request timed out came back as no stake, which Staking kept as read.
+  it("says whether the stake itself was read, not where its request failed", async () => {
+    engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    globalThis.__W3SPER_STAKE_KEYS__ = vi.fn(async () => null);
+    globalThis.__W3SPER_STAKE_INFO__ = vi.fn(async () => {
+      throw new Error("Stake request timed out");
+    });
+    await expect(engine.getStakeOwnerStatus({ profileIndex: 0 })).resolves.toMatchObject({ hasStake: false, infoRead: false });
+    globalThis.__W3SPER_STAKE_INFO__ = vi.fn(async () => ({ amount: null, reward: 0n, faults: 0, hardFaults: 0 }));
+    await expect(engine.getStakeOwnerStatus({ profileIndex: 0 })).resolves.toMatchObject({ hasStake: false, infoRead: true });
+  });
+
+  // Round 40's second review: another profile's stake, which the selected one owns, unread as its request failed,
+  // went from relatedStakes, and the status was said read all the same.
+  it("says the stakes weren't all read where another profile's failed", async () => {
+    engine.configure({ accountCount: 2, selectedAccountIndex: 0 });
+    await engine.unlockWithMnemonic(MNEMONIC);
+    globalThis.__W3SPER_STAKE_KEYS__ = vi.fn(async (account) => (String(account) === "acct1" ? { account: "acct1", owner: { Account: "acct0" } } : null));
+    globalThis.__W3SPER_STAKE_INFO__ = vi.fn(async (account) => {
+      if (String(account) === "acct1") throw new Error("Stake request timed out");
+      return { amount: null, reward: 0n, faults: 0, hardFaults: 0 };
+    });
+    await expect(engine.getStakeOwnerStatus({ profileIndex: 0 })).resolves.toMatchObject({ infoRead: false, relatedStakes: [] });
+    globalThis.__W3SPER_STAKE_INFO__ = vi.fn(async (account) =>
+      String(account) === "acct1" ? { amount: { value: 100n, locked: 0n, eligibility: 0n, total: 100n }, reward: 0n, faults: 0, hardFaults: 0 } : { amount: null, reward: 0n, faults: 0, hardFaults: 0 }
+    );
+    await expect(engine.getStakeOwnerStatus({ profileIndex: 0 })).resolves.toMatchObject({ infoRead: true, relatedStakes: [expect.objectContaining({ profileIndex: 1 })] });
+  });
+
   it("marks missing and contract stake owners as not wallet-manageable", async () => {
     engine.configure({ accountCount: 1, selectedAccountIndex: 0 });
     await engine.unlockWithMnemonic(MNEMONIC);

@@ -16,8 +16,8 @@ import { askSendPassword } from "../../components/SendPasswordDialog.js";
 import { SEND_PASSWORD_WAITS } from "../../../shared/errors.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { connectionLost, sendRefused, sentOf } from "../../../shared/sendOutcome.js";
-import { SEND_CANCELLED_TEXT } from "../../../shared/waitingSends.js";
-import { againDraft, sameSentMeanwhile, sentMeanwhileText } from "../../lib/waiting.js";
+import { MEANWHILE_READ_MS, SEND_CANCELLED_TEXT } from "../../../shared/waitingSends.js";
+import { CHECKING_MEANWHILE_TEXT, againDraft, checksMeanwhile, sameSentMeanwhile, sentMeanwhileText } from "../../lib/waiting.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { whenAtText } from "./txRow.js";
 
@@ -64,8 +64,17 @@ export const NOT_SENT_CHOSEN_TEXT = "Not sent. Nothing left your wallet.";
 // account sent meanwhile; and that said, the recipient named as the Sent
 // screen names this one's, a profile of the wallet's by its name.
 const heldRecordOf = (sent, ov) => (Array.isArray(ov?.waitingSends) ? ov.waitingSends : []).find((send) => send?.sendId === sent?.sendId) ?? null;
+// Held, as the wallet just said (`heldAt`), while the overview Sent is drawn
+// from is older: its record not held yet, or not there. What the account sent
+// is being read then, the wallet having marked it held as it began, and Sent
+// is drawn again with the answer (round 40's review: Send it too and Don't
+// send were on, with "something else", till the new overview came). Read as
+// long as the node is given, and a little.
+const heldChecking = (sent, record, now = Date.now()) =>
+  checksMeanwhile(record, now) || (!record?.held && now - (Number(sent?.heldAt) || 0) < MEANWHILE_READ_MS + 5_000);
 function heldText(sent, ov) {
   const record = heldRecordOf(sent, ov);
+  if (heldChecking(sent, record)) return CHECKING_MEANWHILE_TEXT;
   const to = sent?.to && typeof sent.to === "object" ? sent.to : null;
   const toText = (address) => {
     if (to && address === to.address) return to.name || to.short || shortAddress(address);
@@ -758,13 +767,15 @@ export function sentView(ov, { state, actions, sozu } = {}) {
   const held = phase === "sending" && sent.sendId && sent.held;
   const heldRecord = held ? heldRecordOf(sent, ov) : null;
   const same = held && sameSentMeanwhile(heldRecord);
+  // While what the account sent is read, both wait for it.
+  const checking = held && heldChecking(sent, heldRecord);
   const heldActions = held
     ? [
         h("button", {
           class: same ? "btn-outline" : "btn-primary",
           type: "button",
           text: "Send it too",
-          disabled: !heldRecord,
+          disabled: !heldRecord || checking,
           onclick: () => {
             if (!heldRecord) return;
             state.draft = againDraft(heldRecord, ov, { hidden: balancesHidden(ov) });
@@ -777,6 +788,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
           class: same ? "btn-primary" : "btn-outline",
           type: "button",
           text: "Don't send",
+          disabled: checking,
           onclick: async (event) => {
             const button = event?.currentTarget;
             if (button) button.disabled = true;

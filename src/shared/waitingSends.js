@@ -78,13 +78,14 @@ export const SENT_MEANWHILE_TEXT = "Your account sent something else while this 
  * `error` it ran into. `hash` and `nonce` once it's being handed to the node:
  * its transaction's ID and nonce; `stopped`, why the wallet stopped waiting
  * on it meanwhile. `held` while it waits for Send it too, its account having
- * sent something else meanwhile, and once it ended so.
+ * sent something else meanwhile, and once it ended so; `checking`, since when
+ * what its account sent meanwhile is read, while it is.
  * @typedef {{
  *   sendId: string, walletId: string, nodeUrl: string, profileIndex: number, account?: string,
  *   privacy: "public" | "shielded", to: string, toName?: string, lux: string,
  *   feeLux: string, memo: string, at: number, seenNonce?: string, hash?: string, nonce?: string,
  *   ended?: "closed" | "locked" | "switched" | "failed", error?: string,
- *   stopped?: "closed" | "locked" | "switched", held?: boolean,
+ *   stopped?: "closed" | "locked" | "switched", held?: boolean, checking?: number,
  *   meanwhile?: Array<{ hash: string, to: string, lux: string, memo: string, at: number | null }>,
  * }} WaitingRecord
  */
@@ -385,24 +386,28 @@ async function pastAccepted(item, host) {
 // account sent meanwhile is read from the node, as far as it says it, and
 // kept with it (`meanwhile`), for Home and Sent to name: what, to whom, with
 // what memo and when (Marek's, Lena's, Chen's: "something else" was the
-// very same payment, made on another device).
+// very same payment, made on another device). While it's read (`checking`,
+// since when), the hold says so, its answers off (Chen's and Marek's: "something
+// else", Send it too live, for the 8 to 10 seconds before it named this same
+// payment); with the answer, or what's known once the node's had its time, they're on.
 async function hold(item, host, now) {
   item.state = "held";
   item.heldAt = now;
   await changeKept((kept) => {
-    if (kept[item.sendId]) kept[item.sendId] = { ...kept[item.sendId], held: true };
+    if (kept[item.sendId]) kept[item.sendId] = { ...kept[item.sendId], held: true, checking: Date.now() };
   }).catch(() => {});
   tellWaits(host, item.sendId, false, false, true);
   const named = await sentWhileHeld(item, host, now);
-  if (!named.length || item.state !== "held") return;
   await changeKept((kept) => {
-    if (kept[item.sendId]) kept[item.sendId] = { ...kept[item.sendId], meanwhile: named };
+    if (!kept[item.sendId]) return;
+    const { checking: _checking, ...record } = kept[item.sendId];
+    kept[item.sendId] = named.length && item.state === "held" ? { ...record, meanwhile: named } : record;
   }).catch(() => {});
-  tellWaits(host, item.sendId, false, false, true);
+  if (item.state === "held") tellWaits(host, item.sendId, false, false, true);
 }
 
-/** How long the node is given to say what an account sent while a payment waited. */
-const MEANWHILE_READ_MS = 10_000;
+/** How long the node is given to say what an account sent while a payment waited: its hold says it checks meanwhile. */
+export const MEANWHILE_READ_MS = 10_000;
 
 // What the account sent after the nonce the wallet knew of last, up to `now`,
 // as the node says it within MEANWHILE_READ_MS; none where it doesn't.
@@ -930,7 +935,16 @@ export async function stopWaitingSends(why, host, { engineGone = false } = {}) {
  * @returns {{ sendId: string, walletId: string, nodeUrl: string }[]}
  */
 export function waitingForNetwork() {
-  const of = (sendId, record) => ({ sendId, walletId: String(record?.walletId ?? ""), nodeUrl: String(record?.nodeUrl ?? "") });
+  const of = (sendId, record) => ({
+    sendId,
+    walletId: String(record?.walletId ?? ""),
+    nodeUrl: String(record?.nodeUrl ?? ""),
+    // What it pays and to whom, for its notice where the phone shows one whole.
+    to: String(record?.to ?? ""),
+    toName: String(record?.toName ?? ""),
+    lux: String(record?.lux ?? ""),
+    memo: String(record?.memo ?? ""),
+  });
   return [
     ...[...firstTries].filter(([, first]) => !first.handedOver && !first.cancelled).map(([sendId, first]) => of(sendId, first.record)),
     ...queue.filter((item) => (item.state === "waiting" || item.state === "sending") && !item.handedOver).map((item) => of(item.sendId, item.record)),

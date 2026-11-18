@@ -99,9 +99,10 @@ async function reload(a) {
 
 // What the wallet's own record of a send adds to the chain's row of it: the
 // name typed for its recipient, a token's details, the site that asked for
-// it, a shielded send's memo or recipient.
+// it, a shielded send's memo or recipient, or that it went out after the
+// person chose not to send it, till that's been opened.
 const keeps = (tx) =>
-  Boolean(tx.toName || tx.asset || (tx.origin && tx.origin !== "Wallet") || (tx.privacy === "shielded" && (tx.memo || tx.to)));
+  Boolean(tx.toName || tx.asset || (tx.origin && tx.origin !== "Wallet") || (tx.privacy === "shielded" && (tx.memo || tx.to)) || (tx.wentAfterAll && !tx.afterAllSeen));
 // A send the wallet's watcher still writes to: settled once it's done.
 const watched = (tx) => tx.status === "submitted" || tx.status === "mempool";
 
@@ -471,6 +472,45 @@ export function searchedActivity(ov, { state, render }) {
   }
   const whole = a.searched ? { entries: a.searched.entries, meta: a.searched.meta, shielded: a.shielded, complete: a.searched.complete } : null;
   return { whole, reading: Boolean(a.searching) };
+}
+
+/**
+ * Every row of the account's history kept on this device, not only the page
+ * Activity shows, for what must know of every payment from an address
+ * (Review's note on what one that isn't a contact sent you): `onRows` is
+ * told those kept at once, then, where older blocks aren't all kept yet,
+ * again once they're synced as far back as they go, as Activity's search
+ * syncs them. Nothing once another profile, node or wallet is open.
+ * @param {object} ov - the overview
+ * @param {{ state: object, onRows: (rows: object[]) => void }} ctx
+ */
+export async function keptActivityRows(ov, { state, onRows }) {
+  const a = state?.activity;
+  if (!a?.history || a.key !== activityKey(ov)) return;
+  const all = { limit: Number.MAX_SAFE_INTEGER - 1 };
+  const tell = (read) => {
+    if (state.activity === a) onRows(activityRows(ov, state, { entries: read.entries, meta: read.state, shielded: a.shielded }));
+  };
+  const kept = await a.history.read(all);
+  tell(kept);
+  if (kept.complete === true || state.activity !== a || (await a.epoch) === undefined) return;
+  // One sync of the older blocks at a time, however often Review is drawn meanwhile.
+  a.olderSync ??= (async () => {
+    let complete = false;
+    for (let run = 0; run < WHOLE_RUNS && !complete && !a.stale && state.activity === a; run += 1) {
+      await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
+      ({ complete } = await a.history.read({ limit: 1 }));
+    }
+  })().finally(() => {
+    a.olderSync = null;
+  });
+  try {
+    await a.olderSync;
+  } catch {
+    // Older blocks out of reach, as offline: what's kept was told.
+    return;
+  }
+  if (state.activity === a) tell(await a.history.read(all));
 }
 
 /**

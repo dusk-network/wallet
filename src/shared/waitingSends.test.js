@@ -875,6 +875,36 @@ describe("a public payment that waited, its account having sent something else m
     delete host.meanwhile;
   });
 
+  // Chen's and Marek's: for the 8 to 10 seconds the node took to say what was sent meanwhile, the hold said
+  // "something else", Send it too live, though it was the very same payment.
+  it("says it checks what its account sent while that's read, till the node answers or its time is up", async () => {
+    const other = { hash: "ab".repeat(32), to: "lucas-account", lux: "10000000", memo: "night shift 9", at: 1_794_900_000_000 };
+    for (const answer of ["named", "silent"]) {
+      let named;
+      host.meanwhile = vi.fn(() => new Promise((resolve) => (named = resolve)));
+      host.tell.mockClear();
+      waitsFromNonce("s1", vi.fn().mockRejectedValueOnce(offline())).catch(() => {});
+      await vi.advanceTimersByTimeAsync(0);
+      network.nonce = 43n;
+      network.answers = true;
+      await askAgain();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(await kept(), answer).toEqual([expect.objectContaining({ sendId: "s1", held: true, checking: expect.any(Number) })]);
+      if (answer === "named") named([other]);
+      else await vi.advanceTimersByTimeAsync(waiting.MEANWHILE_READ_MS);
+      await vi.advanceTimersByTimeAsync(0);
+      const [record] = await kept();
+      expect([record.checking, record.meanwhile], answer).toEqual([undefined, answer === "named" ? [other] : undefined]);
+      // Said again with the answer, or with what's known.
+      expect(host.tell.mock.calls.filter(([m]) => m.held), answer).toHaveLength(2);
+      await waiting.cancelWaitingSend("s1", host).catch(() => {});
+      await vi.advanceTimersByTimeAsync(0);
+      network.nonce = 41n;
+      network.answers = false;
+    }
+    delete host.meanwhile;
+  });
+
   // Chen's: Send it too paid at once, with no Review. From its Review, it's sent in the held one's place.
   it("goes from the queue as Send it too's Review sends it in its place, said not sent there without a word", async () => {
     const attempt = vi.fn().mockRejectedValueOnce(offline());

@@ -45,6 +45,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Named how much and to whom in the Android app's notice of a payment waiting for the network, where the phone shows a notice whole, and said under Tell me when money comes in that Android checks about every 15 minutes.
+- Showed on Review the whole memo an address that isn't a contact sent you, quoted and wrapped, in an amber warning with its sign, as the web wallet does.
+- Dropped a Send left with Back, Leave this payment? asking first when anything's in it, rather than opening the next Send on it; one kept through a reload, a lock, the popup closing or the app closing says Your unfinished payment.
+- Cleared the amount and memo a link or a kept Send filled in once another recipient is chosen.
 - Said on Review what an address that isn't one of your contacts or profiles sent you: "This address sent you: “…” · not in your contacts."
 - Named the request list's Copy link Copy request, which copies the request's words and link, as Share does.
 - Brought This request was paid already into view as it opens, in the popup, the full tab and on a phone.
@@ -129,6 +133,15 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said what in a pasted message disagrees with its link, as "The message says 0.002 DUSK; its link asks 0.15 DUSK.", and kept a refused paste in To rather than emptying it.
+- Refused a pasted message whose request line names its payee with a spaced or look-alike dot, that says a total with no unit, or that names another Dusk address than its link's.
+- Opened the popup again on Home's Not sent reminder, Send it now and all, after Send it now's Review was closed, rather than on a filled Send form.
+- Showed Staking's figures read last, saying they may be out of date and when they were read, while the node doesn't answer, as Home does, and said Staking can't be read now rather than loading on, offline or once the node's had its time.
+- Kept a payment that went out after Don't send marked Sent after you chose not to send in Activity and on its details, with when it went, until it's opened once, rather than a plain Sent row after a few seconds.
+- Said Checking what your account sent… on a payment held as its account sent something else meanwhile, Send it too and Don't send off, until the node says what it was, rather than "something else" for the first seconds.
+- Offered your own profiles, then your contacts, in Send's To before any .dusk name, and guessed at no .dusk name for one of your own names: "Profile" offered profile.dusk.
+- Said on Review what an address that isn't a contact sent you from every payment kept on the device, older ones read from the network as needed, not only those Activity had shown.
+- Hid the words of Hold to show words in Firefox for Android the moment a hold is cut into, by a second touch or a menu, as well as when it's let go, and a minute into one hold.
 - Said when the figures were last read on every "may be out of date" note, Home's and Staking's, also once the node goes silent or the browser goes offline while the wallet shows: "Last read at 10:02".
 - Said on an unstake's and a claim's Review what you receive, with the network fee on its own, rather than a total of the fee alone; and counted your own Sozu unstake in Rewards by year once it's in its block, saying Reading… till then.
 - Said in Send's To which .dusk name one written with another point, a look-alike letter or a hidden character looks like, at once, rather than Unknown; and took a dot above, a Braille dot and spaces around a point in a profile's name for the .dusk name it imitates.

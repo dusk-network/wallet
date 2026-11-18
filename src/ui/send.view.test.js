@@ -19,6 +19,7 @@ import { parseDuskQrPayload } from "./components/QrScanModal.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
 import { reviewOf } from "./popup/views/sent.js";
 import { activityKey } from "./popup/activity.js";
+import { asKept, keepOpenSend, takeOpenSend } from "./lib/sendDraft.js";
 
 vi.mock("./components/QrScanModal.js", () => ({
   openQrScanModal: vi.fn(),
@@ -167,6 +168,9 @@ function newState() {
   return { route: "send", draft: null, addressBook: { loaded: true, items: [] } };
 }
 
+// What a refused paste leaves in To: the text, on its one line.
+const oneLine = (text) => text.replace(/\s*[\r\n]+\s*/g, " ").trim();
+
 // Renders the current route as the popup does, and finds the parts the tests read.
 function mount(state, ov = overview(), send = async () => ({})) {
   const actions = {
@@ -184,6 +188,7 @@ function mount(state, ov = overview(), send = async () => ({})) {
     actions,
     to: $(".to-input-wrap textarea"),
     amount: $("input.amount-field__input"),
+    memo: $(".send-form > input"),
     review: $("button.btn-primary"),
     radios,
     picked: () => radios().map((r) => r.getAttribute("aria-checked")),
@@ -640,6 +645,40 @@ describe("what the To field says about what's typed", () => {
     form.nameBox().querySelector("button").click();
     expect(form.to.value).toBe(BOB.account);
     expect(form.pill()).toBe("Public");
+  });
+
+  // Sofía's: "Profile" in To said "Did you mean profile.dusk?", not her own Profile 2. Registered by someone, it
+  // would have taken her own transfer to a stranger.
+  it("offers your own profiles first, then contacts, and guesses at no .dusk name for one of your own names", () => {
+    const state = newState();
+    state.addressBook.items = [{ name: "Profit & Co", address: BOB.account }];
+    const savings = { key: "wb", n: 2, name: "Savings", accounts: [ALICE.account], accountNames: {}, active: false };
+    const form = mount(state, overview({ wallets: [{ key: "wa", n: 1, name: "", accounts: [OWN.account, OTHER_PROFILE], accountNames: {}, active: true }, savings] }));
+    const offered = () => form.nameBox().querySelectorAll("button").map((b) => b.textContent);
+
+    typeInto(form.to, "Profile");
+    expect(offered()).toEqual([`Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`, `Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`]);
+    typeInto(form.to, "profile 2");
+    expect(offered()).toEqual([`Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`]);
+    typeInto(form.to, "prof");
+    expect(offered()).toEqual([
+      `Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`,
+      `Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`,
+      `Your contact Profit & Co · ${shortAddress(BOB.account)}`,
+    ]);
+    // Another wallet's profile, by that wallet's name.
+    typeInto(form.to, "savings");
+    expect(offered()).toEqual([`Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`]);
+    // The profile it goes from: offered as nothing, and no name guessed at for it.
+    typeInto(form.to, "Profile 1");
+    expect(visibleText(form.nameBox())).toBe("");
+    // A name that's none of yours: the guess is still offered.
+    typeInto(form.to, "xyz");
+    expect(offered()).toEqual(["Did you mean xyz.dusk?"]);
+
+    typeInto(form.to, "Profile");
+    form.nameBox().querySelector("button").click();
+    expect([form.to.value, form.pill()]).toEqual([OTHER_PROFILE, "Public"]);
   });
 
   it("says which contacts' names look like another's, with each one's address", () => {
@@ -1771,7 +1810,7 @@ describe("a request for another network", () => {
     return el && isShown(el) ? el.textContent : "";
   };
 
-  it("fills in nothing: the whole form empties, and it says why", async () => {
+  it("fills in nothing, Amount and Memo emptied, To keeping what was put in it, and it says why", async () => {
     // A Mainnet request link put in To on Testnet, over a form being filled in: nothing of it stays to read as the link's.
     const state = newState();
     const form = mount(state);
@@ -1782,8 +1821,9 @@ describe("a request for another network", () => {
     await settle();
 
     expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
-    expect([form.to.value, form.amount.value]).toEqual(["", ""]);
-    expect(state.draft).toMatchObject({ to: "", amountDusk: "", memo: "" });
+    const link = `dusk:public-${ALICE.account}@dusk:1?amount=1&memo=Invoice+9`;
+    expect([form.to.value, form.amount.value]).toEqual([link, ""]);
+    expect(state.draft).toMatchObject({ to: link, amountDusk: "", memo: "" });
     expect(filled()).toBe("");
 
     // Review goes nowhere, and Send drawn again still says why.
@@ -2077,7 +2117,7 @@ describe("a request link", () => {
       paste(form, text);
       await settle();
       expect(dom.document.body.querySelectorAll(".field-error").filter(isShown).map((el) => el.textContent)).toEqual([said]);
-      expect([form.to.value, form.amount.value]).toEqual(["", ""]);
+      expect([form.to.value, form.amount.value]).toEqual([oneLine(text), ""]);
     }
     // Plain words, a name or an address are a recipient, as ever.
     const form = mount(newState());
@@ -2099,27 +2139,31 @@ describe("a request link", () => {
         paste(form, text);
         await settle();
         expect(refusal(), JSON.stringify(text)).toEqual([UNCLEAR]);
-        expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], JSON.stringify(text)).toEqual(["", "", ""]);
+        expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], JSON.stringify(text)).toEqual([oneLine(text), "", ""]);
       }
     }
   });
 
   // Marek's: the wallet's own share message with only its link's amount changed (0.002 to 0.15) filled 0.15 without a
   // word, and a first line naming someone else, another amount or another memo was let by.
-  it("refuses a shared message whose line says another amount or memo than its link, and fills in nothing", async () => {
-    const DISAGREES = "The message and its link don't agree.";
+  // Then Amélie's, Sofía's, Lena's: it never said what didn't agree, and To emptied. It says what (app-core's words),
+  // and keeps what was pasted in To.
+  it("refuses a shared message whose line says another amount or memo than its link, says which, and fills in nothing", async () => {
     const link = (amount) => httpsLink(`to=${ALICE.account}&amount=${amount}&memo=r35+marek+T2&network=testnet`);
-    for (const text of [
-      `You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nPay here: ${link("0.15")}`,
-      `Sofía asks you to pay 0.001 DUSK · coffee\nPay here: ${link("0.002")}`,
-      `You're asked to pay 0.002 DUSK on Testnet · r35 marek T3\nPay here: ${link("0.002")}`,
+    for (const [text, said] of [
+      [`You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nPay here: ${link("0.15")}`, "The message says 0.002 DUSK; its link asks 0.15 DUSK."],
+      [`Sofía asks you to pay 0.001 DUSK · coffee\nPay here: ${link("0.002")}`, "The message says 0.001 DUSK; its link asks 0.002 DUSK."],
+      [`You're asked to pay 0.002 DUSK on Testnet · r35 marek T3\nPay here: ${link("0.002")}`, "The message's memo is “r35 marek T3”; its link's is “r35 marek T2”."],
     ]) {
       const state = newState();
       const form = mount(state);
       paste(form, text);
       await settle();
-      expect(refusal(), text).toEqual([DISAGREES]);
-      expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], text).toEqual(["", "", ""]);
+      expect(refusal(), text).toEqual([said]);
+      expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], text).toEqual([oneLine(text), "", ""]);
+      // Drawn again, as a redraw does: the same.
+      const again = mount(state);
+      expect([refusal(), again.to.value, again.amount.value], text).toEqual([[said], oneLine(text), ""]);
     }
     // The message as the wallet wrote it: read, and filled in.
     const state = newState();
@@ -2133,7 +2177,7 @@ describe("a request link", () => {
   // off and the link's 0.15 filled in under a line saying 0.002; and the extension read only the line right before the
   // link, so a "Thanks!" or "Pay me here:" between them let it by. Both wallets read the whole message now (app-core).
   it("reads the whole pasted message, through what can't be seen and look-alike letters, and refuses one that says another amount", async () => {
-    const DISAGREES = "The message and its link don't agree.";
+    const DISAGREES = /^The message says 0\.0.*02 DUS.*; its link asks 0\.15 DUSK\.$/;
     const link = (amount) => httpsLink(`to=${ALICE.account}&amount=${amount}&memo=r37+marek+T2&network=testnet`);
     const line = "You're asked to pay 0.002 DUSK on Testnet · r37 marek T2";
     for (const text of [
@@ -2150,8 +2194,8 @@ describe("a request link", () => {
       const form = mount(state);
       paste(form, text);
       await settle();
-      expect(refusal(), JSON.stringify(text)).toEqual([DISAGREES]);
-      expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], JSON.stringify(text)).toEqual(["", "", ""]);
+      expect(refusal(), JSON.stringify(text)).toEqual([expect.stringMatching(DISAGREES)]);
+      expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], JSON.stringify(text)).toEqual([oneLine(text), "", ""]);
     }
     // Words that state nothing else may be around its link: filled in.
     for (const text of [`${line}\nThanks!\nPay here: ${link("0.002")}`, `Hi Marek,\nPay me here: ${link("0.002")}`]) {
@@ -2166,15 +2210,16 @@ describe("a request link", () => {
   // R02, Nandini's: "You're asked to pay 0.012 DUSK to alice.dusk on Testnet…" over a link to Amélie's account filled
   // Amélie in, and never said alice.dusk; "alice·dusk" too. A name anywhere in the message is the link's, or refused.
   it("looks up a .dusk name anywhere in a pasted message, and refuses one that isn't the link's recipient", async () => {
-    const DISAGREES = "The message and its link don't agree.";
+    const DISAGREES = `The message says alice.dusk; its link pays ${shortAddress(ALICE.account)}.`;
     duskNamesOwners.mockImplementation(async (names) => new Map(names.map((name) => [name, { account: BOB.account }])));
     for (const name of ["alice.dusk", "alice\u00b7dusk"]) {
       const state = newState();
       const form = mount(state);
-      paste(form, `You're asked to pay 0.012 DUSK to ${name} on Testnet · Invoice NOV-17c r37\nPay here: ${httpsLink(`to=${ALICE.account}&amount=0.012&memo=Invoice+NOV-17c+r37&network=testnet`)}`);
+      const text = `You're asked to pay 0.012 DUSK to ${name} on Testnet · Invoice NOV-17c r37\nPay here: ${httpsLink(`to=${ALICE.account}&amount=0.012&memo=Invoice+NOV-17c+r37&network=testnet`)}`;
+      paste(form, text);
       await settle();
       expect(duskNamesOwners.mock.lastCall?.[0], name).toEqual(["alice.dusk"]);
-      expect([refusal(), form.to.value, form.amount.value], name).toEqual([[DISAGREES], "", ""]);
+      expect([refusal(), form.to.value, form.amount.value], name).toEqual([[DISAGREES], oneLine(text), ""]);
     }
     // Without the name: filled in.
     const state = newState();
@@ -2184,9 +2229,75 @@ describe("a request link", () => {
     expect([refusal(), form.to.value, form.amount.value]).toEqual([[], ALICE.account, "0.012"]);
   });
 
+  // Marek's, round 39, exact: a request line naming the payee with a spaced dot over a link to someone else; "Total
+  // 0.15" with no unit over a 0.02 link; and someone else's raw address in the text. All filled in. Refused, saying
+  // what disagrees, the paste kept in To.
+  it("refuses Marek's pastes that say another amount, name or address than their link, saying what disagrees", async () => {
+    const MAREK = "26dtBf5Lj7C6GccJMeU17JrSEhAarDB6Fvs3MBkCeKVrUXnzXR71MBBvZqih3SB5cwv8t76TWTi7AUMUWL8sBFEGkLabyF2VmALNuf1YYAiaiLitUcKdT4Hwg64pSzxSS93z";
+    const SOFIA = "sEeMSo7oiV2rxo6aZD3H75XGFZD95BtrmgFD3AezyUkC5W9bUyRwqFr6VuybvuvmvX5kTRt4STaSKbE6FEeMGoPDZNaX1LL82rGzN6BDbajY8qJcweu1mp7m1budNv9kgd7";
+    const toMarek = "https://apps.testnet.dusk.network/wallet/dashboard/send?to=" + MAREK + "&amount=0.02&memo=marek-r10-req&network=testnet";
+    const own = `You're asked to pay 0.02 DUSK on Testnet · marek-r10-req\nPay here: ${toMarek}`;
+    duskNamesOwners.mockImplementation(async (names) => new Map(names.filter((name) => name === "sofiadesign.dusk").map((name) => [name, { account: SOFIA }])));
+    for (const [text, said] of [
+      [`Total 0.15\n${own}`, "The message says 0.15; its link asks 0.02 DUSK."],
+      [`Pay to ${SOFIA}\n${own}`, `The message says ${shortAddress(SOFIA)}; its link pays ${shortAddress(MAREK)}.`],
+      [own.replace("You're asked", "sofiadesign . dusk asks you"), `The message says sofiadesign.dusk; its link pays ${shortAddress(MAREK)}.`],
+    ]) {
+      const state = newState();
+      const form = mount(state);
+      paste(form, text);
+      await settle();
+      expect([refusal(), form.to.value, form.amount.value, state.draft?.memo ?? ""], text).toEqual([[said], oneLine(text), "", ""]);
+    }
+    // His own message as the wallet wrote it: filled in.
+    const state = newState();
+    const form = mount(state);
+    paste(form, own);
+    await settle();
+    expect([refusal(), form.to.value, form.amount.value, state.draft?.memo]).toEqual([[], MAREK, "0.02", "marek-r10-req"]);
+  });
+
+  // Round 40's review: a paste refused stayed in To on its one line, and leaving To or pressing Review read it again
+  // so, its lines run together: a memo on two lines then read as its link's, and filled in the payment just refused.
+  it("keeps a refused paste refused as To is left, on Review, drawn again and kept, till To is edited", async () => {
+    const SAID = "The message's memo is “r35 marek T2”; its link's is “r35 marek T2 Thanks!”.";
+    const text = `You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nThanks!\nPay here: ${httpsLink(`to=${ALICE.account}&amount=0.002&memo=r35+marek+T2+Thanks!&network=testnet`)}`;
+    let state = newState();
+    let form = mount(state);
+    const shown = () => [refusal(), form.to.value, form.amount.value, state.draft?.memo ?? "", state.route];
+    const REFUSED = [[SAID], oneLine(text), "", "", "send"];
+    paste(form, text);
+    await settle();
+    expect(shown()).toEqual(REFUSED);
+    form.to.dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(shown()).toEqual(REFUSED);
+    form.review.click();
+    await settle();
+    expect(shown()).toEqual(REFUSED);
+    // Drawn again, then left.
+    form = mount(state);
+    form.to.dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(shown()).toEqual(REFUSED);
+    // Kept as a reload keeps Send, and opened on again.
+    keepOpenSend(state.draft, overview());
+    state = { ...newState(), draft: asKept(takeOpenSend(overview())) };
+    form = mount(state);
+    form.to.dispatchEvent(fakeEvent("blur"));
+    form.review.click();
+    await settle();
+    expect(shown()).toEqual(REFUSED);
+    // Edited, it's a recipient as typed.
+    typeInto(form.to, ALICE.account);
+    form.to.dispatchEvent(fakeEvent("blur"));
+    await settle();
+    expect(shown()).toEqual([[], ALICE.account, "", "", "send"]);
+  });
+
   // Sofía's, as Marek tried it: "sofiadesign.dusk asks you…" over someone else's link filled in their account.
   describe("whose .dusk name a shared request's line says it's from", () => {
-    const DISAGREES = "The message and its link don't agree.";
+    const DISAGREES = `The message says sofiadesign.dusk; its link pays ${shortAddress(ALICE.account)}.`;
     const message = (to) =>
       `sofiadesign.dusk asks you to pay 0.002 DUSK on Testnet · F-2026-102\nPay here: ${httpsLink(`to=${to}&amount=0.002&memo=F-2026-102&network=testnet`)}`;
     const sofias = new Map([["sofiadesign.dusk", { account: BOB.account }]]);
@@ -2205,7 +2316,7 @@ describe("a request link", () => {
       expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual(["", "", "", [], ["Looking up sofiadesign.dusk…"], true]);
       answer.resolve(sofias);
       await settle();
-      expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual(["", "", "", [DISAGREES], [], false]);
+      expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual([oneLine(message(ALICE.account)), "", "", [DISAGREES], [], false]);
 
       // Over the name's own account's link: filled in.
       duskNamesOwners.mockImplementation(async () => sofias);
@@ -2255,7 +2366,7 @@ describe("a request link", () => {
       expect(lookingUp()).toEqual(["Looking up sofiadesign.dusk…"]);
       answer.resolve(sofias);
       await settle();
-      expect([refusal(), again.to.value]).toEqual([[DISAGREES], ""]);
+      expect([refusal(), again.to.value]).toEqual([[DISAGREES], oneLine(message(ALICE.account))]);
 
       // Left for Home and opened again: nothing of it.
       const later = Promise.withResolvers();
@@ -2277,7 +2388,7 @@ describe("a request link", () => {
       await settle();
       expect(duskNamesOwners).not.toHaveBeenCalled();
       expect(refusal()).toHaveLength(1);
-      expect(form.to.value).toBe("");
+      expect(form.to.value).toBe(oneLine(message(ALICE.account)));
     });
   });
 
@@ -2296,8 +2407,35 @@ describe("a request link", () => {
     expect([made.amount.value, made.amountError()]).toEqual(["2.1250", ""]);
   });
 
+  // Lena's, in German: a link's amount=1.000 was filled in as "1,000". It asks which is meant, as typing 1.000 does,
+  // pasted, opened with the wallet or scanned.
+  it("asks of a link's amount that reads two ways in the browser's language what typing it asks", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
+    const link = httpsLink(`to=${ALICE.account}&amount=1.000&memo=Rechnung&network=testnet`);
+    const typed = mount(newState());
+    typeInto(typed.to, ALICE.account);
+    typeInto(typed.amount, "1.000");
+    const asked = typed.amountError();
+    expect(asked).toBe("Is that 1 or 1000?1 DUSK1000 DUSK");
+
+    const pasted = mount(newState());
+    paste(pasted, link);
+    await settle();
+    expect([pasted.amountError(), pasted.review.disabled]).toEqual([asked, true]);
+    const { requestDraftOf } = await import("./lib/requestLink.js");
+    const opened = mount({ ...newState(), draft: requestDraftOf(`?link=${encodeURIComponent(link)}`) });
+    expect([opened.amountError(), opened.review.disabled]).toEqual([asked, true]);
+    const { openQrScanModal } = await import("./components/QrScanModal.js");
+    const scanned = mount(newState());
+    openQrScanModal.mockResolvedValueOnce(link);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    expect([scanned.amountError(), scanned.review.disabled]).toEqual([asked, true]);
+  });
+
   // Sofía's, in the app: Chen picked from Contacts in place of the link's recipient, and the line stayed.
-  it("stops saying it filled the recipient in once another is picked from Contacts, keeping the amount and memo", async () => {
+  // Amélie's: the 0,1 of a payment back to a stranger stayed in Send as she chose Chen from Contacts.
+  it("stops saying it filled the recipient in once another is picked from Contacts, and clears the amount and memo it filled in", async () => {
     const state = newState();
     const form = mount(state);
     paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
@@ -2315,10 +2453,106 @@ describe("a request link", () => {
     expect(state.route).toBe("send");
 
     const picked = mount(state);
-    expect([picked.to.value, picked.amount.value, state.draft.memo]).toEqual([BOB.account, "0.03", "Invoice 2026-120"]);
+    expect([picked.to.value, picked.amount.value, picked.memo.value, state.draft.amountDusk, state.draft.memo]).toEqual([BOB.account, "", "", "", ""]);
     expect(filled()).toBe("");
     // The link's network went with its recipient, as when one is typed.
     expect(state.draft.requestChainId).toBeUndefined();
+
+    // What's typed over the link's is yours: it stays with another recipient, and only the link's own goes.
+    const again = mount(newState());
+    paste(again, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    typeInto(again.amount, "0.05");
+    typeInto(again.to, BOB.account);
+    expect([again.to.value, again.amount.value, again.memo.value]).toEqual([BOB.account, "0.05", ""]);
+    // Its address half edited and put back as it was, nothing goes.
+    const same = mount(newState());
+    paste(same, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    typeInto(same.to, ALICE.account.slice(0, -2));
+    typeInto(same.to, ALICE.account);
+    expect([same.to.value, same.amount.value, same.memo.value]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+  });
+
+  // Round 40's review: a name with the link's shielded address and an account kept the link's amount and memo with its
+  // account picked, as either address matched; and a card picked after was never checked.
+  it("clears what a link filled in for one of a name's addresses once the name's other is picked", async () => {
+    const values = (form) => [form.amount.value, form.memo.value];
+    // The link's shielded address, then the name, its account picked as it opens.
+    const shielded = mount(newState());
+    paste(shielded, httpsLink(`to=${ALICE.address}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    expect(values(shielded)).toEqual(["0.03", "Invoice 2026-120"]);
+    typeInto(shielded.to, "alice.dusk");
+    await settle();
+    expect(shielded.picked()).toEqual(["true", "false"]);
+    expect(values(shielded)).toEqual(["", ""]);
+    // The link's account, then the name: kept on its account, cleared once its shielded address is picked.
+    const account = mount(newState());
+    paste(account, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    typeInto(account.to, "alice.dusk");
+    await settle();
+    expect(values(account)).toEqual(["0.03", "Invoice 2026-120"]);
+    account.radios()[1].click();
+    await settle();
+    expect(values(account)).toEqual(["", ""]);
+  });
+
+  // Round 40's review: a link's payment with To cleared, kept as a reload keeps Send, opened on what it had for no one,
+  // and whoever was chosen next kept the link's amount and memo.
+  it("clears what a link filled in once another recipient is chosen after a reload, To cleared before it", async () => {
+    let state = newState();
+    let form = mount(state);
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    typeInto(form.to, "");
+    keepOpenSend(state.draft, overview());
+    state = { ...newState(), draft: asKept(takeOpenSend(overview())) };
+    form = mount(state);
+    expect([form.to.value, form.amount.value, form.memo.value]).toEqual(["", "0.03", "Invoice 2026-120"]);
+    typeInto(form.to, BOB.account);
+    expect([form.to.value, form.amount.value, form.memo.value]).toEqual([BOB.account, "", ""]);
+    // Its own recipient again: the link's payment, as it was.
+    state = { ...newState(), draft: asKept({ to: "", amountDusk: "0.03", memo: "Invoice 2026-120", carried: ["amount", "memo"], carriedTo: ALICE.account }) };
+    form = mount(state);
+    typeInto(form.to, ALICE.account);
+    expect([form.to.value, form.amount.value, form.memo.value]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+  });
+
+  // Round 40's review: a link opened Send anew while the form before it still read Contacts; read, that older form took
+  // its own recipient for the new link's, and cleared what the link filled in.
+  it("keeps what a new link filled in from what the form it replaced still waited for", async () => {
+    const { listAddressBook } = await import("../shared/addressBook.js");
+    const { requestDraftOf } = await import("./lib/requestLink.js");
+    let read;
+    listAddressBook.mockImplementationOnce(() => new Promise((resolve) => (read = resolve)));
+    const state = { route: "send", draft: null, addressBook: { loaded: false, items: null } };
+    const old = mount(state);
+    typeInto(old.to, BOB.account);
+    // The link, opened: Send drawn anew for it.
+    state.draft = requestDraftOf(`?link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`))}`);
+    const form = mount(state);
+    expect([form.to.value, form.amount.value, form.memo.value]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+    read([]);
+    await settle();
+    expect([state.draft.to, state.draft.amountDusk, state.draft.memo]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+    const again = mount(state);
+    expect([again.to.value, again.amount.value, again.memo.value]).toEqual([ALICE.account, "0.03", "Invoice 2026-120"]);
+  });
+
+  // Round 40's second review: a form drawn while a field was typed in, which the popup puts on the page only once the
+  // typing stops, counted in place of the one on the page: there, another recipient kept the link's amount and memo.
+  it("clears what a link filled in on the form on the page, another drawn meanwhile but not put there", async () => {
+    const state = newState();
+    const form = mount(state);
+    paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
+    await settle();
+    // Drawn again as To is typed in, and not put on the page.
+    sendFormView(overview(), { state, actions: form.actions });
+    typeInto(form.to, BOB.account);
+    await settle();
+    expect([form.to.value, form.amount.value, form.memo.value, state.draft.amountDusk, state.draft.memo]).toEqual([BOB.account, "", "", "", ""]);
   });
 
   it("refuses one for another network, and goes as far as Review only with what Send takes", async () => {
@@ -2328,7 +2562,7 @@ describe("a request link", () => {
     await settle();
     const note = dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
     expect(note?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
-    expect([form.to.value, form.amount.value]).toEqual(["", ""]);
+    expect([form.to.value, form.amount.value]).toEqual([`https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=1&network=mainnet`, ""]);
 
     // Marek's: an amount in the link that isn't a plain number, a hidden character in it
     // too, fills in nothing, and says why, as app-core's reader does for both wallets.
@@ -2337,7 +2571,7 @@ describe("a request link", () => {
       paste(typo, httpsLink(`to=${ALICE.account}&amount=${amount}`));
       await settle();
       expect(refusal(), amount).toEqual(["This link's amount can't be read. Ask for a new one."]);
-      expect([typo.to.value, typo.amount.value], amount).toEqual(["", ""]);
+      expect([typo.to.value, typo.amount.value], amount).toEqual([httpsLink(`to=${ALICE.account}&amount=${amount}`), ""]);
     }
     // Marek's, the round after: a tab in a pasted link's amount, as a chat or mail can put in, was taken out
     // ("0.001" + tab + "5" filled 0.0015); any space there, of any kind, refuses the link. Pasted, a space ends the
@@ -2347,7 +2581,7 @@ describe("a request link", () => {
       paste(spaced, httpsLink(`to=${ALICE.account}&amount=0.001${space}5&memo=x&network=testnet`));
       await settle();
       expect(refusal(), JSON.stringify(space)).toEqual(["The words after that link may be part of it. Paste the link alone."]);
-      expect([spaced.to.value, spaced.amount.value], JSON.stringify(space)).toEqual(["", ""]);
+      expect([spaced.to.value, spaced.amount.value], JSON.stringify(space)).toEqual([httpsLink(`to=${ALICE.account}&amount=0.001${space}5&memo=x&network=testnet`), ""]);
     }
   });
 
@@ -2367,7 +2601,7 @@ describe("a request link", () => {
       paste(form, httpsLink(`to=${to}&amount=0.001`));
       await settle();
       expect(refusal(), to).toEqual(["This link's address isn't valid. Ask for a new one."]);
-      expect([form.to.value, form.amount.value, state.draft.to, visibleText(dom.document.body.querySelector(".send-filled-note"))]).toEqual(["", "", "", ""]);
+      expect([form.to.value, form.amount.value, state.draft.to, visibleText(dom.document.body.querySelector(".send-filled-note"))]).toEqual([oneLine(httpsLink(`to=${to}&amount=0.001`)), "", oneLine(httpsLink(`to=${to}&amount=0.001`)), ""]);
     }
   });
 
@@ -2381,7 +2615,7 @@ describe("a request link", () => {
       paste(form, httpsLink(`to=${ALICE.account}&${fields}`));
       await settle();
       expect(refusal(), fields).toEqual(["That link can't be read. Ask for a new one."]);
-      expect([form.to.value, form.amount.value, state.draft.to], fields).toEqual(["", "", ""]);
+      expect([form.to.value, form.amount.value, state.draft.to], fields).toEqual([httpsLink(`to=${ALICE.account}&${fields}`), "", httpsLink(`to=${ALICE.account}&${fields}`)]);
     }
     // A name that's no field's is still left out.
     const form = mount(newState());
@@ -2402,7 +2636,7 @@ describe("a request link", () => {
       paste(form, link);
       await settle();
       expect(refusal(), link).toEqual([why]);
-      expect([form.to.value, form.amount.value, state.draft.to]).toEqual(["", "", ""]);
+      expect([form.to.value, form.amount.value, state.draft.to]).toEqual([link, "", link]);
     }
   });
 
@@ -2420,7 +2654,7 @@ describe("a request link", () => {
       paste(form, link);
       await settle();
       expect(refusal(), link).toEqual([why]);
-      expect([form.to.value, form.amount.value, state.draft.to]).toEqual(["", "", ""]);
+      expect([form.to.value, form.amount.value, state.draft.to]).toEqual([link, "", link]);
     }
 
     const twice = mount(newState());
@@ -2436,7 +2670,7 @@ describe("a request link", () => {
     typeInto(form.to, `https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.0013&memo=Order+1044&network=mainnet`);
     await settle();
     expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
-    expect(form.to.value).toBe("");
+    expect(form.to.value).toBe(`https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.0013&memo=Order+1044&network=mainnet`);
 
     form.to.dispatchEvent(fakeEvent("blur"));
     form.review.click();
@@ -2477,7 +2711,6 @@ describe("a request link", () => {
     dom.document.body.querySelector("button[aria-label='Scan QR']").click();
     await settle();
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "0.03"]);
-    typeInto(form.to, BOB.account);
     // Back asks first, the scan's: Leave goes.
     dom.document.body.querySelector(".subnav-back").click();
     expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears the payment the QR code filled in.LeaveStay");
@@ -2493,13 +2726,29 @@ describe("a request link", () => {
     expect(state.route).toBe("home");
     expect(keptSendDraft(overview())).toBeNull();
 
-    // What's typed by hand is still kept for the next Send.
+    // A recipient typed over it: nothing of the scan is left, and Back asks of what is.
+    const over = newState();
+    const typedOver = mount(over);
+    openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:2?amount=0.03&memo=Invoice+2026-120`);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    typeInto(typedOver.to, BOB.account);
+    expect([typedOver.to.value, typedOver.amount.value, typedOver.memo.value]).toEqual([BOB.account, "", ""]);
+    dom.document.body.querySelector(".subnav-back").click();
+    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears your unfinished payment.LeaveStay");
+    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    await settle();
+    expect([over.route, keptSendDraft(overview())]).toEqual(["home", null]);
+
+    // Amélie's: what's typed by hand, left with Back, isn't kept for the next Send either.
     keepSendDraft({ to: BOB.account, amountDusk: "0.02", memo: "satay" }, overview());
     const typed = { ...newState(), draft: keptSendDraft(overview()) };
     const again = mount(typed);
     expect([again.to.value, again.amount.value]).toEqual([BOB.account, "0.02"]);
     dom.document.body.querySelector(".subnav-back").click();
-    expect(keptSendDraft(overview())).toMatchObject({ to: BOB.account, amountDusk: "0.02", memo: "satay" });
+    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    await settle();
+    expect([typed.route, keptSendDraft(overview())]).toEqual(["home", null]);
   });
 
   it("is no request when it goes anywhere else, or names no recipient", async () => {
@@ -2547,7 +2796,7 @@ describe("a request link", () => {
     paste(form, httpsLink(`to=${ALICE.account}&memo=One&memo=Two`));
     await settle();
     expect(refusal()).toEqual(["This link says the memo twice. Ask for a new one."]);
-    expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
+    expect([form.to.value, form.amount.value, memoField().value]).toEqual([httpsLink(`to=${ALICE.account}&memo=One&memo=Two`), "", ""]);
   });
 
   it("refuses a dusk: link for another network by the network its query names, as an https link", async () => {
@@ -2556,13 +2805,13 @@ describe("a request link", () => {
     paste(onTestnet, `dusk:public-${ALICE.account}?amount=0.001&network=mainnet`);
     await settle();
     expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
-    expect([onTestnet.to.value, onTestnet.amount.value]).toEqual(["", ""]);
+    expect([onTestnet.to.value, onTestnet.amount.value]).toEqual([`dusk:public-${ALICE.account}?amount=0.001&network=mainnet`, ""]);
 
     const onMainnet = mount(newState(), overview({ nodeUrl: "https://nodes.dusk.network" }));
     paste(onMainnet, `dusk:public-${ALICE.account}?amount=0.001&network=testnet`);
     await settle();
     expect(refusal()).toEqual(["This request is for Testnet. You are on Mainnet."]);
-    expect([onMainnet.to.value, onMainnet.amount.value]).toEqual(["", ""]);
+    expect([onMainnet.to.value, onMainnet.amount.value]).toEqual([`dusk:public-${ALICE.account}?amount=0.001&network=testnet`, ""]);
   });
 
   it("refuses a link whose memo has a line break, saying so, rather than sending it on one line", async () => {
@@ -2572,7 +2821,7 @@ describe("a request link", () => {
     paste(form, httpsLink(`to=${ALICE.account}&amount=0.001&memo=line%20one%0Aline%20two`));
     await settle();
     expect(refusal()).toEqual(["This link's memo has a line break. Ask for a new one."]);
-    expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
+    expect([form.to.value, form.amount.value, memoField().value]).toEqual([httpsLink(`to=${ALICE.account}&amount=0.001&memo=line%20one%0Aline%20two`), "", ""]);
   });
 
   // Chen's: a plain dusk: link on Mainnet filled Send in without a word of the network.
@@ -2822,7 +3071,8 @@ describe("paying an address that sent you a memo", () => {
     expect(review({ entries: [cameIn(ALICE.account, URGENT)] })).toBe(SAID);
     // Its newest memo, with what can't be seen in it as its codes.
     // A right-to-left override (U+202E) in it.
-    const newer = cameIn(ALICE.account, `Pay back${String.fromCharCode(0x202e)}now`, { hash: "c2".repeat(32), blockHeight: 4_687_100 });
+    // Newer by its block and its time: two made in the same test can fall a millisecond apart either way.
+    const newer = { ...cameIn(ALICE.account, `Pay back${String.fromCharCode(0x202e)}now`, { hash: "c2".repeat(32), blockHeight: 4_687_100 }), timestamp: Date.now() - 30 * 60_000 };
     expect(review({ entries: [newer, cameIn(ALICE.account, URGENT)] })).toBe("This address sent you: “Pay back\\u202enow” · not in your contacts.");
     // A contact's, or your other profile's: nothing, as Activity calls neither a stranger.
     expect(review({ entries: [cameIn(ALICE.account, URGENT)], contacts: [{ name: "Alice", address: ALICE.account }] })).toBe("");
@@ -2830,6 +3080,104 @@ describe("paying an address that sent you a memo", () => {
     // Nothing it sent with a memo, or a memo from another address: nothing.
     expect(review({ entries: [cameIn(ALICE.account, "")] })).toBe("");
     expect(review({ entries: [cameIn(BOB.account, URGENT)] })).toBe("");
+  });
+
+  // Chen's: a stranger's "URGENT: wallet suspended" memos were 3 and 6 days old, past the page Activity had read, and
+  // Review said nothing; yesterday's memo from Lena it said.
+  it("says what it sent you from every payment kept on this device, and from older ones once they're synced", async () => {
+    const ov = overview();
+    const day = 24 * 60 * 60_000;
+    // Activity's page: other payments only.
+    const page = Array.from({ length: 3 }, (_, i) =>
+      cameIn(BOB.account, `Lunch ${i}`, { hash: `b${i}`.padEnd(64, "0"), blockHeight: 4_690_000 - i })
+    );
+    const threeDays = { ...cameIn(ALICE.account, "", { hash: "d3".repeat(32), blockHeight: 4_660_000 }), timestamp: Date.now() - 3 * day };
+    const sixDays = { ...cameIn(ALICE.account, URGENT, { hash: "d6".repeat(32), blockHeight: 4_630_000 }), timestamp: Date.now() - 6 * day };
+    // What's kept on this device past the page, and what a sync of older blocks brings.
+    const kept = (more, older = []) => {
+      let synced = false;
+      return {
+        read: vi.fn(async ({ limit }) => ({ entries: [...page, ...more, ...(synced ? older : [])].slice(0, limit), state: null, complete: synced || !older.length })),
+        sync: vi.fn(async () => {
+          synced = true;
+        }),
+      };
+    };
+    for (const history of [kept([threeDays, sixDays]), kept([threeDays], [sixDays])]) {
+      mount({ route: "confirm", addressBook: { loaded: true, items: [] }, activity: { key: activityKey(ov), entries: page, names: new Map(), history, epoch: Promise.resolve(1) }, draft: draft() }, ov);
+      await settle();
+      expect(said()).toBe(SAID);
+    }
+
+    // Review drawn again and again while the older blocks are read: one read of them.
+    const slow = kept([threeDays], [sixDays]);
+    let synced;
+    const sync = slow.sync;
+    slow.sync = vi.fn(() => new Promise((resolve) => (synced = () => sync().then(resolve))));
+    const activity = { key: activityKey(ov), entries: page, names: new Map(), history: slow, epoch: Promise.resolve(1) };
+    const state = { route: "confirm", addressBook: { loaded: true, items: [] }, activity, draft: draft() };
+    for (let i = 0; i < 3; i++) {
+      mount(state, ov);
+      await settle();
+    }
+    expect([slow.sync.mock.calls.length, said()]).toEqual([1, ""]);
+    synced();
+    await settle();
+    expect(said()).toBe(SAID);
+  });
+
+  // Round 40's review: Review read and merged every payment kept here, and synced older blocks, for a contact or another
+  // profile too, whose memo it never says, and did it again at each draw. Only for a stranger, once Contacts is read,
+  // once for the Review.
+  it("reads what's kept only for an address that's none of yours, once Contacts is read, and once however often it's drawn", async () => {
+    const { listAddressBook } = await import("../shared/addressBook.js");
+    const ov = overview();
+    const reviewOf = (to, addressBook) => {
+      const history = { read: vi.fn(async () => ({ entries: [cameIn(to, URGENT)], state: null, complete: true })), sync: vi.fn(async () => {}) };
+      const state = { route: "confirm", addressBook, activity: { key: activityKey(ov), entries: [], names: new Map(), history, epoch: Promise.resolve(1) }, draft: draft(to) };
+      return { state, history };
+    };
+    // A contact's, and your other profile's: nothing read.
+    for (const [to, items] of [
+      [ALICE.account, [{ name: "Alice", address: ALICE.account }]],
+      [OTHER_PROFILE, []],
+    ]) {
+      const { state, history } = reviewOf(to, { loaded: true, items });
+      mount(state, ov);
+      await settle();
+      expect([history.read.mock.calls.length, said()], to).toEqual([0, ""]);
+    }
+    // A stranger's: nothing till Contacts is read, then one read, however often Review is drawn.
+    let read;
+    listAddressBook.mockImplementationOnce(() => new Promise((resolve) => (read = resolve)));
+    const { state, history } = reviewOf(ALICE.account, { loaded: false, items: null });
+    mount(state, ov);
+    await settle();
+    expect(history.read).not.toHaveBeenCalled();
+    read([]);
+    await settle();
+    for (let i = 0; i < 3; i++) {
+      mount(state, ov);
+      await settle();
+    }
+    expect([history.read.mock.calls.length, said()]).toEqual([1, SAID]);
+  });
+
+  // Amélie's: in the extension it was a dark box with no sign, the memo cut at "renvo…"; the web wallet's is amber,
+  // with a sign and the whole memo.
+  it("says it in an amber warning with its sign, their whole memo quoted and wrapped, in a memo's small style", async () => {
+    review({ entries: [cameIn(ALICE.account, URGENT)] });
+    const note = dom.document.body.querySelector(".review-theirs");
+    expect([note.className, note.querySelector(".review-theirs__sign")?.innerHTML]).toEqual(["callout review-theirs", iconSvg("alert")]);
+    expect(note.querySelector(".review-theirs__memo").textContent).toBe(`“${URGENT}”`);
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
+    expect(rule(".callout.review-theirs")).toContain("var(--warn)");
+    expect([rule(".review-theirs__sign"), rule(".review-theirs__title")].map((r) => r.includes("color: var(--warn)"))).toEqual([true, true]);
+    // Wrapped, never cut: no ellipsis, no single line.
+    const memo = rule(".review-theirs__memo");
+    expect(memo).toContain("overflow-wrap: anywhere;");
+    expect(memo).not.toMatch(/nowrap|ellipsis/);
   });
 
   it("says nothing of it until Contacts is read, so a contact is never called a stranger", async () => {

@@ -31,7 +31,7 @@ import { engineContactsVault, handleUiCommand, sendParams } from "./uiCommands.j
 import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
-import { WAITING_NOTICE, arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff } from "../shared/phoneNotices.js";
+import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff, waitingNotice } from "../shared/phoneNotices.js";
 import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, waitAppSend, watchAppArrival } from "../platform/notices.js";
 import { incomingNoticeToken, isIncomingNoticeToken, noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
@@ -312,7 +312,10 @@ function tellWaitingForApp() {
   waitingTold = waitingTold
     .then(async (said) => {
       const [first] = waitingForNetwork();
-      const setup = first && (await appNoticesAllowed().catch(() => false)) ? { wallet: first.walletId, nodeUrl: first.nodeUrl, ...WAITING_NOTICE } : null;
+      const setup =
+        first && (await appNoticesAllowed().catch(() => false))
+          ? { wallet: first.walletId, nodeUrl: first.nodeUrl, ...waitingNotice(await paymentOf({ kind: TX_KIND.TRANSFER, to: first.to, amount: first.lux, toName: first.toName, walletId: first.walletId })) }
+          : null;
       const key = JSON.stringify(setup);
       if (key !== said) await waitAppSend(setup).catch(() => {});
       return key;
@@ -528,6 +531,10 @@ export async function localSend(message) {
       ensureEngineConfigured,
       getEngineStatus: engineStatus,
     });
+    // Balances hidden or shown: a waiting payment's notice says its amount,
+    // or not, from now on, the app put away next included (round 40's
+    // second review: it kept the amount, balances hidden).
+    if (message?.type === "DUSK_UI_SET_HIDE_BALANCES") await tellWaitingForApp();
     if (common) return common;
     // Switch, add, remove and rename wallets, and change the password.
     const wallets = await handleWalletCommand(message, {

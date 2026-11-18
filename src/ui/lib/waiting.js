@@ -4,7 +4,7 @@
 // out, and what Review says is waiting already.
 
 import { formatDuskExact, formatLuxForInput, safeBigInt } from "../../shared/amount.js";
-import { SENT_MEANWHILE_TEXT } from "../../shared/waitingSends.js";
+import { MEANWHILE_READ_MS, SENT_MEANWHILE_TEXT } from "../../shared/waitingSends.js";
 
 /**
  * Who pays and on which network, as a Review was asked for: the wallet, the
@@ -89,6 +89,24 @@ export function againDraft(send, ov, { hidden = false } = {}) {
   };
 }
 
+/**
+ * Whether Send's draft is still the payment it was opened again for
+ * (`replaces`), as the overview holds that one: to the same recipient, the
+ * same amount and memo, untouched. False where it was changed, or that
+ * payment is held no more.
+ * @param {object | null} draft
+ * @param {object} ov
+ */
+export function retriedAsIs(draft, ov) {
+  const send = (Array.isArray(ov?.waitingSends) ? ov.waitingSends : []).find((each) => each?.sendId && each.sendId === draft?.replaces);
+  if (!send) return false;
+  return (
+    String(draft.to ?? "").trim() === String(send.to ?? "") &&
+    String(draft.amountDusk ?? "").trim() === formatLuxForInput(safeBigInt(send.lux, 0n)) &&
+    String(draft.memo ?? "") === String(send.memo ?? "")
+  );
+}
+
 // A memo said in a sentence: none that holds a control or direction character.
 const sayable = (memo) => {
   const text = String(memo ?? "").trim();
@@ -110,18 +128,35 @@ export function sameSentMeanwhile(send) {
   );
 }
 
+/** What a payment held for Send it too says while what its account sent meanwhile is read. */
+export const CHECKING_MEANWHILE_TEXT = "Checking what your account sent…";
+
+/**
+ * Whether a payment held for Send it too still reads what its account sent
+ * meanwhile (`checking`, since when): its Send it too and Don't send wait for
+ * the answer, though no longer than the node is given for it, and a little.
+ * @param {object} send
+ * @param {number} [now]
+ */
+export function checksMeanwhile(send, now = Date.now()) {
+  const since = Number(send?.checking);
+  return Boolean(send?.held) && since > 0 && now - since < MEANWHILE_READ_MS + 5_000;
+}
+
 /**
  * What a payment held for Send it too says of what its account sent while it
  * waited, from the chain: "Your account sent 0.001 DUSK to your Profile 2 at
  * 10:02 while this waited." with its memo, and "That looks like this same
  * payment." where it's this one (Marek's, Lena's, Chen's: "something else"
- * was the very same payment, from another device). The plain sentence where
- * the node named nothing.
+ * was the very same payment, from another device). "Checking what your
+ * account sent…" while it's read; the plain sentence where the node named
+ * nothing.
  * @param {object} send - a held payment, with `meanwhile`
  * @param {{ toText: (address: string) => string, whenText: (at: number) => string, hidden?: boolean }} words
  * @returns {string}
  */
 export function sentMeanwhileText(send, { toText, whenText, hidden = false }) {
+  if (checksMeanwhile(send)) return CHECKING_MEANWHILE_TEXT;
   const sent = Array.isArray(send?.meanwhile) ? send.meanwhile : [];
   if (!sent.length) return SENT_MEANWHILE_TEXT;
   const [first] = sent;

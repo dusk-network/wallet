@@ -119,8 +119,8 @@ function fingerprintRow({ actions }) {
   return row;
 }
 
-/** What Settings says of the notices for money coming in. */
-export const INCOMING_NOTE = "It can take up to about 15 minutes.";
+/** What Settings says of the notices for money coming in, under its switch: how often Android looks. */
+export const INCOMING_NOTE = "Android checks about every 15 minutes.";
 
 // The app on Android: a notice for money that came in, told by Android about
 // every 15 minutes while the app is away (android/ArrivalJob.kt). On while the

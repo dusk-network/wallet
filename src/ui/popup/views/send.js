@@ -23,7 +23,7 @@ import { HIDDEN_BALANCE, balance, balancesHidden, shieldedLuxOf } from "../../co
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
-import { ownProfileName, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
+import { ownProfileName, profileLabelOf, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { fieldLabel, reviewActions, submitOnGasEnter, textInput, wrappingInput } from "../../components/FormControls.js";
 import { gasFeeLux, networkGasPrice, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
@@ -39,7 +39,7 @@ import {
 
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { asDuskName, closeDuskName, isDuskName } from "@duskdomains/sdk/names";
-import { duskNameLookAlike } from "@dusk-network/app-core/names";
+import { duskNameLookAlike, toSuggestions } from "@dusk-network/app-core/names";
 import {
   duskNameErrorText,
   duskNameRecipient,
@@ -53,13 +53,13 @@ import { openQrScanModal } from "../../components/QrScanModal.js";
 import { forgetRequestLink, pastedRequestNames, readPastedRequest, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
-import { activityRows } from "../activity.js";
+import { activityKey, activityRows, keptActivityRows } from "../activity.js";
 import { contactNames, theirMemo, whenAtText } from "./txRow.js";
 import { safeText } from "../../../shared/safeText.js";
 import { clockText } from "../../lib/time.js";
 import { sendFromReview } from "./sent.js";
 import { MAX_MEMO_BYTES, chainLabel, linkAmount, networkMismatch } from "@dusk-network/app-core/payment-links";
-import { forgetSendDraft, keepSendDraft } from "../../lib/sendDraft.js";
+import { carriedDropped, forgetSendDraft, holdsPayment } from "../../lib/sendDraft.js";
 import { askConfirm } from "../../components/ConfirmDialog.js";
 import { reviewContextOf, sameWaiting, waitingLux } from "../../lib/waiting.js";
 import { homeView } from "./home.js";
@@ -89,6 +89,14 @@ export function draftDuskName(draft) {
   const name = draft?.duskName;
   return name && typeof draft.to === "string" && name.to === draft.to ? name : undefined;
 }
+
+// What a Send kept on purpose says under the recipient: through a reload, a
+// lock, or the app ended in the background.
+const KEPT_TEXT = "Your unfinished payment.";
+
+// A profile of yours as Send offers it: "Your Profile 2" where it goes by its
+// number, "Your profile Savings" by a name, as the web wallet says it.
+const yourProfile = (name) => (/^Profile \d/.test(name) ? `Your ${name}` : `Your profile ${name}`);
 
 // What a request link or a QR code filled in says under the recipient, until
 // it changes, with the network it pays on: a plain link says none.
@@ -135,6 +143,8 @@ function waitingAgainWords(ov, { lux, masked, to, memo, name = "", time }) {
 let pasteReading = null;
 
 export function sendFormView(ov, { state, actions } = {}) {
+  // While it's drawn, and then while it's on the page (liveForm).
+  let drawing = true;
   // A request for another network leaves nothing of itself here, whether it
   // opened this page or the network changed under it: the form says why.
   if (state.draft?.requestChainId && chainMismatchText(state.draft.requestChainId, ov?.nodeUrl)) {
@@ -151,6 +161,15 @@ export function sendFormView(ov, { state, actions } = {}) {
     value: draftDuskName(draft)?.name || (typeof draft.to === "string" ? draft.to : ""),
     onEnter: () => amount.focus(),
   });
+  // This form, as it's drawn and while it's on the page: once another takes
+  // its place there, as a link opening Send anew, what this one still waited
+  // for (its contacts, a name's lookup, a QR code) leaves the draft alone
+  // (round 40's review: an older form's contacts, read late, cleared what a
+  // new link filled in); and one drawn but never put on the page, as while a
+  // field is typed in (app.js), is no form of the person's (its second
+  // review: the one on the page then kept a link's amount for another
+  // recipient).
+  const liveForm = () => drawing || Boolean(to.isConnected);
 
   // Optional inline contact badge (shown when the recipient matches a saved contact).
   const toChip = recipientBadge({
@@ -223,6 +242,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     masked: hidden && Boolean(draft.amountMasked),
     onInput: () => {
       stopReading();
+      typedOver("amount");
       checkAmount();
       syncDraft();
     },
@@ -261,6 +281,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       const maxLux = getMaxAmountLux();
       if (maxLux == null || maxLux <= 0n) return;
       stopReading();
+      typedOver("amount");
       // The real amount, which gets sent, shown as dots with balances hidden.
       field.setValue(formatLuxForInput(maxLux), { masked: hidden });
       checkAmount();
@@ -375,32 +396,60 @@ export function sendFormView(ov, { state, actions } = {}) {
     chainNote.hidden = !text;
   };
   const filledNote = h("p", { class: "field-hint send-filled-note", role: "status", hidden: true });
-  // Whether Back asks first, said to the phone's Back as a link or a QR code fills the form in.
+  // Whether Back asks first, said to the phone's Back as the form fills in.
   let markAsks = () => {};
   // A link that waited behind the lock says when it was opened (Sofía's: one
-  // from long before filled Send in after an unlock, with no word of it).
+  // from long before filled Send in after an unlock, with no word of it). A
+  // Send kept on purpose, through a reload, a lock or the app ended, says
+  // it's your unfinished payment.
   const sayFilled = (from) => {
     const said = filledText(from, ov?.nodeUrl);
     const linkAt = Number(state.draft?.linkAt) || 0;
-    filledNote.textContent = said && from === "link" && linkAt ? `${said} From a link opened at ${clockText(linkAt)}.` : said;
+    filledNote.textContent = said && from === "link" && linkAt ? `${said} From a link opened at ${clockText(linkAt)}.` : said || (state.draft?.kept ? KEPT_TEXT : "");
     filledNote.hidden = !filledNote.textContent;
     markAsks();
+  };
+  // What a link or a kept Send put in Amount and Memo is for the recipient it
+  // came with: another chosen, typed, pasted or picked, they go, and with
+  // them that it was that payment (Amélie's: the 0,1 of an abandoned payment
+  // back to a stranger stayed as she chose Chen). Typed over, they're yours.
+  const dropCarried = (recipient) => {
+    const d = state.draft;
+    const changes = liveForm() ? carriedDropped(d, recipient) : null;
+    if (!changes) return;
+    if ("amountDusk" in changes) field.setValue("");
+    if ("memo" in changes) memo.value = "";
+    Object.assign(d, changes);
+    if ("memo" in changes) checkMemo();
+    checkAmount();
+    sayFilled(d.filledFrom);
+  };
+  const typedOver = (name) => {
+    const d = state.draft;
+    if (Array.isArray(d?.carried)) d.carried = d.carried.filter((each) => each !== name);
   };
   sayRefused({ chainId: state.draft?.refusedChainId, problem: state.draft?.refusedProblem });
   sayFilled(state.draft?.filledFrom);
 
   // A link read (readRequestLink), as it's pasted, scanned or opened.
-  const applyRequest = (read, { source = "request" } = {}) => {
-    // For another network, or one that can't be read, it fills in nothing:
-    // the whole form empties, so nothing an earlier link or a person put in
-    // reads as this one's, and the reason alone is said.
+  const applyRequest = (read, { source = "request", pasted = "" } = {}) => {
+    // For another network, one that can't be read, or a message that says
+    // other than its link, it fills in nothing: Amount and Memo empty, so
+    // nothing an earlier link or a person put in reads as this one's, and the
+    // reason alone is said, what disagrees too (app-core's). What was pasted
+    // stays in To, to see what it said (Amélie's, Sofía's: To emptied too),
+    // and the refusal stands till To is edited: on its one line it may read
+    // otherwise, its lines run together (refusalStands).
     if (!read?.link) {
-      to.value = "";
+      // On To's one line, as a keyboard's paste puts it there.
+      to.value = String(pasted ?? "").replace(/\s*[\r\n]+\s*/g, " ").trim();
       field.setValue("");
       memo.value = "";
       checkMemo();
       state.draft = {
         ...refusedRequest({ ...(state.draft || {}), requestChainId: read?.reason === "other-network" ? read.chainId : undefined }, read?.reason === "other-network" ? "" : read?.problem),
+        to: to.value,
+        refusedText: to.value || undefined,
         amountDusk: "",
         amountMasked: false,
         memo: "",
@@ -413,6 +462,8 @@ export function sendFormView(ov, { state, actions } = {}) {
 
     const req = read.link;
     const isDuskReq = req.form === "dusk" || req.form === "https";
+    dropCarried(req.to);
+    const carriedBefore = state.draft?.carriedTo === req.to && Array.isArray(state.draft?.carried) ? state.draft.carried : [];
 
     // Update DOM values
     to.value = req.to;
@@ -440,10 +491,15 @@ export function sendFormView(ov, { state, actions } = {}) {
       if (req.amountDusk) nextDraft.amountDusk = amount.value;
       if (req.memo) nextDraft.memo = memo.value;
     }
+    // What it put in Amount and Memo, for its recipient alone.
+    const filled = [amount.value && (isDuskReq || req.amountDusk) ? "amount" : "", memo.value && (isDuskReq || req.memo) ? "memo" : ""];
+    nextDraft.carried = [...new Set([...(isDuskReq ? [] : carriedBefore), ...filled.filter(Boolean)])];
+    nextDraft.carriedTo = req.to;
 
     nextDraft.requestChainId = req.chainId || undefined;
     nextDraft.refusedChainId = undefined;
     nextDraft.refusedProblem = undefined;
+    nextDraft.refusedText = undefined;
     nextDraft.filledFrom = source === "qr" ? "qr" : "link";
     // What filled it in, which typing over the recipient doesn't change.
     nextDraft.filledIn = nextDraft.filledFrom;
@@ -465,6 +521,10 @@ export function sendFormView(ov, { state, actions } = {}) {
   // pasted in To is read as a paste (readPastedRequest): a shared request's
   // message by its link; a QR code's, as the link it holds.
   const looksLikeRequest = (text) => readPastedRequest(text, ov?.nodeUrl) !== null;
+  // A paste refused, as To still shows it, unedited: the refusal stands. Read
+  // again on its one line, a message's lines run together, and a memo on two
+  // lines can read as the link's (a refused paste filled in as To was left).
+  const refusalStands = () => Boolean(state.draft?.refusedText) && String(to.value ?? "").trim() === state.draft.refusedText;
 
   // A shared request's .dusk names, looked up on the wallet's network before
   // it fills anything in, as the web wallet does: "sofiadesign.dusk asks
@@ -489,7 +549,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       if (pasteReading !== reading || !readingHere() || state.route !== "send" || !to.isConnected) return;
       stopReading();
       const read = readPastedRequest(reading.text, ov?.nodeUrl, { owners });
-      if (read) applyRequest(read, { source: "request" });
+      if (read) applyRequest(read, { source: "request", pasted: reading.text });
       toBefore = String(to.value ?? "");
     });
   };
@@ -511,10 +571,10 @@ export function sendFormView(ov, { state, actions } = {}) {
     if (names.length) return readWithNames(s, names);
     stopReading();
     const read = source === "qr" ? readRequestLink(s, ov?.nodeUrl) : readPastedRequest(s, ov?.nodeUrl);
-    if (read) return applyRequest(read, { source });
+    if (read) return applyRequest(read, { source, pasted: source === "qr" ? "" : s });
     if (source !== "qr") return false;
     to.value = s;
-    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: "qr", filledIn: "qr" };
+    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, refusedText: undefined, filledFrom: "qr", filledIn: "qr" };
     sayRefused();
     sayFilled("qr");
     updateToType();
@@ -559,6 +619,8 @@ export function sendFormView(ov, { state, actions } = {}) {
       listAddressBook()
         .then((items) => {
           contactsLoading = false;
+          // Another form drawn since reads them itself.
+          if (!liveForm()) return;
           try {
             // Cache in shared state so other views (review, contacts picker) can reuse.
             state.addressBook = {
@@ -682,6 +744,13 @@ export function sendFormView(ov, { state, actions } = {}) {
   const nameChoices = { ...draft.nameChoices };
   const pickedShielded = (result) => nameChoices[result.name] === true;
   const nameRecipient = (result) => duskNameRecipient(result, { shielded: pickedShielded(result) });
+  // A name's recipient, for what a link or a kept Send carried: the address of
+  // its card picked, or any, where the link named the name itself (round 40's
+  // review: a name with the link's shielded address and an account kept the
+  // link's amount and memo with its account picked, or picked after).
+  const dropCarriedFor = (result) => {
+    if (String(state.draft?.carriedTo ?? "") !== result.name) dropCarried(nameRecipient(result));
+  };
 
   // The resolved name the form shows while the field holds it. Contacts saves
   // the address it sends to, never the name.
@@ -724,17 +793,35 @@ export function sendFormView(ov, { state, actions } = {}) {
       },
     });
 
-  // The contacts a typed name can mean, by the start of their name or of a word in it.
-  const contactsNamed = (typed) => {
-    const q = typed.toLowerCase();
-    const items = Array.isArray(state.addressBook?.items) ? state.addressBook.items : [];
-    return items
-      .filter((c) => {
-        const name = String(c?.name ?? "").trim().toLowerCase();
-        return Boolean(c?.address) && (name.startsWith(q) || name.split(/[^\p{L}\p{N}]+/u).some((word) => word && word.startsWith(q)));
-      })
-      .slice(0, 3);
-  };
+  // Your profiles, every wallet's here, by their names: this wallet's as
+  // "Profile 2" or its own name, another's with that wallet's name.
+  const profilesHere = () => [
+    ...(Array.isArray(ov?.accounts) ? ov.accounts : []).map((account, i) => ({ account, name: profileLabelOf(ov, i) })),
+    ...(Array.isArray(ov?.wallets) ? ov.wallets : [])
+      .filter((wallet) => !wallet?.active && Array.isArray(wallet?.accounts))
+      .flatMap((wallet) => wallet.accounts.map((account) => ({ account, name: ownProfileName({ wallets: [wallet] }, account) }))),
+  ].filter(({ account, name }) => account && name);
+  // What a name typed in To can mean, as both wallets read it (app-core's
+  // toSuggestions): your profiles but the one it goes from, then your
+  // contacts; and whether a .dusk name may be guessed at, only for text that
+  // is none of your own names (Sofía's: "Profile" offered profile.dusk, not
+  // her Profile 2; registered, it would have taken her own transfer to a
+  // stranger).
+  const suggestionsFor = (typed) =>
+    toSuggestions(typed, { profiles: profilesHere(), contacts: Array.isArray(state.addressBook?.items) ? state.addressBook.items : [], self: ownAccount });
+
+  // "Your Profile 2 · 26FCH7…", which puts the profile's account in the field.
+  const profileButton = (profile) =>
+    h("button", {
+      class: "text-btn text-btn--inline name-suggestion",
+      type: "button",
+      text: `${yourProfile(profile.name)} · ${shortAddress(profile.account)}`,
+      onclick: () => {
+        to.value = profile.account;
+        onRecipientInput();
+        to.focus?.();
+      },
+    });
 
   // "Your contact Jan · 26FCH7…", which puts the contact's address in the field;
   // one whose name looks like another's says so, its address beside it.
@@ -787,6 +874,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     shownName = result;
+    dropCarriedFor(result);
     // The name's cards show the transfer type, and pick it when the name has
     // both addresses, so the pill stays off.
     hideRecipientBadge(toTypePill);
@@ -798,6 +886,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       shieldedDisabled: !shieldedCovers,
       onChoose: (shielded) => {
         nameChoices[result.name] = shielded;
+        dropCarriedFor(result);
         syncDraft();
         choice.set(shielded);
         showNameAddress(result);
@@ -853,7 +942,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     updateAmountHelpers();
     showNameBox([h("div", { class: "muted", text: `Looking up ${v}…` })]);
     lookup.promise.then((result) => {
-      if (latest()) applyNameResult(v, result);
+      if (latest() && liveForm()) applyNameResult(v, result);
     });
   };
 
@@ -932,6 +1021,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     if (t === "account" || t === "address") {
+      dropCarried(v);
       setRecipientBadge(toTypePill, {
         ...recipientTypeBadgeOptions(t),
         className: "recipient-type-badge",
@@ -955,12 +1045,12 @@ export function sendFormView(ov, { state, actions } = {}) {
       return;
     }
 
-    // A contact's name comes before any guess at a .dusk name, which would
-    // be somebody else's.
-    const named = contactsNamed(v);
-    if (named.length) {
+    // Your profiles' names, then your contacts', come before any guess at a
+    // .dusk name, which would be somebody else's.
+    const named = suggestionsFor(v);
+    if (named.profiles.length || named.contacts.length) {
       hideRecipientBadge(toTypePill);
-      showNameBox(named.map(contactButton));
+      showNameBox([...named.profiles.map(profileButton), ...named.contacts.map(contactButton)]);
       detectedRecipientType = null;
       updateContactMatch("", null);
       updateAmountHelpers();
@@ -968,8 +1058,9 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     // A name typed without .dusk, or with a dot after it, where the network
-    // has names: the name it likely means (asDuskName).
-    const bare = duskNamesNetwork(ov?.nodeUrl) ? asDuskName(v) : null;
+    // has names: the name it likely means (asDuskName), unless it's one of
+    // your own, as the profile it goes from.
+    const bare = duskNamesNetwork(ov?.nodeUrl) && named.guessDusk ? asDuskName(v) : null;
     if (bare) {
       hideRecipientBadge(toTypePill);
       showNameBox([suggestionButton(bare)]);
@@ -1043,6 +1134,8 @@ export function sendFormView(ov, { state, actions } = {}) {
       // preserve any gas edits the user may have made on the confirm screen
       gas: state.draft?.gas,
     };
+    // Anything in it now, Back asks first.
+    markAsks();
   };
 
   // What To held before this input, to tell a link put in whole from one typed.
@@ -1056,7 +1149,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     sayRefused();
     sayFilled("");
     // Another recipient: the request, and whether it was refused, no longer apply.
-    if (state.draft) Object.assign(state.draft, { requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: undefined });
+    if (state.draft) Object.assign(state.draft, { requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, refusedText: undefined, filledFrom: undefined });
     // A link put in whole is read at once, as a paste is: one for another
     // network, or that can't be read, says so then, not at Review.
     if (whole && looksLikeRequest(now.trim()) && maybeDecodeRequest(now, { source: "request" })) {
@@ -1069,6 +1162,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   to.addEventListener("input", onRecipientInput);
   memo.addEventListener("input", () => {
     stopReading();
+    typedOver("memo");
     checkMemo();
     syncDraft();
   });
@@ -1088,7 +1182,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
   to.addEventListener("blur", () => {
     const v = String(to.value || "").trim();
-    if (looksLikeRequest(v)) {
+    if (!refusalStands() && looksLikeRequest(v)) {
       maybeDecodeRequest(v, { source: "request" });
     }
   });
@@ -1105,7 +1199,7 @@ export function sendFormView(ov, { state, actions } = {}) {
           title: "Scan request",
           hint: "Scan a Dusk request QR or choose an image.",
         });
-        if (!payload) return;
+        if (!payload || !liveForm()) return;
         const ok = maybeDecodeRequest(payload, { source: "qr" });
         if (!ok) setErr("This QR code isn't a Dusk account, address or request.");
         toBefore = String(to.value ?? "");
@@ -1169,6 +1263,8 @@ export function sendFormView(ov, { state, actions } = {}) {
         const rawTo = to.value.trim();
         // A paste's .dusk names still being looked up: it's read first.
         if (readingHere()) return;
+        // A paste refused, unedited since: why is said under the field already.
+        if (refusalStands()) return;
         const decoded = looksLikeRequest(rawTo) ? maybeDecodeRequest(rawTo, { source: "request" }) : false;
         if (decoded === "refused" || decoded === "reading") return;
 
@@ -1194,7 +1290,8 @@ export function sendFormView(ov, { state, actions } = {}) {
 
         const recType = ProfileGenerator.typeOf(recipient);
         if (recType !== "account" && recType !== "address") {
-          throw new Error(contactsNamed(toVal).length ? "Tap the contact above to use it." : NOT_AN_ADDRESS_TEXT);
+          const named = suggestionsFor(toVal);
+          throw new Error(named.contacts.length ? "Tap the contact above to use it." : named.profiles.length ? "Tap the profile above to use it." : NOT_AN_ADDRESS_TEXT);
         }
         const blocked = blockedRecipient(recipient, ov?.chainId);
         if (blocked) throw new Error(blocked);
@@ -1232,6 +1329,10 @@ export function sendFormView(ov, { state, actions } = {}) {
           filledFrom: state.draft?.filledFrom,
           filledIn: state.draft?.filledIn,
           linkAt: state.draft?.linkAt,
+          // What a link or a kept Send put in, for the recipient it came with, and that it was kept.
+          carried: state.draft?.carried,
+          carriedTo: state.draft?.carriedTo,
+          kept: state.draft?.kept,
           reviewedFor: reviewedFor(ov),
           // Sent again from Home's Send it now, back from its Review: still in
           // the place of the one Home said wasn't sent, while it's that payment
@@ -1270,19 +1371,21 @@ export function sendFormView(ov, { state, actions } = {}) {
     })
     .catch(() => {});
 
-  // Kept for Send's next opening: Back on a phone is pressed by the way. Not
-  // what a link or a QR code filled in, edited since or not: it isn't the next
-  // payment's, so Back asks first (Amélie's and Chen's: a phone's Back threw
-  // a link's payment away without a word). Stay keeps it, as the question's
+  // Left with Back, it goes, never to come back in a later Send (Amélie's: a
+  // payment back to a stranger, left with Back twice, was there again with
+  // its 0,1 the next time). Anything in it, Back asks first, a phone's Back
+  // being pressed by the way (Amélie's and Chen's: a phone's Back threw a
+  // link's payment away without a word). Stay keeps it, as the question's
   // own Back does.
   const leave = async () => {
-    if (state.draft?.filledIn) {
-      const from = state.draft.filledIn === "qr" ? "QR code" : "link";
-      const go = await askConfirm({ title: "Leave this payment?", text: `This clears the payment the ${from} filled in.`, action: "Leave", cancel: "Stay", destructive: true });
+    const d = state.draft;
+    if (d?.filledIn || holdsPayment(d)) {
+      const text = d?.filledIn ? `This clears the payment the ${d.filledIn === "qr" ? "QR code" : "link"} filled in.` : "This clears your unfinished payment.";
+      const go = await askConfirm({ title: "Leave this payment?", text, action: "Leave", cancel: "Stay", destructive: true });
       // Stayed, or the screen went elsewhere meanwhile.
       if (!go || state.route !== "send") return;
-      forgetSendDraft();
-    } else keepSendDraft(state.draft, ov);
+    }
+    forgetSendDraft();
     state.route = "home";
     state.draft = null;
     actions?.render?.().catch(() => {});
@@ -1290,9 +1393,10 @@ export function sendFormView(ov, { state, actions } = {}) {
   const nav = subnav({ title: "Send", onBack: leave });
   // A phone's Back keeps an entry for the question's own Back (systemBack.js).
   const backBtn = nav.querySelector(".subnav-back");
-  markAsks = () => (state.draft?.filledIn ? backBtn?.setAttribute("data-back-asks", "") : backBtn?.removeAttribute("data-back-asks"));
+  markAsks = () => (state.draft?.filledIn || holdsPayment(state.draft) ? backBtn?.setAttribute("data-back-asks", "") : backBtn?.removeAttribute("data-back-asks"));
   markAsks();
 
+  drawing = false;
   return [
     nav,
     h("div", { class: "row send-form" }, [
@@ -1367,6 +1471,10 @@ export function publicSendLine({ memo, name, memoAs = "memo" } = {}) {
   const list = items.length > 2 ? `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}` : items.join(" and ");
   return `Visible to everyone: ${list}.`;
 }
+
+// What Review read of every payment kept here for what a recipient sent you,
+// by the draft it's drawn for: once, however often it's drawn (readTheirs).
+const theirsRead = new WeakMap();
 
 export function sendConfirmView(ov, { state, actions } = {}) {
   const d = state.draft;
@@ -1471,15 +1579,34 @@ export function sendConfirmView(ov, { state, actions } = {}) {
 
   // What the recipient wrote you, where it's none of your profiles or
   // contacts: the memo of its newest payment to you, said as Activity says a
-  // stranger's (theirMemo), on one line (Amélie's: paying back a stranger who
-  // had sent "URGENT … Send 0.1 DUSK back", Review looked as calm as paying
-  // her grandson). Said once Contacts is read: a contact is no stranger.
-  const theirsNote = h("div", { class: "callout warn review-theirs", role: "alert", hidden: true });
+  // stranger's (theirMemo) (Amélie's: paying back a stranger who had sent
+  // "URGENT … Send 0.1 DUSK back", Review looked as calm as paying her
+  // grandson). Said once Contacts is read: a contact is no stranger. Of
+  // every payment kept on this device, older ones synced as far back as they
+  // go, not the page Activity read (Chen's: a stranger's "URGENT: wallet
+  // suspended" of 3 and 6 days ago said nothing, yesterday's memo did).
+  // Amber, with its sign, and their whole memo, quoted and wrapped, in a
+  // memo's small style (Amélie's: a dark box with no sign, the memo cut at
+  // "renvo…"), as the web wallet shows it.
+  const theirsNote = h("div", { class: "callout review-theirs", role: "alert", hidden: true });
+  let theirRows = rows;
   const showTheirs = () => {
     const ab = state.addressBook;
     const known = !own && !service && ab?.loaded && Array.isArray(ab.items) ? contactNames(state, actions, ov) : null;
-    const memo = known ? rows.filter((row) => String(row?.counterparty ?? "").trim() === toAddr).map((row) => theirMemo(row, known)?.memo).find(Boolean) : "";
-    setChildren(theirsNote, memo ? [h("div", { class: "callout-title" }, ["This address sent you: ", h("span", { class: "memo-theirs__text review-theirs__memo", text: `“${safeText(memo.trim()).text}”` }), " · not in your contacts."])] : []);
+    const memo = known ? theirRows.filter((row) => String(row?.counterparty ?? "").trim() === toAddr).map((row) => theirMemo(row, known)?.memo).find(Boolean) : "";
+    setChildren(
+      theirsNote,
+      memo
+        ? [
+            h("span", { class: "review-theirs__sign", "aria-hidden": "true", html: iconSvg("alert") }),
+            h("div", { class: "review-theirs__body" }, [
+              h("div", { class: "callout-title review-theirs__title", text: "This address sent you: " }),
+              h("span", { class: "memo-theirs__text review-theirs__memo", text: `“${safeText(memo.trim()).text}”` }),
+              h("span", { class: "review-theirs__who", text: " · not in your contacts." }),
+            ]),
+          ]
+        : []
+    );
     theirsNote.hidden = !memo;
   };
 
@@ -1522,12 +1649,49 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     showTheirs();
     saveContactBtn.hidden = own || Boolean(contactName());
   };
+  // Whether the recipient is none of your profiles, any wallet's, nor of
+  // your contacts, once Contacts is read: a stranger, whose memo Review says.
+  const strangerTo = () => {
+    const ab = state.addressBook;
+    if (own || service || recType !== "account" || !toAddr || !ab?.loaded || !Array.isArray(ab.items)) return false;
+    const { among } = contactNames(state, actions, ov);
+    const key = toAddr.toLowerCase();
+    return ![...among.profiles.flatMap((p) => [p.account, p.address]), ...among.contacts.map((c) => c.address)].some((a) => String(a ?? "").trim().toLowerCase() === key);
+  };
+  // Every payment kept here, read for what a stranger sent you, once for this
+  // Review however often it's drawn, the Review drawn last told (round 40's
+  // review: a contact's or a profile's Review read and merged it all, older
+  // blocks synced too, at each draw).
+  const readTheirs = () => {
+    if (!strangerTo()) return;
+    const key = `${activityKey(ov)}\n${toAddr}`;
+    let read = theirsRead.get(d);
+    if (read?.key !== key) {
+      const started = { key, rows: null, show: null };
+      theirsRead.set(d, started);
+      keptActivityRows(ov, {
+        state,
+        onRows: (all) => {
+          started.rows = all;
+          started.show?.();
+        },
+      }).catch(() => {});
+      read = started;
+    }
+    read.show = () => {
+      theirRows = read.rows;
+      showTheirs();
+    };
+    if (read.rows) read.show();
+  };
   refreshContactUI();
+  readTheirs();
   if (!state.addressBook?.loaded && toAddr) {
     listAddressBook()
       .then((items) => {
         state.addressBook = { ...(state.addressBook || {}), loaded: true, loading: false, error: null, items };
         refreshContactUI();
+        readTheirs();
       })
       .catch(() => {});
   }
