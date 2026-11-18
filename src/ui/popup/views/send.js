@@ -432,17 +432,24 @@ export function sendFormView(ov, { state, actions } = {}) {
   sayFilled(state.draft?.filledFrom);
 
   // A link read (readRequestLink), as it's pasted, scanned or opened.
-  const applyRequest = (read, { source = "request" } = {}) => {
-    // For another network, or one that can't be read, it fills in nothing:
-    // the whole form empties, so nothing an earlier link or a person put in
-    // reads as this one's, and the reason alone is said.
+  const applyRequest = (read, { source = "request", pasted = "" } = {}) => {
+    // For another network, one that can't be read, or a message that says
+    // other than its link, it fills in nothing: Amount and Memo empty, so
+    // nothing an earlier link or a person put in reads as this one's, and the
+    // reason alone is said, what disagrees too (app-core's). What was pasted
+    // stays in To, to see what it said (Amélie's, Sofía's: To emptied too),
+    // and the refusal stands till To is edited: on its one line it may read
+    // otherwise, its lines run together (refusalStands).
     if (!read?.link) {
-      to.value = "";
+      // On To's one line, as a keyboard's paste puts it there.
+      to.value = String(pasted ?? "").replace(/\s*[\r\n]+\s*/g, " ").trim();
       field.setValue("");
       memo.value = "";
       checkMemo();
       state.draft = {
         ...refusedRequest({ ...(state.draft || {}), requestChainId: read?.reason === "other-network" ? read.chainId : undefined }, read?.reason === "other-network" ? "" : read?.problem),
+        to: to.value,
+        refusedText: to.value || undefined,
         amountDusk: "",
         amountMasked: false,
         memo: "",
@@ -492,6 +499,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     nextDraft.requestChainId = req.chainId || undefined;
     nextDraft.refusedChainId = undefined;
     nextDraft.refusedProblem = undefined;
+    nextDraft.refusedText = undefined;
     nextDraft.filledFrom = source === "qr" ? "qr" : "link";
     // What filled it in, which typing over the recipient doesn't change.
     nextDraft.filledIn = nextDraft.filledFrom;
@@ -513,6 +521,10 @@ export function sendFormView(ov, { state, actions } = {}) {
   // pasted in To is read as a paste (readPastedRequest): a shared request's
   // message by its link; a QR code's, as the link it holds.
   const looksLikeRequest = (text) => readPastedRequest(text, ov?.nodeUrl) !== null;
+  // A paste refused, as To still shows it, unedited: the refusal stands. Read
+  // again on its one line, a message's lines run together, and a memo on two
+  // lines can read as the link's (a refused paste filled in as To was left).
+  const refusalStands = () => Boolean(state.draft?.refusedText) && String(to.value ?? "").trim() === state.draft.refusedText;
 
   // A shared request's .dusk names, looked up on the wallet's network before
   // it fills anything in, as the web wallet does: "sofiadesign.dusk asks
@@ -537,7 +549,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       if (pasteReading !== reading || !readingHere() || state.route !== "send" || !to.isConnected) return;
       stopReading();
       const read = readPastedRequest(reading.text, ov?.nodeUrl, { owners });
-      if (read) applyRequest(read, { source: "request" });
+      if (read) applyRequest(read, { source: "request", pasted: reading.text });
       toBefore = String(to.value ?? "");
     });
   };
@@ -559,10 +571,10 @@ export function sendFormView(ov, { state, actions } = {}) {
     if (names.length) return readWithNames(s, names);
     stopReading();
     const read = source === "qr" ? readRequestLink(s, ov?.nodeUrl) : readPastedRequest(s, ov?.nodeUrl);
-    if (read) return applyRequest(read, { source });
+    if (read) return applyRequest(read, { source, pasted: source === "qr" ? "" : s });
     if (source !== "qr") return false;
     to.value = s;
-    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: "qr", filledIn: "qr" };
+    state.draft = { ...(state.draft || {}), to: s, duskName: undefined, requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, refusedText: undefined, filledFrom: "qr", filledIn: "qr" };
     sayRefused();
     sayFilled("qr");
     updateToType();
@@ -1137,7 +1149,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     sayRefused();
     sayFilled("");
     // Another recipient: the request, and whether it was refused, no longer apply.
-    if (state.draft) Object.assign(state.draft, { requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, filledFrom: undefined });
+    if (state.draft) Object.assign(state.draft, { requestChainId: undefined, refusedChainId: undefined, refusedProblem: undefined, refusedText: undefined, filledFrom: undefined });
     // A link put in whole is read at once, as a paste is: one for another
     // network, or that can't be read, says so then, not at Review.
     if (whole && looksLikeRequest(now.trim()) && maybeDecodeRequest(now, { source: "request" })) {
@@ -1170,7 +1182,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   });
   to.addEventListener("blur", () => {
     const v = String(to.value || "").trim();
-    if (looksLikeRequest(v)) {
+    if (!refusalStands() && looksLikeRequest(v)) {
       maybeDecodeRequest(v, { source: "request" });
     }
   });
@@ -1251,6 +1263,8 @@ export function sendFormView(ov, { state, actions } = {}) {
         const rawTo = to.value.trim();
         // A paste's .dusk names still being looked up: it's read first.
         if (readingHere()) return;
+        // A paste refused, unedited since: why is said under the field already.
+        if (refusalStands()) return;
         const decoded = looksLikeRequest(rawTo) ? maybeDecodeRequest(rawTo, { source: "request" }) : false;
         if (decoded === "refused" || decoded === "reading") return;
 

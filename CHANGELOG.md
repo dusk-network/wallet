@@ -133,6 +133,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said what in a pasted message disagrees with its link, as "The message says 0.002 DUSK; its link asks 0.15 DUSK.", and kept a refused paste in To rather than emptying it.
+- Refused a pasted message whose request line names its payee with a spaced or look-alike dot, that says a total with no unit, or that names another Dusk address than its link's.
 - Opened the popup again on Home's Not sent reminder, Send it now and all, after Send it now's Review was closed, rather than on a filled Send form.
 - Showed Staking's figures read last, saying they may be out of date and when they were read, while the node doesn't answer, as Home does, and said Staking can't be read now rather than loading on, offline or once the node's had its time.
 - Kept a payment that went out after Don't send marked Sent after you chose not to send in Activity and on its details, with when it went, until it's opened once, rather than a plain Sent row after a few seconds.

@@ -33,9 +33,10 @@ import { REQUEST_DRAFT_KEY, SEND_DRAFT_KEY as KEY } from "../../shared/sendDraft
 // change), which is never the next Send's; when a link opened behind the
 // lock or before the setup was opened (`linkAt`), and that it was taken;
 // which of Amount and Memo a link or a kept Send put there, untouched since
-// (`carried`), with the recipient they're for (`carriedTo`); and that it's
-// one kept on purpose (`kept`).
-const FIELDS = ["to", "duskName", "nameChoices", "amountDusk", "amountMasked", "memo", "gas", "requestChainId", "filledFrom", "filledIn", "linkAt", "linkTaken", "carried", "carriedTo", "kept"];
+// (`carried`), with the recipient they're for (`carriedTo`); that it's one
+// kept on purpose (`kept`); and a paste refused, still in To as it was, with
+// why (`refusedText`, `refusedProblem`, `refusedChainId`), which stands.
+const FIELDS = ["to", "duskName", "nameChoices", "amountDusk", "amountMasked", "memo", "gas", "requestChainId", "filledFrom", "filledIn", "linkAt", "linkTaken", "carried", "carriedTo", "kept", "refusedText", "refusedProblem", "refusedChainId"];
 
 let held = null;
 // What the extension's session store held as this page opened (loadKeptSend).
