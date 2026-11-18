@@ -1199,7 +1199,10 @@ function comeBack() {
   // A send on Sent being looked up.
   lookingUpOnLeave();
   setTimeout(() => askNode().catch(() => {}), 0);
-  setTimeout(() => renderHeader(headerOf(state.overview)), RECONNECT_MS + 50);
+  // Once the network's had its time, the header says what it knows: where the page is still there.
+  setTimeout(() => {
+    if (globalThis.document) renderHeader(headerOf(state.overview));
+  }, RECONNECT_MS + 50);
   renderForConnection({ forceRefresh: true })
     .then(() => lookForPayments(state.overview, { state, render }))
     .catch(() => {});
