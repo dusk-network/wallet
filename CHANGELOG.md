@@ -129,6 +129,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Hid the words of Hold to show words in Firefox for Android the moment a hold is cut into, by a second touch or a menu, as well as when it's let go, and a minute into one hold.
 - Said when the figures were last read on every "may be out of date" note, Home's and Staking's, also once the node goes silent or the browser goes offline while the wallet shows: "Last read at 10:02".
 - Said on an unstake's and a claim's Review what you receive, with the network fee on its own, rather than a total of the fee alone; and counted your own Sozu unstake in Rewards by year once it's in its block, saying Reading… till then.
 - Said in Send's To which .dusk name one written with another point, a look-alike letter or a hidden character looks like, at once, rather than Unknown; and took a dot above, a Braille dot and spaces around a point in a profile's name for the .dusk name it imitates.
