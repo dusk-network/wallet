@@ -2832,6 +2832,87 @@ describe("paying an address that sent you a memo", () => {
     expect(review({ entries: [cameIn(BOB.account, URGENT)] })).toBe("");
   });
 
+  // Chen's: a stranger's "URGENT: wallet suspended" memos were 3 and 6 days old, past the page Activity had read, and
+  // Review said nothing; yesterday's memo from Lena it said.
+  it("says what it sent you from every payment kept on this device, and from older ones once they're synced", async () => {
+    const ov = overview();
+    const day = 24 * 60 * 60_000;
+    // Activity's page: other payments only.
+    const page = Array.from({ length: 3 }, (_, i) =>
+      cameIn(BOB.account, `Lunch ${i}`, { hash: `b${i}`.padEnd(64, "0"), blockHeight: 4_690_000 - i })
+    );
+    const threeDays = { ...cameIn(ALICE.account, "", { hash: "d3".repeat(32), blockHeight: 4_660_000 }), timestamp: Date.now() - 3 * day };
+    const sixDays = { ...cameIn(ALICE.account, URGENT, { hash: "d6".repeat(32), blockHeight: 4_630_000 }), timestamp: Date.now() - 6 * day };
+    // What's kept on this device past the page, and what a sync of older blocks brings.
+    const kept = (more, older = []) => {
+      let synced = false;
+      return {
+        read: vi.fn(async ({ limit }) => ({ entries: [...page, ...more, ...(synced ? older : [])].slice(0, limit), state: null, complete: synced || !older.length })),
+        sync: vi.fn(async () => {
+          synced = true;
+        }),
+      };
+    };
+    for (const history of [kept([threeDays, sixDays]), kept([threeDays], [sixDays])]) {
+      mount({ route: "confirm", addressBook: { loaded: true, items: [] }, activity: { key: activityKey(ov), entries: page, names: new Map(), history, epoch: Promise.resolve(1) }, draft: draft() }, ov);
+      await settle();
+      expect(said()).toBe(SAID);
+    }
+
+    // Review drawn again and again while the older blocks are read: one read of them.
+    const slow = kept([threeDays], [sixDays]);
+    let synced;
+    const sync = slow.sync;
+    slow.sync = vi.fn(() => new Promise((resolve) => (synced = () => sync().then(resolve))));
+    const activity = { key: activityKey(ov), entries: page, names: new Map(), history: slow, epoch: Promise.resolve(1) };
+    const state = { route: "confirm", addressBook: { loaded: true, items: [] }, activity, draft: draft() };
+    for (let i = 0; i < 3; i++) {
+      mount(state, ov);
+      await settle();
+    }
+    expect([slow.sync.mock.calls.length, said()]).toEqual([1, ""]);
+    synced();
+    await settle();
+    expect(said()).toBe(SAID);
+  });
+
+  // Round 40's review: Review read and merged every payment kept here, and synced older blocks, for a contact or another
+  // profile too, whose memo it never says, and did it again at each draw. Only for a stranger, once Contacts is read,
+  // once for the Review.
+  it("reads what's kept only for an address that's none of yours, once Contacts is read, and once however often it's drawn", async () => {
+    const { listAddressBook } = await import("../shared/addressBook.js");
+    const ov = overview();
+    const reviewOf = (to, addressBook) => {
+      const history = { read: vi.fn(async () => ({ entries: [cameIn(to, URGENT)], state: null, complete: true })), sync: vi.fn(async () => {}) };
+      const state = { route: "confirm", addressBook, activity: { key: activityKey(ov), entries: [], names: new Map(), history, epoch: Promise.resolve(1) }, draft: draft(to) };
+      return { state, history };
+    };
+    // A contact's, and your other profile's: nothing read.
+    for (const [to, items] of [
+      [ALICE.account, [{ name: "Alice", address: ALICE.account }]],
+      [OTHER_PROFILE, []],
+    ]) {
+      const { state, history } = reviewOf(to, { loaded: true, items });
+      mount(state, ov);
+      await settle();
+      expect([history.read.mock.calls.length, said()], to).toEqual([0, ""]);
+    }
+    // A stranger's: nothing till Contacts is read, then one read, however often Review is drawn.
+    let read;
+    listAddressBook.mockImplementationOnce(() => new Promise((resolve) => (read = resolve)));
+    const { state, history } = reviewOf(ALICE.account, { loaded: false, items: null });
+    mount(state, ov);
+    await settle();
+    expect(history.read).not.toHaveBeenCalled();
+    read([]);
+    await settle();
+    for (let i = 0; i < 3; i++) {
+      mount(state, ov);
+      await settle();
+    }
+    expect([history.read.mock.calls.length, said()]).toEqual([1, SAID]);
+  });
+
   it("says nothing of it until Contacts is read, so a contact is never called a stranger", async () => {
     const { listAddressBook } = await import("../shared/addressBook.js");
     const ov = overview();

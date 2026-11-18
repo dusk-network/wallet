@@ -474,6 +474,45 @@ export function searchedActivity(ov, { state, render }) {
 }
 
 /**
+ * Every row of the account's history kept on this device, not only the page
+ * Activity shows, for what must know of every payment from an address
+ * (Review's note on what one that isn't a contact sent you): `onRows` is
+ * told those kept at once, then, where older blocks aren't all kept yet,
+ * again once they're synced as far back as they go, as Activity's search
+ * syncs them. Nothing once another profile, node or wallet is open.
+ * @param {object} ov - the overview
+ * @param {{ state: object, onRows: (rows: object[]) => void }} ctx
+ */
+export async function keptActivityRows(ov, { state, onRows }) {
+  const a = state?.activity;
+  if (!a?.history || a.key !== activityKey(ov)) return;
+  const all = { limit: Number.MAX_SAFE_INTEGER - 1 };
+  const tell = (read) => {
+    if (state.activity === a) onRows(activityRows(ov, state, { entries: read.entries, meta: read.state, shielded: a.shielded }));
+  };
+  const kept = await a.history.read(all);
+  tell(kept);
+  if (kept.complete === true || state.activity !== a || (await a.epoch) === undefined) return;
+  // One sync of the older blocks at a time, however often Review is drawn meanwhile.
+  a.olderSync ??= (async () => {
+    let complete = false;
+    for (let run = 0; run < WHOLE_RUNS && !complete && !a.stale && state.activity === a; run += 1) {
+      await a.history.sync({ maxRequests: WHOLE_RUN_REQUESTS, maxDetailRequests: 0 });
+      ({ complete } = await a.history.read({ limit: 1 }));
+    }
+  })().finally(() => {
+    a.olderSync = null;
+  });
+  try {
+    await a.olderSync;
+  } catch {
+    // Older blocks out of reach, as offline: what's kept was told.
+    return;
+  }
+  if (state.activity === a) tell(await a.history.read(all));
+}
+
+/**
  * All of the account's history, for what needs every row (an export, a Sozu
  * position), read from the archive as far as it isn't kept yet, with each
  * entry's details. Throws when it can't be had whole, and ActivityChangedError when

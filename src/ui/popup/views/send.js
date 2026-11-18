@@ -53,7 +53,7 @@ import { openQrScanModal } from "../../components/QrScanModal.js";
 import { forgetRequestLink, pastedRequestNames, readPastedRequest, readRequestLink, walletChainOf } from "../../lib/requestLink.js";
 import { contactAlikeOf, contactAlikeText, contactNameText } from "../../lib/contactNames.js";
 import { sentAlready } from "@dusk-network/app-core/requests";
-import { activityRows } from "../activity.js";
+import { activityKey, activityRows, keptActivityRows } from "../activity.js";
 import { contactNames, theirMemo, whenAtText } from "./txRow.js";
 import { safeText } from "../../../shared/safeText.js";
 import { clockText } from "../../lib/time.js";
@@ -1368,6 +1368,10 @@ export function publicSendLine({ memo, name, memoAs = "memo" } = {}) {
   return `Visible to everyone: ${list}.`;
 }
 
+// What Review read of every payment kept here for what a recipient sent you,
+// by the draft it's drawn for: once, however often it's drawn (readTheirs).
+const theirsRead = new WeakMap();
+
 export function sendConfirmView(ov, { state, actions } = {}) {
   const d = state.draft;
   const duskName = draftDuskName(d);
@@ -1473,12 +1477,16 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // contacts: the memo of its newest payment to you, said as Activity says a
   // stranger's (theirMemo), on one line (Amélie's: paying back a stranger who
   // had sent "URGENT … Send 0.1 DUSK back", Review looked as calm as paying
-  // her grandson). Said once Contacts is read: a contact is no stranger.
+  // her grandson). Said once Contacts is read: a contact is no stranger. Of
+  // every payment kept on this device, older ones synced as far back as they
+  // go, not the page Activity read (Chen's: a stranger's "URGENT: wallet
+  // suspended" of 3 and 6 days ago said nothing, yesterday's memo did).
   const theirsNote = h("div", { class: "callout warn review-theirs", role: "alert", hidden: true });
+  let theirRows = rows;
   const showTheirs = () => {
     const ab = state.addressBook;
     const known = !own && !service && ab?.loaded && Array.isArray(ab.items) ? contactNames(state, actions, ov) : null;
-    const memo = known ? rows.filter((row) => String(row?.counterparty ?? "").trim() === toAddr).map((row) => theirMemo(row, known)?.memo).find(Boolean) : "";
+    const memo = known ? theirRows.filter((row) => String(row?.counterparty ?? "").trim() === toAddr).map((row) => theirMemo(row, known)?.memo).find(Boolean) : "";
     setChildren(theirsNote, memo ? [h("div", { class: "callout-title" }, ["This address sent you: ", h("span", { class: "memo-theirs__text review-theirs__memo", text: `“${safeText(memo.trim()).text}”` }), " · not in your contacts."])] : []);
     theirsNote.hidden = !memo;
   };
@@ -1522,12 +1530,49 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     showTheirs();
     saveContactBtn.hidden = own || Boolean(contactName());
   };
+  // Whether the recipient is none of your profiles, any wallet's, nor of
+  // your contacts, once Contacts is read: a stranger, whose memo Review says.
+  const strangerTo = () => {
+    const ab = state.addressBook;
+    if (own || service || recType !== "account" || !toAddr || !ab?.loaded || !Array.isArray(ab.items)) return false;
+    const { among } = contactNames(state, actions, ov);
+    const key = toAddr.toLowerCase();
+    return ![...among.profiles.flatMap((p) => [p.account, p.address]), ...among.contacts.map((c) => c.address)].some((a) => String(a ?? "").trim().toLowerCase() === key);
+  };
+  // Every payment kept here, read for what a stranger sent you, once for this
+  // Review however often it's drawn, the Review drawn last told (round 40's
+  // review: a contact's or a profile's Review read and merged it all, older
+  // blocks synced too, at each draw).
+  const readTheirs = () => {
+    if (!strangerTo()) return;
+    const key = `${activityKey(ov)}\n${toAddr}`;
+    let read = theirsRead.get(d);
+    if (read?.key !== key) {
+      const started = { key, rows: null, show: null };
+      theirsRead.set(d, started);
+      keptActivityRows(ov, {
+        state,
+        onRows: (all) => {
+          started.rows = all;
+          started.show?.();
+        },
+      }).catch(() => {});
+      read = started;
+    }
+    read.show = () => {
+      theirRows = read.rows;
+      showTheirs();
+    };
+    if (read.rows) read.show();
+  };
   refreshContactUI();
+  readTheirs();
   if (!state.addressBook?.loaded && toAddr) {
     listAddressBook()
       .then((items) => {
         state.addressBook = { ...(state.addressBook || {}), loaded: true, loading: false, error: null, items };
         refreshContactUI();
+        readTheirs();
       })
       .catch(() => {});
   }
