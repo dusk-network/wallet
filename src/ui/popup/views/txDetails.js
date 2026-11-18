@@ -5,7 +5,7 @@ import { TX_KIND } from "../../../shared/constants.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { arrivalUrl, awaitingArrival, depositLux } from "../../../shared/bridgeArrival.js";
 import { chainIdForNode, networkOf, networkTextOf, nameCheckNote } from "../../../shared/nodeNetwork.js";
-import { getTxMeta } from "../../../shared/txStore.js";
+import { getTxEpoch, getTxMeta, patchTxMeta } from "../../../shared/txStore.js";
 import { activityOwnersOf } from "../../../shared/activityStore.js";
 import { activityNetworkKey } from "../../../shared/activityHistory.js";
 import { walletLabel } from "../../../shared/wallets.js";
@@ -22,7 +22,7 @@ import { copyButton as copyWordsButton } from "../../components/CopyButton.js";
 import { profileNameEl } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { stDuskLines, txErrorText, txRecoveryReasonLabel, txStatusWord } from "./txDisplay.js";
-import { amountEl, contactNames, copyButton, dateText, describeTx, nameParts, theirMemo, txIconSvg } from "./txRow.js";
+import { AFTER_ALL_TEXT, afterAllUnseen, amountEl, contactNames, copyButton, dateText, describeTx, nameParts, theirMemo, txIconSvg, whenAtText } from "./txRow.js";
 import { NOT_SENT_FOLLOWED_TEXT, reasonText } from "./sent.js";
 import { activityKey, activityRows, loadActivityDetail, lookForKeptRow, sozuFactOf } from "../activity.js";
 import { migrationFactOf } from "../migrationFacts.js";
@@ -40,6 +40,17 @@ const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 
 // What the status word doesn't say: whether to wait, what may still hold, and
 // for one that didn't go through, that its amount never left.
+// When a payment of the wallet's own went out, as its block says: the time
+// kept with its record from the node (`finalizedAt`), or its row's from the
+// account's history. Never when the wallet handed it over or saw it go
+// (`submittedAt`, `executedAt`), which can be long after it went, or before
+// Don't send (round 40's review). 0 for none known.
+function wentAt(tx) {
+  const kept = Number(tx?.sent?.finalizedAt) || 0;
+  if (kept) return kept;
+  return tx?.entry?.timestamp != null ? Number(tx.time) || 0 : 0;
+}
+
 function statusNote(tx, desc, hidden) {
   const shielded = tx?.privacy === "shielded";
   const a = desc.amount;
@@ -47,8 +58,12 @@ function statusNote(tx, desc, hidden) {
   if (tx?.dropped) {
     return `The network dropped it before it ran, so no fee was charged.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
   }
-  // Chosen not to be sent, and arrived after all (txReconcile.js).
-  if (tx?.sent?.wentAfterAll && desc.status !== "failed") return "It went out after you chose not to send it.";
+  // Chosen not to be sent, and arrived after all (txReconcile.js): when, too,
+  // as its block says (wentAt).
+  if (tx?.sent?.wentAfterAll && desc.status !== "failed") {
+    const at = wentAt(tx);
+    return at ? `It went out ${whenAtText(at)}, after you chose not to send it.` : "It went out after you chose not to send it.";
+  }
   switch (desc.status) {
     case "pending":
       if (globalThis.navigator?.onLine === false) return "No connection. It's looked up again once you're back online.";
@@ -287,6 +302,13 @@ function elsewhereText(where, ov) {
   return "";
 }
 
+// A payment that went out after the person chose not to send it, opened:
+// it's no longer marked from the next look on.
+async function seenAfterAll(hash) {
+  const epoch = await getTxEpoch().catch(() => undefined);
+  if (epoch !== undefined) await patchTxMeta(hash, { afterAllSeen: Date.now() }, { epoch }).catch(() => {});
+}
+
 export function txDetailsView(ov, { state, actions } = {}) {
   const hash = String(state?.txDetailHash ?? "");
   const txs = activityRows(ov, state);
@@ -343,7 +365,20 @@ export function txDetailsView(ov, { state, actions } = {}) {
 
   const hidden = balancesHidden(ov);
   const contactName = contactNames(state, actions, ov);
-  const desc = describeTx(tx, { contactName, nodeUrl });
+  // Gone out after the person chose not to send it: marked till it's opened
+  // once, as it is now, this look included.
+  if (afterAllUnseen(tx)) {
+    state.afterAllOpen = hash;
+    seenAfterAll(hash);
+    // Seen in what's drawn from the overview at hand, Activity's rows
+    // included, before it's read again (round 40's review: back in Activity,
+    // the row was still marked).
+    for (const record of Array.isArray(ov?.txs) ? ov.txs : []) {
+      if (record && String(record.hash ?? "").toLowerCase() === hash.toLowerCase()) record.afterAllSeen = Date.now();
+    }
+  }
+  const marked = state?.afterAllOpen === hash && Boolean(tx?.sent?.wentAfterAll);
+  const desc = describeTx(marked ? { ...tx, sent: { ...tx.sent, afterAllSeen: undefined } } : tx, { contactName, nodeUrl });
   // A stranger's memo, said as theirs (theirMemo).
   const theirs = tx?.memo ? theirMemo(tx, contactName) : null;
   const { kind } = tx;
@@ -378,10 +413,10 @@ export function txDetailsView(ov, { state, actions } = {}) {
     desc.alike ? h("p", { class: "tx-hero-note tx-hero-alike", role: "note", text: desc.alike }) : null,
     tx?.counterpartyName || tx?.toName ? nameNote : null,
     amountEl(desc.amount, hidden, "tx-hero-amount", { exact: true }),
-    h("div", { class: `tx-hero-status is-${desc.tone}` }, [
-      h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg(STATUS_ICON[desc.tone] ?? "clock") }),
+    h("div", { class: `tx-hero-status is-${desc.afterAll ? "pending" : desc.tone}` }, [
+      h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg(desc.afterAll ? "alert" : STATUS_ICON[desc.tone] ?? "clock") }),
       // The row's word, or Completed, which rows leave out.
-      h("span", { text: desc.statusWord || txStatusWord(desc.status) }),
+      h("span", { text: desc.afterAll ? AFTER_ALL_TEXT : desc.statusWord || txStatusWord(desc.status) }),
     ]),
     (() => {
       const note = statusNote(tx, desc, hidden);

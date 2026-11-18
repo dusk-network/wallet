@@ -283,6 +283,22 @@ describe("the wallet's own sends", () => {
     expect([await txs.getTxMeta(register), (await txs.listTxs()).map((tx) => tx.hash)]).toEqual([null, [commit]]);
   });
 
+  // Lena's, Chen's, Marek's: a payment they'd said Don't send to went out anyway; said so for 8 seconds, then a plain
+  // Sent row, and Lena thought her "no" had been ignored. Marked till it's opened once.
+  it("keep one that went out after Don't send, marked in its row, till it's opened once", async () => {
+    fakeArchive();
+    await txs.putTxMeta(register, { ...registration, wentAfterAll: Date.now() });
+    const { state } = await popup();
+    let kept = await txs.listTxs({ nodeUrl: NODE });
+    expect(kept.map((tx) => [tx.hash, tx.settled])).toEqual([[register, true]]);
+    const row = () => activity.activityRows(overview(A, { txs: kept }), state).find((r) => r.hash === register);
+    expect(describeTx(row(), { nodeUrl: NODE })).toMatchObject({ afterAll: true });
+    // Opened: from then on, a row as any other's, its record let go at the next read.
+    await txs.patchTxMeta(register, { afterAllSeen: Date.now() });
+    kept = await txs.listTxs({ nodeUrl: NODE });
+    expect(describeTx(row(), { nodeUrl: NODE })).toMatchObject({ afterAll: false });
+  });
+
   it("are another wallet's own to settle: one of another wallet stays as it is", async () => {
     fakeArchive();
     await txs.putTxMeta(register, { ...registration, walletId: "another wallet" });

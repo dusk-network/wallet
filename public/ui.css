@@ -4692,6 +4692,12 @@ button.tx-open:focus-visible::after {
   white-space: nowrap;
 }
 
+/* A payment that went out after Don't send, till it's opened once: said whole, in the colour of what waits on you. */
+.tx-after-all {
+  color: var(--pending);
+  font-weight: 500;
+}
+
 /* A row's memo under its name, two lines at most: its details have all of it.
    It reads left to right on its own, as text someone else chose does. */
 .tx-memo {

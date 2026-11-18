@@ -212,6 +212,34 @@ describe("Activity's rows", () => {
     expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Faucet (test) · faucet.dusk, Sent · Just now, −5 DUSK, Pending");
   });
 
+  // Lena's: after Don't send, a payment that went out anyway was a plain Sent row after a few seconds, and she
+  // thought her "no" had been ignored. Marked till it's opened once.
+  it("mark one that went out after Don't send, till it's opened once", () => {
+    const went = {
+      hash: "af".repeat(32),
+      kind: TX_KIND.TRANSFER,
+      privacy: "public",
+      to: FAUCET,
+      toName: "faucet.dusk",
+      amount: "5000000000",
+      status: "executed",
+      submittedAt: NOW.getTime() - 20_000,
+      profileIndex: 0,
+      wentAfterAll: NOW.getTime() - 10_000,
+    };
+    const view = setup({ local: [went] });
+    expect(rows()[0]).toBe("faucet.duskSent after you chose not to sendSent · Just now−5 DUSK");
+    expect(body().querySelector(".tx-row .tx-after-all").textContent).toBe("Sent after you chose not to send");
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("faucet.dusk, Sent after you chose not to send, Sent · Just now, −5 DUSK");
+    // Opened, it's said there; then a row as any other.
+    body().querySelector(".tx-row button.tx-open").click();
+    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Sent after you chose not to send");
+    view.ov.txs = [{ ...went, afterAllSeen: NOW.getTime() }];
+    view.state.route = "home";
+    view.draw();
+    expect(rows()[0]).toBe("faucet.duskSent · Just now−5 DUSK");
+  });
+
   it("say a failed one sent nothing, with the fee paid, its amount muted and unsigned", () => {
     const failed = {
       hash: "bb".repeat(32),

@@ -131,6 +131,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Kept a payment that went out after Don't send marked Sent after you chose not to send in Activity and on its details, with when it went, until it's opened once, rather than a plain Sent row after a few seconds.
 - Said Checking what your account sent… on a payment held as its account sent something else meanwhile, Send it too and Don't send off, until the node says what it was, rather than "something else" for the first seconds.
 - Offered your own profiles, then your contacts, in Send's To before any .dusk name, and guessed at no .dusk name for one of your own names: "Profile" offered profile.dusk.
 - Said on Review what an address that isn't a contact sent you from every payment kept on the device, older ones read from the network as needed, not only those Activity had shown.

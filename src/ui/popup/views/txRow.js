@@ -344,6 +344,10 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
   // of it. Past the week it's looked for, nothing more is known.
   const onItsWay = Boolean(payout) && !arrival && status === "executed" && (!sentAt || sentAgo < ARRIVAL_WINDOW_MS);
   const isLate = onItsWay && sentAt > 0 && sentAgo > 2 * Number(tx.route.typicalSeconds ?? Infinity) * 1000;
+  // Gone out after the person chose not to send it, and not opened since:
+  // said so till it is (Lena's: a plain Sent row, and she thought her "no"
+  // had been ignored).
+  const afterAll = status === "executed" && afterAllUnseen(tx);
   return {
     lead: "",
     alias: "",
@@ -374,11 +378,23 @@ export function describeTx(tx, { contactName, nodeUrl } = {}) {
     flow: d.amount?.sign === MINUS ? "out" : d.amount?.sign === "+" ? "in" : null,
     failed,
     unsent,
+    afterAll,
     fee: tx?.fee != null ? formatFee(tx.fee) : null,
     arrival: arrival?.hash ?? null,
     arrivedAt: arrival?.at || null,
   };
 }
+
+/** What a payment says that went out after the person chose not to send it, till it's opened once. */
+export const AFTER_ALL_TEXT = "Sent after you chose not to send";
+
+/**
+ * Whether a row is a payment of the wallet's own that went out after the
+ * person chose not to send it (Don't send, txStore.js `wentAfterAll`), not
+ * opened since (`afterAllSeen`).
+ * @param {object} tx - an Activity row
+ */
+export const afterAllUnseen = (tx) => Boolean(tx?.sent?.wentAfterAll) && !tx?.sent?.afterAllSeen;
 
 /** Whether a row shows under an Activity filter: All, or its own. */
 export function inFilter(desc, filter) {
@@ -568,10 +584,12 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
   const theirs = memo ? theirMemo(tx, contactName) : null;
   // What the row says, for the button that opens it.
   const spoken = !desc.amount ? "" : hidden && !desc.amount.text ? "amount hidden" : amountText(desc.amount, false);
-  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, desc.alike, sub, spoken, desc.unsent ? "" : desc.statusWord, memo ? (theirs ? `memo “${memo}”, ${theirs.from}` : `memo ${memo}`) : ""].filter(Boolean).join(", ");
+  const label = [desc.alias ? `${desc.name} · ${desc.alias}` : desc.name, desc.alike, desc.afterAll ? AFTER_ALL_TEXT : "", sub, spoken, desc.unsent ? "" : desc.statusWord, memo ? (theirs ? `memo “${memo}”, ${theirs.from}` : `memo ${memo}`) : ""].filter(Boolean).join(", ");
 
   const open = () => {
     if (!state || !hash) return;
+    // A fresh look: what was marked till it's opened is marked once more, this time.
+    state.afterAllOpen = null;
     if (context) state.txDetailRow = { context, hash, reading: false, row: tx };
     state.txDetailHash = hash;
     // Back from the details returns here: Activity, a contact's page, or Home.
@@ -607,6 +625,7 @@ export function txRowEl(tx, { state, actions, hidden, nodeUrl, contactName, when
           : null,
       ].filter(Boolean)),
       // The button's name says these already.
+      desc.afterAll ? h("div", { class: "row-sub tx-after-all", "aria-hidden": "true", text: AFTER_ALL_TEXT }) : null,
       sub ? subEl(desc, when(tx), hidden) : null,
       desc.alike ? h("div", { class: "row-sub tx-alike", "aria-hidden": "true", text: desc.alike }) : null,
       // A stranger's: who it's from first, then their words, small, muted and in quotes, one line.

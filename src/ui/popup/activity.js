@@ -99,9 +99,10 @@ async function reload(a) {
 
 // What the wallet's own record of a send adds to the chain's row of it: the
 // name typed for its recipient, a token's details, the site that asked for
-// it, a shielded send's memo or recipient.
+// it, a shielded send's memo or recipient, or that it went out after the
+// person chose not to send it, till that's been opened.
 const keeps = (tx) =>
-  Boolean(tx.toName || tx.asset || (tx.origin && tx.origin !== "Wallet") || (tx.privacy === "shielded" && (tx.memo || tx.to)));
+  Boolean(tx.toName || tx.asset || (tx.origin && tx.origin !== "Wallet") || (tx.privacy === "shielded" && (tx.memo || tx.to)) || (tx.wentAfterAll && !tx.afterAllSeen));
 // A send the wallet's watcher still writes to: settled once it's done.
 const watched = (tx) => tx.status === "submitted" || tx.status === "mempool";
 

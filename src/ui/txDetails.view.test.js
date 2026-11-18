@@ -9,9 +9,10 @@ import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom, settle, visibleText } from "./testing/fakeDom.js";
 import { recordedEvm, recordedMigration } from "./testing/recordedEvm.js";
 import { entryOf } from "../shared/fixtures/rows.js";
-import { activityKey } from "./popup/activity.js";
+import { activityKey, activityRows } from "./popup/activity.js";
 import { dateText } from "./lib/time.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
+import { afterAllUnseen, whenAtText } from "./popup/views/txRow.js";
 
 const HASH = "ab".repeat(32);
 const NODE = "https://testnet.nodes.dusk.network";
@@ -137,14 +138,60 @@ describe("transaction details", () => {
     view.buttons[0].click();
     await settle();
     expect(actions.showToast).toHaveBeenLastCalledWith("It may have gone out. It shows here once the network says.");
-    // Chosen not to be sent, and arrived after all: Sent, and said so.
-    view = show({ ...stake, status: "executed", wentAfterAll: Date.now() });
-    expect(view.note).toBe("It went out after you chose not to send it.");
+    // Chosen not to be sent, and arrived after all: Sent, and said so, till it's opened once.
+    view = show({ ...stake, status: "executed", wentAfterAll: Date.now(), afterAllSeen: Date.now() });
+    expect([view.status, view.note]).toEqual(["Completed", "It went out after you chose not to send it."]);
 
     state.route = "tx";
     state.txDetailHash = HASH;
     view = show({ ...stake, status: "not_sent" });
     expect([view.status, view.note, view.buttons]).toEqual(["Not sent", "Another transaction from this account took its place, so nothing was sent.", []]);
+  });
+
+  // Lena's: she said Don't send, it went out anyway, and its screen turned into a plain green "Sent at …": she
+  // thought her "no" had been ignored. Said so on its screen, with when it went, till it's opened once.
+  it("says a payment went out after you chose not to send it, and when, till it's opened once", async () => {
+    // Where the transaction store lives outside the extension.
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(String(k)) ?? null, setItem: (k, v) => kept.set(String(k), String(v)), removeItem: (k) => kept.delete(String(k)), key: (i) => [...kept.keys()][i] ?? null, get length() { return kept.size; } });
+    const txs = await import("../shared/txStore.js");
+    const landed = new Date(2026, 10, 17, 20, 41).getTime();
+    // When it went, as its block says (finalizedAt).
+    const sent = { kind: TX_KIND.TRANSFER, privacy: "public", to: "acct", amount: "10000000", profileIndex: 0, status: "executed", submittedAt: landed - 60_000, finalizedAt: landed, wentAfterAll: landed + 5_000 };
+    await txs.putTxMeta(HASH, { ...sent, walletId: "w", nodeUrl: NODE });
+    const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "activity", addressBook: { loaded: true, items: [] } };
+    const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
+    const show = (over = {}) => {
+      dom.document.body.replaceChildren(...txDetailsView({ nodeUrl: NODE, txs: [{ hash: HASH, nodeUrl: NODE, ...sent, ...over }] }, { state, actions }));
+      const body = dom.document.body;
+      return [visibleText(body.querySelector(".tx-hero-status")), visibleText(body.querySelector(".tx-hero-note")), body.querySelector(".tx-hero-status").className];
+    };
+    const when = whenAtText(landed);
+    expect(when).toMatch(/20:41$/);
+    expect(show()).toEqual(["Sent after you chose not to send", `It went out ${when}, after you chose not to send it.`, "tx-hero-status is-pending"]);
+    // Opened: it's kept as seen, and this look still says it.
+    await vi.waitFor(async () => expect((await txs.getTxMeta(HASH))?.afterAllSeen).toEqual(expect.any(Number)));
+    expect(show({ afterAllSeen: Date.now() })[0]).toBe("Sent after you chose not to send");
+    // The next look: Completed, with what happened in its note.
+    state.afterAllOpen = null;
+    expect(show({ afterAllSeen: Date.now() })).toEqual(["Completed", `It went out ${when}, after you chose not to send it.`, "tx-hero-status is-ok"]);
+  });
+
+  // Round 40's review: "It went out at …" said when the wallet handed it over or saw it go, which can be long after,
+  // or before Don't send; and back in Activity from its screen, its row was still marked till the overview was read again.
+  it("says when it went only as its block says, and its row's mark goes as it's opened", async () => {
+    const kept = new Map();
+    vi.stubGlobal("localStorage", { getItem: (k) => kept.get(String(k)) ?? null, setItem: (k, v) => kept.set(String(k), String(v)), removeItem: (k) => kept.delete(String(k)), key: (i) => [...kept.keys()][i] ?? null, get length() { return kept.size; } });
+    const seenLate = new Date(2026, 10, 18, 9, 12).getTime();
+    const record = { hash: HASH, nodeUrl: NODE, kind: TX_KIND.TRANSFER, privacy: "public", to: "acct", amount: "10000000", profileIndex: 0, status: "executed", submittedAt: seenLate - 3_600_000, executedAt: seenLate, wentAfterAll: seenLate };
+    const ov = { nodeUrl: NODE, txs: [record] };
+    const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "activity", addressBook: { loaded: true, items: [] } };
+    expect(afterAllUnseen(activityRows(ov, state).find((row) => row.hash === HASH))).toBe(true);
+    dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
+    expect(visibleText(dom.document.body.querySelector(".tx-hero-note"))).toBe("It went out after you chose not to send it.");
+    // Back in Activity, the overview not read again: no longer marked.
+    state.afterAllOpen = null;
+    expect(afterAllUnseen(activityRows(ov, state).find((row) => row.hash === HASH))).toBe(false);
   });
 
   // Lena's: "Why: watcher_unavailable".
