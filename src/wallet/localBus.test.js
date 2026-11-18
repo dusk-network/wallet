@@ -1547,7 +1547,9 @@ describe("arrival notices in the app on a phone", () => {
 
   // Chen's: a payment confirmed as the signal dropped didn't go out with the app in the background, the signal back
   // for minutes, and nothing said so. The app sends only while it's open: Android's notice says so while it's away.
-  it("tells Android of a payment waiting for the network, with no amount or name, and that none waits once it's gone out", async () => {
+  // Chen's and Sofía's: "A payment is waiting" didn't say which payment. Named where the phone shows a notice whole;
+  // the neutral words where a locked phone hides what notices say.
+  it("tells Android of a payment waiting for the network, named but on a locked phone, and that none waits once it's gone out", async () => {
     let allowed = false;
     phone({ allowed: () => allowed });
     const { localSend } = await import("./localBus.js");
@@ -1566,7 +1568,7 @@ describe("arrival notices in the app on a phone", () => {
       // it waiting, and no notice came, nor once the network was back. Told as the wallet draws, nothing asked.
       allowed = true;
       await localSend({ type: "DUSK_UI_OVERVIEW" });
-      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toMatchObject({ title: "A payment is waiting" }));
+      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toMatchObject({ publicTitle: "A payment is waiting" }));
       expect(phoneNotices.asked).toEqual([]);
       await localSend({ type: "DUSK_UI_CANCEL_SEND", sendId: "send-0101" });
       await quiet;
@@ -1583,15 +1585,25 @@ describe("arrival notices in the app on a phone", () => {
         expect(phoneNotices.waiting.at(-1)).toEqual({
           wallet: "account of wallet A",
           nodeUrl,
-          title: "A payment is waiting",
+          title: `0.01 DUSK to ${ACCOUNT.slice(0, 6)}…${ACCOUNT.slice(-6)} is waiting`,
+          publicTitle: "A payment is waiting",
           away: "It goes out when you open Dusk Wallet again. If Android closes the app first, you'll be asked to send it.",
           back: "Open Dusk Wallet to send it.",
         })
       );
-      expect(JSON.stringify(phoneNotices.waiting)).not.toMatch(/0\.01|cendol|lucas|account-/);
+      // What a locked phone shows: no amount, no name, no memo.
+      const { publicTitle, away, back } = phoneNotices.waiting.at(-1);
+      expect(JSON.stringify([publicTitle, away, back])).not.toMatch(/0\.01|cendol|lucas|26FCH7/);
       firstTry.reject(offline());
       await vi.waitFor(async () => expect((await localSend({ type: "DUSK_UI_OVERVIEW" })).waitingSends).toEqual([expect.objectContaining({ sendId: "send-0102", waits: true })]));
-      expect(phoneNotices.waiting.at(-1)).toMatchObject({ title: "A payment is waiting" });
+      expect(phoneNotices.waiting.at(-1)).toMatchObject({ publicTitle: "A payment is waiting" });
+      // Balances hidden meanwhile, then shown: its amount goes from the notice, and comes back (round 40's second
+      // review: hidden, the app put away said it all the same).
+      const short = `${ACCOUNT.slice(0, 6)}…${ACCOUNT.slice(-6)}`;
+      await localSend({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: true });
+      expect(phoneNotices.waiting.at(-1)).toMatchObject({ title: `A payment to ${short} is waiting`, publicTitle: "A payment is waiting" });
+      await localSend({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: false });
+      expect(phoneNotices.waiting.at(-1)).toMatchObject({ title: `0.01 DUSK to ${short} is waiting` });
 
       // The network back, the app open: it goes out, and none waits.
       statusChecks.nodeAnswers = true;
@@ -1603,7 +1615,7 @@ describe("arrival notices in the app on a phone", () => {
       statusChecks.nodeAnswers = false;
       engine.sendTransaction.mockRejectedValueOnce(offline());
       const locked = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0103", walletId: "account of wallet A", params });
-      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toMatchObject({ title: "A payment is waiting" }));
+      await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toMatchObject({ publicTitle: "A payment is waiting" }));
       await localSend({ type: "DUSK_UI_LOCK" });
       await locked;
       await vi.waitFor(() => expect(phoneNotices.waiting.at(-1)).toBeNull());

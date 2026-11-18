@@ -1177,15 +1177,16 @@ describe("security in the app on a phone", () => {
   });
 
   // Sofía's: no notice when a client paid her with the app in the background, and Settings had nothing for notices.
-  it("has Tell me when money comes in, on while notices are allowed, saying it can take 15 minutes, and turns it off and on", async () => {
+  // Then Chen's and Sofía's: a friend's payment was noticed after 14 and 9 minutes, and only Settings said it could.
+  it("has Tell me when money comes in, on while notices are allowed, saying Android checks about every 15 minutes, and turns it off and on", async () => {
     let allowed = true;
     const { asked } = onPhone({ notices: () => allowed });
     const view = await settings({}, { app: true });
     const toggle = () => dom.document.body.querySelector("#incoming-notices");
     await vi.waitFor(() => expect(toggle().checked).toBe(true));
     const section = view.section("Notices");
-    expect(visibleText(section)).toBe("[Notices]Tell me when money comes inIt can take up to about 15 minutes.");
-    expect(dom.document.getElementById(toggle().getAttribute("aria-describedby")).textContent).toBe("It can take up to about 15 minutes.");
+    expect(visibleText(section)).toBe("[Notices]Tell me when money comes inAndroid checks about every 15 minutes.");
+    expect(dom.document.getElementById(toggle().getAttribute("aria-describedby")).textContent).toBe("Android checks about every 15 minutes.");
 
     toggle().checked = false;
     toggle().dispatchEvent(fakeEvent("change"));

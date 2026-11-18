@@ -619,9 +619,10 @@ object Incoming {
  * it's from and the notice's words. As the app leaves the screen with one
  * waiting, its notice says it goes out when the app's opened again; once a job
  * finds the network back (its node answers), the notice says to open the
- * wallet to send it. Neither names the amount or whom it's to. Tapping it
- * opens the wallet, which shows the waiting payment; back on the screen, the
- * notice and the job go.
+ * wallet to send it. Its title names the amount and whom it's to where the
+ * phone shows a notice whole; a locked phone that hides what notices say shows
+ * the neutral title (`publicTitle`). Tapping it opens the wallet, which shows
+ * the waiting payment; back on the screen, the notice and the job go.
  */
 object Waiting {
   private const val PREFS = "dusk-wallet-waiting"
@@ -647,8 +648,8 @@ object Waiting {
   private fun jobs(context: Context) = context.getSystemService(JobScheduler::class.java)
 
   /**
-   * One waits (`next`: `wallet`, `nodeUrl`, `title`, `away` and `back`, the
-   * notice's words), or none (null): then its notice and the job go. Told
+   * One waits (`next`: `wallet`, `nodeUrl`, `title`, `publicTitle`, `away`
+   * and `back`, the notice's words), or none (null): then its notice and the job go. Told
    * while the app's away already, as when its first try ended after it was
    * left, the notice says so then.
    */
@@ -693,12 +694,23 @@ object Waiting {
       }
       Notification.Builder(context, "payments")
     }
-    // No amount and no one's name, so a locked phone shows it whole.
+    // Its title names the payment; a locked phone that hides what notices say
+    // shows the neutral one, no amount and no one's name, with the same words.
+    val publicTitle = setup.optString("publicTitle")
+    @Suppress("DEPRECATION")
+    val locked = (if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) Notification.Builder(context) else Notification.Builder(context, "payments"))
+      .setSmallIcon(icon)
+      .setContentTitle(publicTitle)
+      .setContentText(body)
+      .build()
     val notice = builder
       .setSmallIcon(icon)
       .setContentTitle(setup.optString("title"))
       .setContentText(body)
-      .setVisibility(Notification.VISIBILITY_PUBLIC)
+      .apply {
+        if (publicTitle.isEmpty()) setVisibility(Notification.VISIBILITY_PUBLIC)
+        else setVisibility(Notification.VISIBILITY_PRIVATE).setPublicVersion(locked)
+      }
       .setAutoCancel(true)
       .apply { if (tap != null) setContentIntent(tap) }
       .build()

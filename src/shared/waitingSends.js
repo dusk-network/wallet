@@ -935,7 +935,16 @@ export async function stopWaitingSends(why, host, { engineGone = false } = {}) {
  * @returns {{ sendId: string, walletId: string, nodeUrl: string }[]}
  */
 export function waitingForNetwork() {
-  const of = (sendId, record) => ({ sendId, walletId: String(record?.walletId ?? ""), nodeUrl: String(record?.nodeUrl ?? "") });
+  const of = (sendId, record) => ({
+    sendId,
+    walletId: String(record?.walletId ?? ""),
+    nodeUrl: String(record?.nodeUrl ?? ""),
+    // What it pays and to whom, for its notice where the phone shows one whole.
+    to: String(record?.to ?? ""),
+    toName: String(record?.toName ?? ""),
+    lux: String(record?.lux ?? ""),
+    memo: String(record?.memo ?? ""),
+  });
   return [
     ...[...firstTries].filter(([, first]) => !first.handedOver && !first.cancelled).map(([sendId, first]) => of(sendId, first.record)),
     ...queue.filter((item) => (item.state === "waiting" || item.state === "sending") && !item.handedOver).map((item) => of(item.sendId, item.record)),

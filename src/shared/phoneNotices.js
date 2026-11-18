@@ -113,7 +113,8 @@ export const incomingMemoBody = (network) => [`“{memo}”`, network].filter(Bo
  * The app's notice while it's away with a payment waiting for the network
  * (android/ArrivalJob.kt's Waiting): it signs and sends only while it's open.
  * `away` as it's left, `back` once the network answers again. No amount and
- * no one's name, on a locked phone or not.
+ * no one's name: what a locked phone that hides what notices say shows
+ * (waitingNotice).
  */
 export const WAITING_NOTICE = Object.freeze({
   title: "A payment is waiting",
@@ -122,6 +123,21 @@ export const WAITING_NOTICE = Object.freeze({
   away: "It goes out when you open Dusk Wallet again. If Android closes the app first, you'll be asked to send it.",
   back: "Open Dusk Wallet to send it.",
 });
+
+/**
+ * The waiting notice's words for a payment (WAITING_NOTICE): where the phone
+ * shows a notice whole, its title names how much and to whom, as Activity
+ * names them (`amount` "" while balances are hidden), "0.01 DUSK to Lena is
+ * waiting" (Chen's, Sofía's: "A payment is waiting" didn't say which); a
+ * locked phone that hides what notices say shows the neutral words
+ * (`publicTitle`).
+ * @param {{ amount?: string, to?: string }} [payment]
+ * @returns {{ title: string, publicTitle: string, away: string, back: string }}
+ */
+export function waitingNotice({ amount = "", to = "" } = {}) {
+  const title = !to ? WAITING_NOTICE.title : amount ? `${amount} DUSK to ${to} is waiting` : `A payment to ${to} is waiting`;
+  return { ...WAITING_NOTICE, title, publicTitle: WAITING_NOTICE.title };
+}
 
 /**
  * The person tapped Tell me when it arrives: the phone asks, the first time.
