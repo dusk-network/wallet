@@ -89,6 +89,24 @@ export function againDraft(send, ov, { hidden = false } = {}) {
   };
 }
 
+/**
+ * Whether Send's draft is still the payment it was opened again for
+ * (`replaces`), as the overview holds that one: to the same recipient, the
+ * same amount and memo, untouched. False where it was changed, or that
+ * payment is held no more.
+ * @param {object | null} draft
+ * @param {object} ov
+ */
+export function retriedAsIs(draft, ov) {
+  const send = (Array.isArray(ov?.waitingSends) ? ov.waitingSends : []).find((each) => each?.sendId && each.sendId === draft?.replaces);
+  if (!send) return false;
+  return (
+    String(draft.to ?? "").trim() === String(send.to ?? "") &&
+    String(draft.amountDusk ?? "").trim() === formatLuxForInput(safeBigInt(send.lux, 0n)) &&
+    String(draft.memo ?? "") === String(send.memo ?? "")
+  );
+}
+
 // A memo said in a sentence: none that holds a control or direction character.
 const sayable = (memo) => {
   const text = String(memo ?? "").trim();

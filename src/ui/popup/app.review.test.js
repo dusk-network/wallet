@@ -575,6 +575,69 @@ describe("a payment that waited, on Home", () => {
   });
 });
 
+// Amélie's: Wi-Fi off at Confirm, the browser closed; opened again, Home said "Not sent … Send it now". Send it now
+// opened its Review, she closed the popup, and it opened again on a filled Send form, with no word of that payment.
+describe("a payment Home says wasn't sent, its Review closed", () => {
+  it("opens again on Home's word for it, Send it now and all, not on a filled Send", async () => {
+    // Each popup a page of its own; the extension's session store outlives them.
+    const session = new Map();
+    pageSession();
+    const unsent = { sendId: "send-0301", walletId: A, nodeUrl: "https://testnet.nodes.dusk.network", profileIndex: 0, privacy: "public", to: B, lux: "10000000", feeLux: "2500000", memo: "Wi-Fi coupé", at: Date.now() - 60_000, waiting: false, waits: false, ended: "closed" };
+    const first = await popupOn("home", { addressBook: { loaded: true, items: [] } }, undefined, { session });
+    first.open = { ...first.open, waitingSends: [unsent] };
+    await first.render({ forceRefresh: true });
+    first.app.querySelectorAll(".home-waiting--unsent button").find((b) => b.textContent === "Send it now").click();
+    await flush();
+    expect(first.state.route).toBe("confirm");
+    first.dom.window.dispatchEvent(fakeEvent("pagehide"));
+    await flush();
+
+    pageSession();
+    const again = await popupOn("home", { addressBook: { loaded: true, items: [] } }, async (message, t) => (message.type === "DUSK_UI_OVERVIEW" ? { ...t.open, waitingSends: [unsent] } : undefined), { session });
+    expect(again.state.route).toBe("home");
+    expect(again.app.querySelector(".home-waiting--unsent")?.textContent).toContain("Not sent: ");
+    expect(again.app.querySelectorAll(".home-waiting--unsent button").map((b) => b.textContent)).toEqual(["Send it now", "Don't send"]);
+  });
+
+  // Round 40's review: back from Send it now's Review, the payment changed, the popup closed before Review again: the
+  // changes went, and Home only had the payment as it was. Changed, it's a payment of its own, kept as any Send is;
+  // as it was, Home's word for it stands.
+  it("keeps it as your unfinished payment once it's changed back from its Review, and not while it's as it was", async () => {
+    const session = new Map();
+    const unsent = { sendId: "send-0302", walletId: A, nodeUrl: "https://testnet.nodes.dusk.network", profileIndex: 0, privacy: "public", to: B, lux: "10000000", feeLux: "2500000", memo: "Wi-Fi coupé", at: Date.now() - 60_000, waiting: false, waits: false, ended: "closed" };
+    const withUnsent = async (message, t) => (message.type === "DUSK_UI_OVERVIEW" ? { ...t.open, waitingSends: [unsent] } : undefined);
+    const field = (t, name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
+    const backFromReview = async (edit) => {
+      pageSession();
+      const t = await popupOn("home", { addressBook: { loaded: true, items: [] } }, withUnsent, { session });
+      t.app.querySelectorAll(".home-waiting--unsent button").find((b) => b.textContent === "Send it now").click();
+      await flush();
+      expect(t.state.route).toBe("confirm");
+      t.app.querySelectorAll("button").find((b) => b.textContent === "← Back").click();
+      await flush();
+      expect(t.state.route).toBe("send");
+      if (edit) {
+        field(t, "Amount").value = "0.2";
+        field(t, "Amount").dispatchEvent(fakeEvent("input"));
+      }
+      // The popup closed: out of sight, then gone.
+      t.dom.document.visibilityState = "hidden";
+      t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
+      t.dom.window.dispatchEvent(fakeEvent("pagehide"));
+      await flush();
+      pageSession();
+      return popupOn("home", { addressBook: { loaded: true, items: [] } }, withUnsent, { session });
+    };
+    const asWas = await backFromReview(false);
+    expect(asWas.state.route).toBe("home");
+    expect(asWas.app.querySelectorAll(".home-waiting--unsent button").map((b) => b.textContent)).toEqual(["Send it now", "Don't send"]);
+    const changed = await backFromReview(true);
+    expect(changed.state.route).toBe("send");
+    expect(["To", "Amount", "Memo"].map((name) => field(changed, name).value)).toEqual([B, "0.2", "Wi-Fi coupé"]);
+    expect(visibleText(changed.app.querySelector(".send-filled-note"))).toBe("Your unfinished payment.");
+  });
+});
+
 // Chen's: Amelie and 0.02 typed, Back, Back, and Send again was empty, nothing asked.
 describe("a half-typed Send, left with Back", () => {
   // Amélie's: a payment back to a stranger, his address and 0,1, left with Back twice, was there again the

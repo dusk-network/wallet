@@ -30,7 +30,8 @@ import { arrivalCheckDelay, awaitingArrival, loadArrivals, payoutOf } from "../.
 import { saveHandedExport } from "./activityExport.js";
 import { siteLastSeen } from "../../shared/siteRecords.js";
 import { forgetRequestLink, requestDraftOf } from "../lib/requestLink.js";
-import { asKept, holdsPayment, keepOpenRequest, keepOpenSend, keepSendDraft, loadKeptSend, takeOpenRequest, takeOpenSend } from "../lib/sendDraft.js";
+import { asKept, forgetSendDraft, holdsPayment, keepOpenRequest, keepOpenSend, keepSendDraft, loadKeptSend, takeOpenRequest, takeOpenSend } from "../lib/sendDraft.js";
+import { retriedAsIs } from "../lib/waiting.js";
 import { listenForBack, listenForLinks, moveAppToBack, stepBack, steppedAway } from "../../platform/native.js";
 import { openedFromNotice } from "../../platform/notices.js";
 import { keepIncomingWatched } from "./incoming.js";
@@ -1361,6 +1362,16 @@ function keepSendOpen(event) {
   // The request form: kept while it's open with something typed in it, else nothing of it.
   if (!isTauriRuntime()) keepOpenRequest(state.route === "receive" ? state.receive : null, state.overview);
   if (!["send", "confirm"].includes(state.route)) return;
+  // A payment Home said wasn't sent, opened again with Send it now or Send
+  // it too, as it was: Home's own word for it stands, Send it now and all,
+  // rather than a Send filled in as if typed (Amélie's: closed on its Review,
+  // the popup opened again on a filled form, with no word of the payment that
+  // never left). Changed since, back from its Review, it's a payment of its
+  // own, kept as any Send is (round 40's review: the edits went).
+  if (state.draft?.replaces && (state.route === "confirm" || retriedAsIs(state.draft, state.overview))) {
+    forgetSendDraft();
+    return;
+  }
   keepOpenSend(state.draft, state.overview, { pastPage: event?.type === "pagehide" });
   openSendKept = true;
 }
