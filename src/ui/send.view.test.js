@@ -2332,6 +2332,32 @@ describe("a request link", () => {
     expect([made.amount.value, made.amountError()]).toEqual(["2.1250", ""]);
   });
 
+  // Lena's, in German: a link's amount=1.000 was filled in as "1,000". It asks which is meant, as typing 1.000 does,
+  // pasted, opened with the wallet or scanned.
+  it("asks of a link's amount that reads two ways in the browser's language what typing it asks", async () => {
+    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
+    const link = httpsLink(`to=${ALICE.account}&amount=1.000&memo=Rechnung&network=testnet`);
+    const typed = mount(newState());
+    typeInto(typed.to, ALICE.account);
+    typeInto(typed.amount, "1.000");
+    const asked = typed.amountError();
+    expect(asked).toBe("Is that 1 or 1000?1 DUSK1000 DUSK");
+
+    const pasted = mount(newState());
+    paste(pasted, link);
+    await settle();
+    expect([pasted.amountError(), pasted.review.disabled]).toEqual([asked, true]);
+    const { requestDraftOf } = await import("./lib/requestLink.js");
+    const opened = mount({ ...newState(), draft: requestDraftOf(`?link=${encodeURIComponent(link)}`) });
+    expect([opened.amountError(), opened.review.disabled]).toEqual([asked, true]);
+    const { openQrScanModal } = await import("./components/QrScanModal.js");
+    const scanned = mount(newState());
+    openQrScanModal.mockResolvedValueOnce(link);
+    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    await settle();
+    expect([scanned.amountError(), scanned.review.disabled]).toEqual([asked, true]);
+  });
+
   // Sofía's, in the app: Chen picked from Contacts in place of the link's recipient, and the line stayed.
   // Amélie's: the 0,1 of a payment back to a stranger stayed in Send as she chose Chen from Contacts.
   it("stops saying it filled the recipient in once another is picked from Contacts, and clears the amount and memo it filled in", async () => {
