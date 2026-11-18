@@ -4743,15 +4743,45 @@ button.tx-open:focus-visible::after {
   direction: ltr;
   unicode-bidi: isolate;
 }
-/* On Review, the words a stranger sent you: one line, as in their row, so
-   what Review says after them shows whole (send.js). */
+/* On Review, what an address that isn't a contact sent you: an amber
+   warning with its sign, their words whole, quoted and wrapped, in a memo's
+   small style (send.js). */
+.callout.review-theirs {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: color-mix(in oklab, var(--warn) 14%, var(--surface-1));
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warn) 40%, transparent);
+}
+.review-theirs__sign {
+  flex: 0 0 auto;
+  display: inline-grid;
+  color: var(--warn);
+}
+.review-theirs__sign svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+.review-theirs__body {
+  min-width: 0;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.review-theirs__title {
+  color: var(--warn);
+  margin-bottom: 4px;
+}
 .review-theirs__memo {
-  display: inline-block;
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  vertical-align: bottom;
+  font-size: 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.review-theirs__who {
+  color: var(--text-muted);
 }
 
 /* An icon button with a name: Copy beside an address */

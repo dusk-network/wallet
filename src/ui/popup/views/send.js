@@ -1565,19 +1565,34 @@ export function sendConfirmView(ov, { state, actions } = {}) {
 
   // What the recipient wrote you, where it's none of your profiles or
   // contacts: the memo of its newest payment to you, said as Activity says a
-  // stranger's (theirMemo), on one line (Amélie's: paying back a stranger who
-  // had sent "URGENT … Send 0.1 DUSK back", Review looked as calm as paying
-  // her grandson). Said once Contacts is read: a contact is no stranger. Of
+  // stranger's (theirMemo) (Amélie's: paying back a stranger who had sent
+  // "URGENT … Send 0.1 DUSK back", Review looked as calm as paying her
+  // grandson). Said once Contacts is read: a contact is no stranger. Of
   // every payment kept on this device, older ones synced as far back as they
   // go, not the page Activity read (Chen's: a stranger's "URGENT: wallet
   // suspended" of 3 and 6 days ago said nothing, yesterday's memo did).
-  const theirsNote = h("div", { class: "callout warn review-theirs", role: "alert", hidden: true });
+  // Amber, with its sign, and their whole memo, quoted and wrapped, in a
+  // memo's small style (Amélie's: a dark box with no sign, the memo cut at
+  // "renvo…"), as the web wallet shows it.
+  const theirsNote = h("div", { class: "callout review-theirs", role: "alert", hidden: true });
   let theirRows = rows;
   const showTheirs = () => {
     const ab = state.addressBook;
     const known = !own && !service && ab?.loaded && Array.isArray(ab.items) ? contactNames(state, actions, ov) : null;
     const memo = known ? theirRows.filter((row) => String(row?.counterparty ?? "").trim() === toAddr).map((row) => theirMemo(row, known)?.memo).find(Boolean) : "";
-    setChildren(theirsNote, memo ? [h("div", { class: "callout-title" }, ["This address sent you: ", h("span", { class: "memo-theirs__text review-theirs__memo", text: `“${safeText(memo.trim()).text}”` }), " · not in your contacts."])] : []);
+    setChildren(
+      theirsNote,
+      memo
+        ? [
+            h("span", { class: "review-theirs__sign", "aria-hidden": "true", html: iconSvg("alert") }),
+            h("div", { class: "review-theirs__body" }, [
+              h("div", { class: "callout-title review-theirs__title", text: "This address sent you: " }),
+              h("span", { class: "memo-theirs__text review-theirs__memo", text: `“${safeText(memo.trim()).text}”` }),
+              h("span", { class: "review-theirs__who", text: " · not in your contacts." }),
+            ]),
+          ]
+        : []
+    );
     theirsNote.hidden = !memo;
   };
 

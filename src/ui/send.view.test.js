@@ -2970,7 +2970,8 @@ describe("paying an address that sent you a memo", () => {
     expect(review({ entries: [cameIn(ALICE.account, URGENT)] })).toBe(SAID);
     // Its newest memo, with what can't be seen in it as its codes.
     // A right-to-left override (U+202E) in it.
-    const newer = cameIn(ALICE.account, `Pay back${String.fromCharCode(0x202e)}now`, { hash: "c2".repeat(32), blockHeight: 4_687_100 });
+    // Newer by its block and its time: two made in the same test can fall a millisecond apart either way.
+    const newer = { ...cameIn(ALICE.account, `Pay back${String.fromCharCode(0x202e)}now`, { hash: "c2".repeat(32), blockHeight: 4_687_100 }), timestamp: Date.now() - 30 * 60_000 };
     expect(review({ entries: [newer, cameIn(ALICE.account, URGENT)] })).toBe("This address sent you: “Pay back\\u202enow” · not in your contacts.");
     // A contact's, or your other profile's: nothing, as Activity calls neither a stranger.
     expect(review({ entries: [cameIn(ALICE.account, URGENT)], contacts: [{ name: "Alice", address: ALICE.account }] })).toBe("");
@@ -3059,6 +3060,23 @@ describe("paying an address that sent you a memo", () => {
       await settle();
     }
     expect([history.read.mock.calls.length, said()]).toEqual([1, SAID]);
+  });
+
+  // Amélie's: in the extension it was a dark box with no sign, the memo cut at "renvo…"; the web wallet's is amber,
+  // with a sign and the whole memo.
+  it("says it in an amber warning with its sign, their whole memo quoted and wrapped, in a memo's small style", async () => {
+    review({ entries: [cameIn(ALICE.account, URGENT)] });
+    const note = dom.document.body.querySelector(".review-theirs");
+    expect([note.className, note.querySelector(".review-theirs__sign")?.innerHTML]).toEqual(["callout review-theirs", iconSvg("alert")]);
+    expect(note.querySelector(".review-theirs__memo").textContent).toBe(`“${URGENT}”`);
+    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
+    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
+    expect(rule(".callout.review-theirs")).toContain("var(--warn)");
+    expect([rule(".review-theirs__sign"), rule(".review-theirs__title")].map((r) => r.includes("color: var(--warn)"))).toEqual([true, true]);
+    // Wrapped, never cut: no ellipsis, no single line.
+    const memo = rule(".review-theirs__memo");
+    expect(memo).toContain("overflow-wrap: anywhere;");
+    expect(memo).not.toMatch(/nowrap|ellipsis/);
   });
 
   it("says nothing of it until Contacts is read, so a contact is never called a stranger", async () => {

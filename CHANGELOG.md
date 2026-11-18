@@ -45,6 +45,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Showed on Review the whole memo an address that isn't a contact sent you, quoted and wrapped, in an amber warning with its sign, as the web wallet does.
 - Dropped a Send left with Back, Leave this payment? asking first when anything's in it, rather than opening the next Send on it; one kept through a reload, a lock, the popup closing or the app closing says Your unfinished payment.
 - Cleared the amount and memo a link or a kept Send filled in once another recipient is chosen.
 - Said on Review what an address that isn't one of your contacts or profiles sent you: "This address sent you: “…” · not in your contacts."
