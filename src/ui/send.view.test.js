@@ -644,6 +644,40 @@ describe("what the To field says about what's typed", () => {
     expect(form.pill()).toBe("Public");
   });
 
+  // Sofía's: "Profile" in To said "Did you mean profile.dusk?", not her own Profile 2. Registered by someone, it
+  // would have taken her own transfer to a stranger.
+  it("offers your own profiles first, then contacts, and guesses at no .dusk name for one of your own names", () => {
+    const state = newState();
+    state.addressBook.items = [{ name: "Profit & Co", address: BOB.account }];
+    const savings = { key: "wb", n: 2, name: "Savings", accounts: [ALICE.account], accountNames: {}, active: false };
+    const form = mount(state, overview({ wallets: [{ key: "wa", n: 1, name: "", accounts: [OWN.account, OTHER_PROFILE], accountNames: {}, active: true }, savings] }));
+    const offered = () => form.nameBox().querySelectorAll("button").map((b) => b.textContent);
+
+    typeInto(form.to, "Profile");
+    expect(offered()).toEqual([`Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`, `Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`]);
+    typeInto(form.to, "profile 2");
+    expect(offered()).toEqual([`Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`]);
+    typeInto(form.to, "prof");
+    expect(offered()).toEqual([
+      `Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`,
+      `Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`,
+      `Your contact Profit & Co · ${shortAddress(BOB.account)}`,
+    ]);
+    // Another wallet's profile, by that wallet's name.
+    typeInto(form.to, "savings");
+    expect(offered()).toEqual([`Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`]);
+    // The profile it goes from: offered as nothing, and no name guessed at for it.
+    typeInto(form.to, "Profile 1");
+    expect(visibleText(form.nameBox())).toBe("");
+    // A name that's none of yours: the guess is still offered.
+    typeInto(form.to, "xyz");
+    expect(offered()).toEqual(["Did you mean xyz.dusk?"]);
+
+    typeInto(form.to, "Profile");
+    form.nameBox().querySelector("button").click();
+    expect([form.to.value, form.pill()]).toEqual([OTHER_PROFILE, "Public"]);
+  });
+
   it("says which contacts' names look like another's, with each one's address", () => {
     // Sofia's: two "Estudio Marta", one in a Cyrillic а, told apart only by the address.
     const state = newState();

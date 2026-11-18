@@ -131,6 +131,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Offered your own profiles, then your contacts, in Send's To before any .dusk name, and guessed at no .dusk name for one of your own names: "Profile" offered profile.dusk.
 - Said on Review what an address that isn't a contact sent you from every payment kept on the device, older ones read from the network as needed, not only those Activity had shown.
 - Hid the words of Hold to show words in Firefox for Android the moment a hold is cut into, by a second touch or a menu, as well as when it's let go, and a minute into one hold.
 - Said when the figures were last read on every "may be out of date" note, Home's and Staking's, also once the node goes silent or the browser goes offline while the wallet shows: "Last read at 10:02".

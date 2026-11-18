@@ -23,7 +23,7 @@ import { HIDDEN_BALANCE, balance, balancesHidden, shieldedLuxOf } from "../../co
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
-import { ownProfileName, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
+import { ownProfileName, profileLabelOf, profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { safeTextEl } from "../../components/SafeText.js";
 import { fieldLabel, reviewActions, submitOnGasEnter, textInput, wrappingInput } from "../../components/FormControls.js";
 import { gasFeeLux, networkGasPrice, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
@@ -39,7 +39,7 @@ import {
 
 import { listAddressBook } from "../../../shared/addressBook.js";
 import { asDuskName, closeDuskName, isDuskName } from "@duskdomains/sdk/names";
-import { duskNameLookAlike } from "@dusk-network/app-core/names";
+import { duskNameLookAlike, toSuggestions } from "@dusk-network/app-core/names";
 import {
   duskNameErrorText,
   duskNameRecipient,
@@ -93,6 +93,10 @@ export function draftDuskName(draft) {
 // What a Send kept on purpose says under the recipient: through a reload, a
 // lock, or the app ended in the background.
 const KEPT_TEXT = "Your unfinished payment.";
+
+// A profile of yours as Send offers it: "Your Profile 2" where it goes by its
+// number, "Your profile Savings" by a name, as the web wallet says it.
+const yourProfile = (name) => (/^Profile \d/.test(name) ? `Your ${name}` : `Your profile ${name}`);
 
 // What a request link or a QR code filled in says under the recipient, until
 // it changes, with the network it pays on: a plain link says none.
@@ -777,17 +781,35 @@ export function sendFormView(ov, { state, actions } = {}) {
       },
     });
 
-  // The contacts a typed name can mean, by the start of their name or of a word in it.
-  const contactsNamed = (typed) => {
-    const q = typed.toLowerCase();
-    const items = Array.isArray(state.addressBook?.items) ? state.addressBook.items : [];
-    return items
-      .filter((c) => {
-        const name = String(c?.name ?? "").trim().toLowerCase();
-        return Boolean(c?.address) && (name.startsWith(q) || name.split(/[^\p{L}\p{N}]+/u).some((word) => word && word.startsWith(q)));
-      })
-      .slice(0, 3);
-  };
+  // Your profiles, every wallet's here, by their names: this wallet's as
+  // "Profile 2" or its own name, another's with that wallet's name.
+  const profilesHere = () => [
+    ...(Array.isArray(ov?.accounts) ? ov.accounts : []).map((account, i) => ({ account, name: profileLabelOf(ov, i) })),
+    ...(Array.isArray(ov?.wallets) ? ov.wallets : [])
+      .filter((wallet) => !wallet?.active && Array.isArray(wallet?.accounts))
+      .flatMap((wallet) => wallet.accounts.map((account) => ({ account, name: ownProfileName({ wallets: [wallet] }, account) }))),
+  ].filter(({ account, name }) => account && name);
+  // What a name typed in To can mean, as both wallets read it (app-core's
+  // toSuggestions): your profiles but the one it goes from, then your
+  // contacts; and whether a .dusk name may be guessed at, only for text that
+  // is none of your own names (Sofía's: "Profile" offered profile.dusk, not
+  // her Profile 2; registered, it would have taken her own transfer to a
+  // stranger).
+  const suggestionsFor = (typed) =>
+    toSuggestions(typed, { profiles: profilesHere(), contacts: Array.isArray(state.addressBook?.items) ? state.addressBook.items : [], self: ownAccount });
+
+  // "Your Profile 2 · 26FCH7…", which puts the profile's account in the field.
+  const profileButton = (profile) =>
+    h("button", {
+      class: "text-btn text-btn--inline name-suggestion",
+      type: "button",
+      text: `${yourProfile(profile.name)} · ${shortAddress(profile.account)}`,
+      onclick: () => {
+        to.value = profile.account;
+        onRecipientInput();
+        to.focus?.();
+      },
+    });
 
   // "Your contact Jan · 26FCH7…", which puts the contact's address in the field;
   // one whose name looks like another's says so, its address beside it.
@@ -1011,12 +1033,12 @@ export function sendFormView(ov, { state, actions } = {}) {
       return;
     }
 
-    // A contact's name comes before any guess at a .dusk name, which would
-    // be somebody else's.
-    const named = contactsNamed(v);
-    if (named.length) {
+    // Your profiles' names, then your contacts', come before any guess at a
+    // .dusk name, which would be somebody else's.
+    const named = suggestionsFor(v);
+    if (named.profiles.length || named.contacts.length) {
       hideRecipientBadge(toTypePill);
-      showNameBox(named.map(contactButton));
+      showNameBox([...named.profiles.map(profileButton), ...named.contacts.map(contactButton)]);
       detectedRecipientType = null;
       updateContactMatch("", null);
       updateAmountHelpers();
@@ -1024,8 +1046,9 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
 
     // A name typed without .dusk, or with a dot after it, where the network
-    // has names: the name it likely means (asDuskName).
-    const bare = duskNamesNetwork(ov?.nodeUrl) ? asDuskName(v) : null;
+    // has names: the name it likely means (asDuskName), unless it's one of
+    // your own, as the profile it goes from.
+    const bare = duskNamesNetwork(ov?.nodeUrl) && named.guessDusk ? asDuskName(v) : null;
     if (bare) {
       hideRecipientBadge(toTypePill);
       showNameBox([suggestionButton(bare)]);
@@ -1253,7 +1276,8 @@ export function sendFormView(ov, { state, actions } = {}) {
 
         const recType = ProfileGenerator.typeOf(recipient);
         if (recType !== "account" && recType !== "address") {
-          throw new Error(contactsNamed(toVal).length ? "Tap the contact above to use it." : NOT_AN_ADDRESS_TEXT);
+          const named = suggestionsFor(toVal);
+          throw new Error(named.contacts.length ? "Tap the contact above to use it." : named.profiles.length ? "Tap the profile above to use it." : NOT_AN_ADDRESS_TEXT);
         }
         const blocked = blockedRecipient(recipient, ov?.chainId);
         if (blocked) throw new Error(blocked);
