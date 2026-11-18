@@ -132,6 +132,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Showed Staking's figures read last, saying they may be out of date and when they were read, while the node doesn't answer, as Home does, and said Staking can't be read now rather than loading on, offline or once the node's had its time.
 - Kept a payment that went out after Don't send marked Sent after you chose not to send in Activity and on its details, with when it went, until it's opened once, rather than a plain Sent row after a few seconds.
 - Said Checking what your account sent… on a payment held as its account sent something else meanwhile, Send it too and Don't send off, until the node says what it was, rather than "something else" for the first seconds.
 - Offered your own profiles, then your contacts, in Send's To before any .dusk name, and guessed at no .dusk name for one of your own names: "Profile" offered profile.dusk.

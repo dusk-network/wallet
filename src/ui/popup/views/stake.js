@@ -33,6 +33,8 @@ import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { readSozuFactsAgain, sozuHolding, sozuLiquidStakingView, stakeStaleNote, stakingHistory } from "./sozu.js";
 import { lastReadText } from "./txRow.js";
+import { keepBalances, keptBalancesOf } from "../../../shared/keptBalances.js";
+import { NODE_ANSWER_MS } from "../../../shared/networkStatus.js";
 import { keptRatesOf, nativeRewardsOf, rewardYearsOf, sozuGrowthOf } from "../activity.js";
 import { currencyName } from "../activityExport.js";
 import { duskPrices } from "../duskPrice.js";
@@ -207,30 +209,95 @@ function ensureStakeLoaded(ov, { state, actions } = {}) {
   });
 
   const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
-  const stale = !st.loaded || st.profileIndex !== idx;
-  if (!stale || st.loading) return st;
+  const place = { nodeUrl: String(ov?.nodeUrl ?? ""), account: String(ov?.accounts?.[idx] ?? "") };
+  // Whose figures they are: the profile's account, any wallet's, on its node
+  // (round 40's review: a profile's index alone took one wallet's Profile 1
+  // for another's, and a switch while its read went on drew the other's
+  // stake, Unstake and Claim with it). Figures with no account of theirs
+  // are the profile's their index says.
+  const owner = `${place.nodeUrl}\n${place.account}`;
+  const sameOwner = st.owner ? st.owner === owner : st.profileIndex === idx;
+  const stale = !st.loaded || !sameOwner;
+  if (!stale || (st.loading && (st.reading ?? owner) === owner)) return st;
+  // A read for this profile that failed stays failed, said on the screen,
+  // till the overview's read again (app.js clears it): not read anew as the
+  // screen's drawn again (round 40's second review: a node refusing the
+  // stake was asked again and again, and "can't be read" never stayed).
+  if (st.error && sameOwner && st.reading === owner) return st;
 
   st.loading = true;
+  st.reading = owner;
   st.error = null;
+  st.slow = false;
+  // This read, which what it brings is for: another profile's, or a later
+  // read's, isn't drawn over it.
+  const read = (st.read = {});
+  // Another's figures don't stay on the screen while this one's are read.
+  if (!sameOwner) Object.assign(st, { ownerStatus: null, minimumStakeLux: null, kept: false, updatedAt: 0, loaded: false });
+  st.owner = owner;
+  // What was read last on this device shows, said to be maybe out of date
+  // with when it was read: at once, till the node answers; and once the node
+  // has had its time, the screen says what it can rather than waiting on
+  // (Lena's: offline, "Loading staking…" for more than a minute, no figures,
+  // no time).
+  const fromKept = (kept) => {
+    const figures = kept?.staking;
+    if (!figures?.ownerStatus) return false;
+    Object.assign(st, { ownerStatus: figures.ownerStatus, minimumStakeLux: String(figures.minimumStakeLux ?? ""), profileIndex: idx, updatedAt: Number(kept.stakingAt) || 0, kept: true });
+    st.ownerProfileIndex = st.ownerStatus?.ownerProfileIndex ?? st.ownerProfileIndex ?? idx;
+    return true;
+  };
+  keptBalancesOf(place)
+    .then((kept) => {
+      if (st.read === read && st.loading && fromKept(kept)) actions?.render?.().catch(() => {});
+    })
+    .catch(() => {});
+  setTimeout(() => {
+    if (st.read !== read || !st.loading) return;
+    st.slow = true;
+    actions?.render?.().catch(() => {});
+  }, NODE_ANSWER_MS);
 
   Promise.all([
     actions?.send?.({ type: "DUSK_UI_GET_MINIMUM_STAKE", profileIndex: idx }),
     actions?.send?.({ type: "DUSK_UI_GET_STAKE_OWNER_STATUS", profileIndex: idx }),
   ])
     .then(([minResp, ownerResp]) => {
+      if (st.read !== read) return;
       if (minResp?.error) throw new Error(minResp.error.message ?? "Failed to load minimum stake");
       if (ownerResp?.error) throw new Error(ownerResp.error.message ?? "Failed to load stake owner");
 
+      const status = ownerResp?.result ?? ownerResp ?? null;
+      // Read for another account than this profile's, as when another window
+      // switched wallets as it was asked: neither shown nor kept (round 40's
+      // second review).
+      if (status?.account && status.account !== place.account) throw new Error("Staking can't be read now.");
+      // The stake itself not read now (its request failed or timed out, which
+      // the wallet says: `infoRead` false): what was read of it before stays,
+      // said to be maybe out of date with when, never a fresh "no stake"
+      // (round 40's review); with none on the screen, what's kept here.
+      if (status?.infoRead === false) {
+        const shown = st.ownerStatus ? Promise.resolve(true) : keptBalancesOf(place).then((kept) => st.read === read && fromKept(kept));
+        return shown.then((had) => {
+          if (st.read !== read) return;
+          if (!had) throw new Error("Staking can't be read now: the network isn't answering. It's read again once it does.");
+          Object.assign(st, { minimumStakeLux: String(minResp?.result ?? minResp ?? ""), profileIndex: idx, loaded: true, loading: false, kept: true });
+          actions?.render?.().catch(() => {});
+        });
+      }
       st.minimumStakeLux = String(minResp?.result ?? minResp ?? "");
-      st.ownerStatus = ownerResp?.result ?? ownerResp ?? null;
+      st.ownerStatus = status;
       st.ownerProfileIndex = st.ownerStatus?.ownerProfileIndex ?? st.ownerProfileIndex ?? idx;
       st.profileIndex = idx;
       st.loaded = true;
       st.loading = false;
+      st.kept = false;
       st.updatedAt = Date.now();
+      keepBalances(place, { staking: { ownerStatus: st.ownerStatus, minimumStakeLux: st.minimumStakeLux } }).catch(() => {});
       actions?.render?.().catch(() => {});
     })
     .catch((e) => {
+      if (st.read !== read) return;
       st.loading = false;
       st.loaded = false;
       st.error = e?.message ?? String(e);
@@ -518,9 +585,18 @@ function advancedPanel(st, key, children) {
   return details;
 }
 
+// What Staking says while it has no figures: that it reads them, for as long
+// as the node is given to answer; then that they can't be read now, never a
+// spinner that goes on. Its figures read last show instead where there are
+// any (ensureStakeLoaded).
 function statusLine(st) {
-  if (st?.loading && !st?.loaded) return waiting("Loading staking…");
-  if (st?.error) return h("div", { class: "err", text: String(st.error) });
+  const offline = globalThis.navigator?.onLine === false;
+  if (st?.loading && !st?.loaded && !st?.kept) {
+    if (offline) return h("div", { class: "muted stake-unread", role: "status", text: "Staking can't be read until you're back online." });
+    if (st.slow) return h("div", { class: "muted stake-unread", role: "status", text: "Staking can't be read now: the network isn't answering. It's read again once it does." });
+    return waiting("Loading staking…");
+  }
+  if (st?.error && !st?.kept) return h("div", { class: "err", text: String(st.error) });
   return null;
 }
 
@@ -644,7 +720,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
     actions?.render?.().catch(() => {});
   };
   if (!pos) {
-    return [subnav({ title: "Staking", onBack }), statusLine(st) ?? waiting("Loading staking…")];
+    return [subnav({ title: "Staking", onBack }), statusLine(st) ?? (st.loading ? waiting("Loading staking…") : h("div", { class: "muted stake-unread", role: "status", text: "Staking can't be read now." }))];
   }
 
   const stakedLux = safeBigInt(pos.info?.amount?.total ?? 0, 0n);
@@ -672,7 +748,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
   // Lena's: with the node silent, Staking said nothing of its own; and "may be
   // out of date" never said when the figures were read. Each figure shown was
   // read on its own: the note says the oldest, and says it for Sozu's too.
-  const staleNote = stakeStaleNote(ov, hasLiquid ? [st.updatedAt, holding.readAt] : [st.updatedAt]);
+  const staleNote = stakeStaleNote(ov, hasLiquid ? [st.updatedAt, holding.readAt] : [st.updatedAt], { kept: Boolean(st.kept || (hasLiquid && state.sozu?.kept)) });
   const sozuNote = sozuOnItsWay
     ? `Your ${sozuOnItsWay.asset.action === "sozu_unstake" ? "unstake from" : "stake with"} Sozu is on its way.`
     : !holding.failed

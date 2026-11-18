@@ -79,4 +79,46 @@ describe("the balances read last, kept on the device", () => {
     await clearWalletData().catch(() => {});
     await expect(kept.keptBalancesOf({ ...place, account: "other-wallet-account" })).resolves.toBeNull();
   });
+
+  // Round 40's review: the popup (Staking's and Sozu's figures) and the wallet (the overview's) each queued their own
+  // writes to the one object they kept, and the one written last dropped what the other wrote meanwhile.
+  it("keep what the page and the wallet write at the same moment, each its own part", async () => {
+    const staking = { ownerStatus: { hasStake: true, amountLux: "1000000000000" }, minimumStakeLux: "1000000000000" };
+    const sozu = { status: { configured: true, position: { stDuskLux: "5" } } };
+    // The page: modules of its own, its own queue of writes, the same storage.
+    vi.resetModules();
+    const page = await import("./keptBalances.js");
+    await Promise.all([kept.keepBalances(place, { balance: read.balance, staked: read.staked }), page.keepBalances(place, { staking }), page.keepBalances(place, { sozu })]);
+    await expect(kept.keptBalancesOf(place)).resolves.toMatchObject({ balance: read.balance, staked: read.staked, staking, sozu });
+    await expect(page.keptBalancesOf(place)).resolves.toMatchObject({ balance: read.balance, staked: read.staked, staking, sozu });
+    // A removed wallet's parts go, every one.
+    await page.forgetKeptBalances([place.account]);
+    await expect(kept.keptBalancesOf(place)).resolves.toBeNull();
+  });
+
+  // Its second review: two windows' Staking, each for another account, each read the staking map, then wrote back the
+  // one it read with its own account in it, and the one written last dropped the other's. Each takes the map's lock,
+  // as the browser's Web Locks lend it to every page alike.
+  it("keep what two pages write for two accounts at the same moment", async () => {
+    const held = new Map();
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      locks: {
+        request: (name, fn) => {
+          const run = (held.get(name) ?? Promise.resolve()).then(() => fn());
+          held.set(name, run.catch(() => {}));
+          return run;
+        },
+      },
+    });
+    const staking = (lux) => ({ ownerStatus: { hasStake: true, amountLux: lux }, minimumStakeLux: "1" });
+    const other = { ...place, account: "profile-2-account" };
+    vi.resetModules();
+    const one = await import("./keptBalances.js");
+    vi.resetModules();
+    const two = await import("./keptBalances.js");
+    await Promise.all([one.keepBalances(place, { staking: staking("1") }), two.keepBalances(other, { staking: staking("2") })]);
+    await expect(one.keptBalancesOf(place)).resolves.toMatchObject({ staking: staking("1") });
+    await expect(one.keptBalancesOf(other)).resolves.toMatchObject({ staking: staking("2") });
+  });
 });

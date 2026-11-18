@@ -44,6 +44,8 @@ import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js
 import { SOZU_FACT_SOON_MS, activityKey, activityRows, keptRatesOf, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
 import { lastReadText } from "./txRow.js";
+import { keepBalances, keptBalancesOf } from "../../../shared/keptBalances.js";
+import { NODE_ANSWER_MS } from "../../../shared/networkStatus.js";
 
 // What a stake of `amount` gets with Sozu (sozuStake), once both the pool's
 // rate and the deposit fee are read; null until then.
@@ -391,13 +393,15 @@ const accountOf = (ov, idx) => String(ov?.accounts?.[idx] ?? "");
  * the sixth round). Null while they're as read.
  * @param {object} ov - the overview
  * @param {unknown[]} [readAt] - when each figure shown was read
+ * @param {{ kept?: boolean }} [opts] - `kept`: the figures shown are those
+ *   read last on this device, the node not having answered for them now
  * @returns {HTMLElement | null}
  */
-export function stakeStaleNote(ov, readAt = []) {
+export function stakeStaleNote(ov, readAt = [], { kept = false } = {}) {
   const read = (readAt.length ? lastReadText(...readAt) : "") || lastReadText(ov?.balanceReadAt);
   const note = (text) => h("div", { class: "muted balance-stale stake-stale", role: "status", text });
   if (globalThis.navigator?.onLine === false) return note(`Your stake may be out of date until you're back online.${read}`);
-  if (ov?.balanceStale || ov?.stakeStale || ov?.networkStatus?.nodeStatus === "offline") return note(`Your stake may be out of date.${read}`);
+  if (kept || ov?.balanceStale || ov?.stakeStale || ov?.networkStatus?.nodeStatus === "offline") return note(`Your stake may be out of date.${read}`);
   return null;
 }
 
@@ -599,6 +603,8 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
   // The context changes as a switch starts, the overview's account once it's done.
   const context = state.context;
   const account = accountOf(ov, idx);
+  const place = { nodeUrl: String(ov?.nodeUrl ?? ""), account };
+  const read = (st.read = {});
   const switched = () => {
     if (state.context === context && accountOf(state.overview ?? ov, idx) === account) return false;
     st.loading = false;
@@ -606,20 +612,63 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
     return true;
   };
+  // What was read last on this device, where nothing's read now: the read
+  // failed, or the node's had its time (Lena's: offline, Staking had none of
+  // what was with Sozu). Said to be maybe out of date, with when it was read.
+  const fromKept = () =>
+    keptBalancesOf(place)
+      .then((kept) => {
+        const sozu = kept?.sozu;
+        if (st.read !== read || st.loaded || !sozu?.status || st.status) return;
+        Object.assign(st, { readContext: context, readAccount: account, status: sozu.status, pool: sozu.status.pool ?? null, position: sozu.status.position ?? null, readAt: Number(kept.sozuAt) || null, profileIndex: idx, kept: true });
+        actions?.render?.().catch(() => {});
+      })
+      .catch(() => {});
+  setTimeout(() => {
+    if (st.read === read && st.loading) fromKept();
+  }, NODE_ANSWER_MS);
+  // A position read last, where this read's failed: the one in hand for
+  // this profile, else the one kept on this device.
+  const keptPosition = () =>
+    keptBalancesOf(place)
+      .then((kept) => {
+        const position = kept?.sozu?.status?.position;
+        const network = kept?.sozu?.status?.networkKey;
+        if (st.read !== read || st.position || !position || st.readAccount !== account || (network && network !== st.status?.networkKey)) return;
+        Object.assign(st, { status: { ...st.status, position }, position, readAt: Number(kept.sozuAt) || null, kept: true });
+        actions?.render?.().catch(() => {});
+      })
+      .catch(() => {});
   actions?.send?.({ type: "DUSK_UI_GET_SOZU_STATUS", profileIndex: idx })
     ?.then((resp) => {
       if (switched()) return;
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to load Sozu status");
+      const status = resp?.result ?? resp ?? null;
+      // On a network with Sozu, no position is a read of it that failed, not
+      // nothing held: the position read last stays, with when it was read,
+      // said to be maybe out of date (round 40's review: the last good one
+      // went, and what's held with Sozu was unknown). A position read as
+      // nothing held is read as such.
+      const unread = status?.configured === true && !status.position;
+      // The one in hand only for the same account on the same network: a
+      // profile's account is the same on every network (its second review:
+      // Testnet's position went with Mainnet's status), else the one kept
+      // for this node.
+      const sameNetwork = Boolean(st.status?.networkKey) && st.status.networkKey === status?.networkKey;
+      const last = unread && sameNetwork && st.readAccount === account && st.position ? { position: st.position, readAt: st.readAt } : null;
       st.readContext = context;
       st.readAccount = account;
-      st.status = resp?.result ?? resp ?? null;
+      st.status = last ? { ...status, position: last.position } : status;
       st.pool = st.status?.pool ?? null;
       st.position = st.status?.position ?? null;
       // When, for a note that it may be out of date once a read fails or the node goes silent.
-      st.readAt = Date.now();
+      st.readAt = last ? last.readAt : Date.now();
       st.profileIndex = idx;
       st.loaded = true;
       st.loading = false;
+      st.kept = Boolean(last);
+      if (st.status && !unread) keepBalances(place, { sozu: { status: st.status } }).catch(() => {});
+      if (unread && !last) keptPosition();
       // What's through by now counts in the position, read with this status.
       st.history = null;
       maybeAutoWatchStDusk({ state, actions, st, status: st.status, profileIndex: idx });
@@ -631,6 +680,7 @@ function ensureSozuLoaded(ov, { state, actions } = {}) {
       st.loaded = false;
       st.loading = false;
       actions?.render?.().catch(() => {});
+      fromKept();
     });
   return st;
 }
@@ -1051,7 +1101,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     cfg && liveStatus?.reason ? h("div", { class: "muted", text: liveStatus.reason }) : null,
     syncing ? syncWarning() : null,
     positionGroup,
-    positionGroup ? stakeStaleNote(ov, [st.readAt]) : null,
+    positionGroup ? stakeStaleNote(ov, [st.readAt], { kept: Boolean(st.kept) }) : null,
     assetError,
     actionTabs,
     stakeOff
