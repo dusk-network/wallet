@@ -15,9 +15,6 @@
   <a href="https://github.com/dusk-network/wallet/actions/workflows/release.yml">
     <img src="https://github.com/dusk-network/wallet/actions/workflows/release.yml/badge.svg" alt="Release"></a>
   &nbsp;
-  <a href="https://codecov.io/gh/dusk-network/wallet">
-    <img src="https://codecov.io/gh/dusk-network/wallet/branch/main/graph/badge.svg" alt="Coverage"></a>
-  &nbsp;
   <a href="https://github.com/dusk-network/wallet/stargazers">
     <img alt="GitHub Repo stars" src="https://img.shields.io/github/stars/dusk-network/wallet?style=social"></a>
   &nbsp;

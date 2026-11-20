@@ -39,7 +39,6 @@
     "build:extension": "vite build -c vite.config.js",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage",
     "rusk:up": "docker compose -f docker-compose.rusk.yml up -d",
     "rusk:down": "docker compose -f docker-compose.rusk.yml down",
     "rusk:logs": "docker compose -f docker-compose.rusk.yml logs -f --tail=200",
@@ -68,7 +67,6 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0",
-    "@vitest/coverage-v8": "^4.1.12",
     "fake-indexeddb": "^6.2.5",
     "vite": "^6.4.3",
     "vitest": "^4.1.12"
