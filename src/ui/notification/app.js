@@ -202,6 +202,21 @@ function formatTokenUnits(units, decimals, { maxFrac = 6 } = {}) {
   return frac ? `${intPart}.${frac}` : intPart;
 }
 
+/**
+ * A DRC20 token's details as its approval shows an amount with them: null
+ * where the token didn't say what that takes, a symbol and whole decimals the
+ * window can write out (up to 64), so the call's units are never scaled by a
+ * guess.
+ * @param {unknown} meta - the engine's answer to DUSK_UI_DRC20_GET_METADATA, or null
+ * @returns {{ name: string, symbol: string, decimals: number } | null}
+ */
+function tokenDetails(meta) {
+  const symbol = String(meta?.symbol ?? "").trim();
+  const decimals = Number(meta?.decimals);
+  if (!symbol || !Number.isInteger(decimals) || decimals < 0 || decimals > 64) return null;
+  return { name: String(meta?.name ?? "").trim(), symbol, decimals };
+}
+
 // A time as the popup writes it: "26 Oct 2026, 14:10 CET". One that isn't a
 // time shows as it came.
 function dateText(value) {
@@ -317,6 +332,11 @@ export const ENDED_ASK_TEXT = "This request isn't waiting any more. Ask the site
 // The kind of request this window shows, and whether it said it ended.
 let shownKind = "";
 let endedSaid = false;
+
+// Each drawing of the window counts up, so a screen still waiting for an
+// answer (a token's details) doesn't draw over one drawn since (the wallet
+// locked meanwhile).
+let renderSeq = 0;
 
 function ended(text = shownKind === "send_tx" ? ENDED_TEXT : ENDED_ASK_TEXT) {
   approvalLive = false;
@@ -510,6 +530,7 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
 }
 
 export async function renderNotification() {
+  const seq = ++renderSeq;
   if (!rid) {
     renderError("Missing request id.");
     return;
@@ -1532,11 +1553,12 @@ export async function renderNotification() {
     const sendVisible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
     // Reject and Approve, with the box to type MAX in: an allowance that is or
     // may be unlimited waits for MAX, and any approval for gas that will do.
-    const maxGatedBar = (gated, approveText) => {
+    // While the token is being read, Approve stays off.
+    const maxGatedBar = (gated, approveText, { reading = false } = {}) => {
       const bar = decisionBar({
         approveText,
-        approveDisabled: gated,
-        approveTitle: gated ? "Type MAX to enable approval" : "",
+        approveDisabled: gated || reading,
+        approveTitle: gated && !reading ? "Type MAX to enable approval" : "",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
         sends: true,
       });
@@ -1546,7 +1568,7 @@ export async function renderNotification() {
         onEnter: () => bar.approveBtn.click(),
         oninput: () => pay.draw(),
       });
-      const acknowledged = () => !gated || String(ackInput.value ?? "").trim().toUpperCase() === "MAX";
+      const acknowledged = () => !reading && (!gated || String(ackInput.value ?? "").trim().toUpperCase() === "MAX");
       const pay = guardFor(gasEditor, bar, sendsLux, acknowledged);
       submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => acknowledged() && pay.covered() });
       return { bar, ackInput, pay };
@@ -1639,24 +1661,14 @@ export async function renderNotification() {
       }
     }
 
-    let drcMeta = null;
-    if (drcKind === "DRC20") {
-      drcMeta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId: contractIdHex, driver: drc20.driver }).catch(() => null);
-    }
-    if (drcKind === "DRC721") {
-      drcMeta = await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId: contractIdHex }).catch(() => null);
-    }
-
-    // Token standards: what the call moves or allows, in the token's units.
+    // Token standards: what the call moves or allows, in the token's units,
+    // which only the token's own details say: its name, symbol and decimals.
+    // The window shows at once, saying it's reading the token, with Approve
+    // off; then the amount in the token's units, or, where the token can't
+    // be read, the call's raw units beside its contract, never a figure the
+    // wallet scaled for a token it couldn't name.
     if (drc20) {
-      const sym = String(drcMeta?.symbol ?? "").trim() || "TOKEN";
-      const name = String(drcMeta?.name ?? "").trim() || "DRC20 token";
-      const dec = Number(drcMeta?.decimals ?? 0) || 0;
-
-      // Exact, as an approval shows DUSK: every decimal the token has.
       const units = drc20.amount;
-      const amount = groupThousands(formatTokenUnits(units, dec, { maxFrac: dec }));
-
       const isApprove = drc20.fn === "approve";
       const isIncrease = drc20.fn === "increase_allowance";
       const isTransfer = drc20.fn === "transfer";
@@ -1669,46 +1681,68 @@ export async function renderNotification() {
         h("code", { class: "ap-address", text: party.value }),
       ];
       const partyTo = (party) => (kindOf(party) ? plainTo(party.value, "", { evm: false, prefix: `to ${kindOf(party)} ` }) : toLine(party.value));
+      // Drawn once: it asks for the recipient's .dusk name.
+      const toEl = drc20.to ? partyTo(drc20.to) : null;
+      const title = isApprove
+        ? "Allow spending?"
+        : isIncrease
+          ? "Allow more spending?"
+          : drc20.fn === "decrease_allowance"
+            ? "Allow less spending?"
+            : "Send tokens";
+      const approveText = isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve";
 
-      const { bar, ackInput, pay } = maxGatedBar(isMax, isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve");
+      // `token`: undefined while it's read, null when it couldn't be, else
+      // its name, symbol and decimals (tokenDetails).
+      const drawToken = (token) => {
+        const reading = token === undefined;
+        // Exact, as an approval shows DUSK: every decimal the token has.
+        const amount = token
+          ? { value: groupThousands(formatTokenUnits(units, token.decimals, { maxFrac: token.decimals })), unit: token.symbol }
+          : reading
+            ? null
+            : { value: String(units), unit: "units" };
+        const tokenName = token ? token.name || token.symbol : contractIdText(contractShown, { short: true });
+        const { bar, ackInput } = maxGatedBar(isMax, approveText, { reading });
+        show(
+          [
+            site,
+            requestHead({ title, amount, to: toEl, sub: reading ? "Reading the token…" : `${tokenName} · DRC20` }),
+            token === null ? note("Couldn't read this token, so the amount is in its raw units.", "alert", { className: "ap-token-unread" }) : null,
+            // A transfer names whom it pays; an allowance moves nothing yet.
+            drc20.to ? sendVisible("this call, the tokens it moves") : null,
+            group([
+              kv("From", payerLine(rail)),
+              drc20.to ? kv("To", partyValue(drc20.to), { stack: true }) : null,
+              drc20.spender ? kv("Spender", partyValue(drc20.spender), { stack: true }) : null,
+              drc20.owner ? kv("Owner", partyValue(drc20.owner), { stack: true }) : null,
+              kv(
+                "Token",
+                token ? h("span", {}, [h("span", { text: `${token.name ? `${token.name} (${token.symbol})` : token.symbol} ` }), shortMono(contractShown)]) : shortMono(contractShown)
+              ),
+              kv("Units", mono(units)),
+            ]),
+            isMax && !reading
+              ? warning("Unlimited allowance", "This lets the spender move all of this token from your account, now and later. Only continue if you trust it.", [ackInput])
+              : null,
+            callRows(),
+            siteFee,
+            gasEditor,
+            detailsBlock(),
+          ],
+          bar.nodes
+        );
+      };
 
-      show(
-        [
-          site,
-          requestHead({
-            title: isApprove
-              ? "Allow spending?"
-              : isIncrease
-                ? "Allow more spending?"
-                : drc20.fn === "decrease_allowance"
-                  ? "Allow less spending?"
-                  : "Send tokens",
-            amount: { value: amount, unit: sym },
-            to: drc20.to ? partyTo(drc20.to) : null,
-            sub: `${name} · DRC20`,
-          }),
-          // A transfer names whom it pays; an allowance moves nothing yet.
-          drc20.to ? sendVisible("this call, the tokens it moves") : null,
-          group([
-            kv("From", payerLine(rail)),
-            drc20.to ? kv("To", partyValue(drc20.to), { stack: true }) : null,
-            drc20.spender ? kv("Spender", partyValue(drc20.spender), { stack: true }) : null,
-            drc20.owner ? kv("Owner", partyValue(drc20.owner), { stack: true }) : null,
-            kv("Token", h("span", {}, [h("span", { text: `${name} (${sym}) ` }), shortMono(contractShown)])),
-            kv("Units", mono(units)),
-          ]),
-          isMax
-            ? warning("Unlimited allowance", "This lets the spender move all of this token from your account, now and later. Only continue if you trust it.", [ackInput])
-            : null,
-          callRows(),
-          siteFee,
-          gasEditor,
-          detailsBlock(),
-        ],
-        bar.nodes
-      );
+      drawToken(undefined);
+      const meta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId: contractIdHex, driver: drc20.driver }).catch(() => null);
+      // The window drew something else meanwhile: the wallet locked, say.
+      if (seq !== renderSeq) return;
+      drawToken(tokenDetails(meta));
       return;
     }
+
+    const drcMeta = drcKind === "DRC721" ? await sendResult({ type: "DUSK_UI_DRC721_GET_METADATA", contractId: contractIdHex }).catch(() => null) : null;
 
     if (drcKind === "DRC721" && decoded && typeof decoded === "object") {
       const sym = String(drcMeta?.symbol ?? "").trim() || "NFT";

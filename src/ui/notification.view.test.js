@@ -1375,6 +1375,92 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     expect([row("To"), row("Units"), app.querySelector(".ap-opaque")]).toEqual([undefined, undefined, null]);
     expect(approve().disabled).toBe(false);
   });
+
+  // The copy audit's: a 10 stDUSK allowance's first window read "10,000,000,000 TOKEN", the call's
+  // units as an unnamed token's, until the token's details came.
+  describe("a token whose details come late, or never", () => {
+    // Sozu's approval of 10 stDUSK (9 decimals) for a contract.
+    const tenStDusk = () => tokenCall("sozu_staked_dusk", "approve", `["${"10".repeat(32)}","10000000000"]`);
+    const unlimited = () => tokenCall("sozu_staked_dusk", "approve", `["${"10".repeat(32)}","18446744073709551615"]`);
+    // The token's details as the test gives them, once it does.
+    const detailsLater = () => {
+      let give;
+      mocks.answers.DUSK_UI_DRC20_GET_METADATA = () => new Promise((resolve) => (give = resolve));
+      return (answer) => give(answer);
+    };
+    const STAKED = { ok: true, result: { name: "Staked Dusk", symbol: "stDUSK", decimals: 9 } };
+    const unreadNote = () => app.querySelector(".ap-token-unread");
+
+    it("says it's reading the token, with Approve off, then shows the amount in the token's units", async () => {
+      const params = tenStDusk();
+      const give = detailsLater();
+      const shown = render("send_tx", params);
+      await vi.waitFor(() => expect(visibleText(head())).toBe("Allow spending?Reading the token…"));
+      expect(head().querySelector(".ap-amount")).toBeNull();
+      expect(visibleText(app)).not.toMatch(/TOKEN|10,000,000,000|DRC20 token/);
+      expect(row("Units").textContent).toBe("10000000000");
+      expect(approve().disabled).toBe(true);
+      pastClickGuard();
+      approve().click();
+      await settle();
+      expect(decision("approve")).toBeUndefined();
+
+      give(STAKED);
+      await shown;
+      expect([amount(), visibleText(head().querySelector(".ap-sub"))]).toEqual(["10 stDUSK", "Staked Dusk · DRC20"]);
+      expect(visibleText(row("Token"))).toBe(`Staked Dusk (stDUSK) ${shortAddress("11".repeat(32))}`);
+      expect(unreadNote()).toBeNull();
+      expect(approve().disabled).toBe(false);
+    });
+
+    it.each([
+      ["the wallet couldn't read them", { ok: false, error: "Engine call timed out" }],
+      ["they name no symbol", { ok: true, result: { name: "", symbol: "", decimals: 0 } }],
+      ["their decimals aren't a whole number", { ok: true, result: { name: "Staked Dusk", symbol: "stDUSK", decimals: 9.5 } }],
+    ])("shows the call's raw units beside its contract when %s, never a figure scaled for an unnamed token", async (_label, answer) => {
+      const params = tenStDusk();
+      const give = detailsLater();
+      const shown = render("send_tx", params);
+      await vi.waitFor(() => expect(visibleText(head())).toContain("Reading the token…"));
+      give(answer);
+      await shown;
+      expect(amount()).toBe("10000000000 units");
+      expect(visibleText(head().querySelector(".ap-sub"))).toBe(`${shortAddress("11".repeat(32))} · DRC20`);
+      expect(visibleText(unreadNote())).toBe("Couldn't read this token, so the amount is in its raw units.");
+      expect(visibleText(app)).not.toMatch(/TOKEN|10,000,000,000|DRC20 token|stDUSK/);
+      expect(approve().disabled).toBe(false);
+    });
+
+    it("keeps an unlimited allowance waiting for MAX, while it reads the token and when it can't", async () => {
+      const params = unlimited();
+      const give = detailsLater();
+      const shown = render("send_tx", params);
+      await vi.waitFor(() => expect(visibleText(head())).toContain("Reading the token…"));
+      expect(approve().disabled).toBe(true);
+      give({ ok: false, error: "Engine call timed out" });
+      await shown;
+      expect(amount()).toBe("18446744073709551615 units");
+      expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Unlimited allowance");
+      expect(approve().disabled).toBe(true);
+      typeInto(app.querySelector(".callout.warn input"), "MAX");
+      expect(approve().disabled).toBe(false);
+    });
+
+    it("doesn't draw the token over the unlock the window asked for meanwhile", async () => {
+      const params = tenStDusk();
+      const give = detailsLater();
+      const shown = render("send_tx", params);
+      await vi.waitFor(() => expect(visibleText(head())).toContain("Reading the token…"));
+      mocks.pending = { ...mocks.pending, isUnlocked: false, accounts: [], duskNames: {} };
+      for (const hear of mocks.heard) hear({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "engine_closed" });
+      await vi.waitFor(() => expect(app.querySelector("label[for=approval-password]")?.textContent).toBe("Unlock to answer"));
+      give(STAKED);
+      await shown;
+      await settle();
+      expect(app.querySelector("label[for=approval-password]")?.textContent).toBe("Unlock to answer");
+      expect(buttons()).toEqual(["Reject", "Unlock"]);
+    });
+  });
 });
 
 describe("contract calls", () => {
