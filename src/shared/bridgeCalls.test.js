@@ -37,7 +37,7 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
   const EVM = "0x" + "ab".repeat(20);
   // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
   // more digits, letters or a decimal part (1 DUSK ≠ 11 or 21 DUSK, 0.000000001 ≠ 10.000000001).
-  const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+  const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
   // A line's part, by the word that says what it is: what's sent, the fee, or what arrives.
   const part = (line, word) => line.split(" · ").find((p) => word.test(p)) ?? "";
   // Every part that says what arrives: one, never a second that promises an amount.
@@ -92,6 +92,8 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
     expect(part(line, /arriv/i)).toMatch(/nothing/i);
     expect(part(line, /arriv/i)).toMatch(/Sepolia/);
     expect(arrivals(line).join(" ")).not.toMatch(/\d/);
+    // Nor any other part but the fee and what's sent: no payout line at all.
+    expect(line.split(" · ").filter((p) => !/fee|sent/i.test(p)).join(" · ")).not.toMatch(/\d/);
     // Another account, or another network's, is no bridge transfer.
     expect(bridgeServiceTransfer({ nodeUrl: TESTNET, to: mainnet.account, amount: "5000000000" })).toBeNull();
   });

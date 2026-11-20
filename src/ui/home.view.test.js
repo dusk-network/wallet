@@ -9,7 +9,7 @@ vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // Everything a screen gives away: all its text, shown or not, and each element's title and aria-label.
 const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
 
@@ -213,7 +213,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     const [hidden] = boxes(document);
     expect(hidden.title).toMatch(exactly("•••• DUSK"));
     expect(hidden.title).not.toMatch(/\d/);
-    expect(everything(hidden.el)).not.toMatch(exactly("0.01"));
+    expect(everything(hidden.el)).not.toContain("0.01");
     document.body.replaceChildren(...homeView(ov([send({ profileIndex: 1 })]), { state, actions }));
     expect(boxes(document)).toEqual([]);
   });

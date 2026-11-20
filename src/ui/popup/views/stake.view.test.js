@@ -192,7 +192,7 @@ const confirm = () => body.querySelectorAll(".review-actions .btnrow > button").
 
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // Figures said in one line, each exactly so, in their order or in any; and a name on its own: Profile 2, never
 // Profile 20.
 const inOrder = (...texts) => new RegExp(texts.map((text) => exactly(text).source).join("[\\s\\S]*"));

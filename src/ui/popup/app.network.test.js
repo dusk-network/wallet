@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "../../shared/fixtures/activity-testnet.json";
 import { fakeArchive } from "../../shared/fixtures/fakeArchive.js";
-import { installFakeDom, settle } from "../testing/fakeDom.js";
+import { installFakeDom, isShown, settle, visibleText } from "../testing/fakeDom.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
@@ -113,7 +113,11 @@ describe("a node that answers again before the balance does", () => {
     // The balance shown, and what's said of it under it (home.js balance-stale): that it may be out of date, never
     // that it's current; "" where nothing is said.
     const balance = () => app.querySelector(".balance-amount").textContent;
-    const note = () => app.querySelector(".balance-stale")?.textContent ?? "";
+    // The note as the screen shows it: "" while it's hidden or not there.
+    const note = () => {
+      const el = app.querySelector(".balance-stale");
+      return el && isShown(el) ? visibleText(el) : "";
+    };
     const maybeOutOfDate = () => {
       expect(note()).toMatch(/may be out of date/i);
       expect(note()).not.toMatch(/\bcurrent\b|up to date/i);

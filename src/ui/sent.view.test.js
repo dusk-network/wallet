@@ -109,7 +109,7 @@ const stepTitle = (i) => {
 const screen = () => visibleText(body);
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // When it was sent, and from which balance: the line that gives its time.
 const sentLine = () => body.querySelectorAll(".step-sub, .kv-value").map(visibleText).find((text) => /\d\d:\d\d/.test(text)) ?? "";
 // A row's value, by its label: the fee's, whatever its row is called, and the memo's.

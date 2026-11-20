@@ -86,7 +86,7 @@ const errorOf = (field) =>
     .join("");
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // A site's row in Settings, connected or earlier, by its host.
 const siteRow = (host) => dom.document.body.querySelectorAll(".settings-site").find((row) => visibleText(row.querySelector(".settings-site__host")) === host);
 // The row in Security that opens `route`, whatever it's called: each row pressed until one does.
@@ -425,7 +425,9 @@ describe("settings", () => {
       ]);
       // Nothing a site chose reads as something else.
       expect(row.textContent).not.toContain("\u202E");
-      expect(column("what")[0]).toMatch(/swap.*yenom/);
+      expect(column("what")[0]).toMatch(/^Contract call: swap.*yenom/);
+      // What each was, as asked: a payment is a payment, never a message to sign.
+      expect(column("what").slice(1)).toEqual(["Pay", "Sign a message", "Connect", "Switch network", "Import an NFT", "Pay", "Pay", "Bridge to DuskEVM"]);
     });
 
     it("sets how long from its Details, and new sites' on their own", async () => {
@@ -437,6 +439,8 @@ describe("settings", () => {
         select.value = String(value);
         select.dispatchEvent(fakeEvent("change"));
       };
+      // The site's own, as saved: 7 days, picked.
+      expect(sitesChoice().value).toBe(String(7 * DAY));
       choose(sitesChoice(), DAY);
       await settle();
       expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_SET_SITE_LASTS", origin: SITE, siteWallet: ACCOUNTS[0], lastsMs: DAY });

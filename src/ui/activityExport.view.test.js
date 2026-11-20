@@ -172,7 +172,7 @@ const exportToggle = () => body().querySelector(".activity-export-toggle");
 const saveCsv = () => panel().querySelector("button");
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 const fieldError = () => panel().querySelectorAll(".field-error").filter(isShown).map((el) => el.textContent).join("");
 
 // The file saved, by its columns' names.
@@ -626,7 +626,7 @@ describe("Activity's Export", () => {
     // Its one line, and no fees said to be in the file from that address.
     const told = stranger.actions.showToast.mock.calls.at(-1)[0];
     expect(told).toMatch(exactly("1"));
-    expect(told).not.toMatch(exactly("0x4E4B…FF46"));
+    expect(told).not.toContain("0x4E4B…FF46");
 
     // From the address the profile bridged DUSK to before: booked.
     page("/full.html");
@@ -648,7 +648,7 @@ describe("Activity's Export", () => {
     // The one migration's fee missing, on its chain, and no fees said to be in the file.
     expect(down.toast).toMatch(exactly("1"));
     expect(down.toast).toContain("BNB Smart Chain");
-    expect(down.toast).not.toMatch(exactly("0x4E4B…FF46"));
+    expect(down.toast).not.toContain("0x4E4B…FF46");
     // Nor its approvals and revokes there, or on Ethereum: maybe in another profile's file.
     expect(down.toast).toMatch(/profile/);
 
@@ -830,7 +830,7 @@ describe("Activity's Export", () => {
     const second = await exportOnce();
     expect(second.lines).toEqual(owners);
     expect(second.toast).toMatch(exactly("0x4E4B…FF46"));
-    expect(second.toast).not.toMatch(exactly("0x5A17…9c0d"));
+    expect(second.toast).not.toContain("0x5A17…9c0d");
     expect(second.toast).not.toMatch(/profile/);
 
     // Whose it is can't be read: in no file, and the toast says it may be in another profile's.

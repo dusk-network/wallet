@@ -78,7 +78,7 @@ async function show(nodes) {
 const button = (text) => body.querySelectorAll("button").find((b) => b.textContent === text);
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // What a form says under its amount where the public balance can't pay it: how much short, its figure hidden, and of
 // which balance.
 const tooMuch = (el) => {
@@ -92,7 +92,7 @@ const tooMuch = (el) => {
 const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
 // None of these figures anywhere on the screen.
 const nowhere = (...figures) => {
-  for (const figure of figures) expect(everything(body), figure).not.toMatch(exactly(figure));
+  for (const figure of figures) expect(everything(body), figure).not.toContain(figure);
 };
 // A balance with balances hidden: dots, no figure to the eyes or to screen readers, and no tooltip.
 const hides = (el) => {

@@ -52,7 +52,7 @@ const showButton = (input) => input.el.querySelector(".srp-show");
 const numbersIn = (text) => text.match(/\d+/g) ?? [];
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // Says a phrase isn't valid, in its key words ("isn't a valid recovery phrase"), and never that it is one.
 const notValid = (text, name) => {
   expect(text, name).toMatch(/\b(?:isn['’]t|is not) a valid\b|\binvalid\b/i);

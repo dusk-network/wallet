@@ -26,7 +26,7 @@ const FEE = /^(network )?fee( charged)?$/i;
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // Values in a sentence, in this order: where a transaction is, then where you are.
 const inOrder = (...values) => new RegExp(values.map(escape).join("[\\s\\S]*"));
 // The row of a field in a transaction's details, by its label.
@@ -90,8 +90,8 @@ describe("a name read through a node the wallet doesn't know", () => {
 
   it("says whose word it is in a transaction's details, and nothing on a network's own node or with no name", () => {
     const { note } = details({ ...transfer, nodeUrl: CUSTOM, toName: "bob.dusk" }, { own: { nodeUrl: CUSTOM } });
-    // The node, by its name, and that the wallet doesn't know it.
-    expect(note).toMatch(exactly("my-node.example:8443"));
+    // The node, by its whole name (not othermy-node.example:8443), and that the wallet doesn't know it.
+    expect(note).toMatch(/(?<![\w.-])my-node\.example:8443(?![\w-]|\.\w)/);
     expect(note).toMatch(/doesn't know/i);
     expect(details({ ...transfer, toName: "bob.dusk" }).note).toBe("");
     expect(details({ ...transfer, nodeUrl: CUSTOM }, { own: { nodeUrl: CUSTOM } }).note).toBe("");
@@ -319,7 +319,8 @@ describe("transaction details", () => {
     await vi.waitFor(() => expect(actions.render).toHaveBeenCalled());
     const fields = draw();
     // What the approval and the migration paid there, together; and what was sent there.
-    expect(fields[FEE_THERE]).toMatch(exactly("0.00000474855 BNB"));
+    // The amount leads its field, alone: not "9 BNB / 0.00000474855 BNB", nor BNBX.
+    expect(fields[FEE_THERE].split(" · ")[0]).toBe("0.00000474855 BNB");
     expect(fields.Sent).toBe("1,041.53106263 BEP20 DUSK");
     // The migration's transaction there, copied in full.
     const there = fieldRow(dom.document.body, "BNB Smart Chain transaction");
@@ -358,7 +359,7 @@ describe("transaction details", () => {
     // What it got hides with the balances, anywhere; the rate says nothing of what's held.
     const hiddenFields = draw(true);
     await vi.waitFor(() => expect(hiddenFields()["You got"]).toBe("•••• stDUSK"));
-    expect(everything(dom.document.body)).not.toMatch(exactly("49.875"));
+    expect(everything(dom.document.body)).not.toContain("49.875");
     expect(hiddenFields().Rate).toBe("1 stDUSK = 2 DUSK");
   });
 
@@ -484,7 +485,7 @@ describe("transaction details", () => {
     expect(on(bridged)).toEqual(["3.190082082 DUSK", "1 DUSK", "0.001859281 DUSK", "2.190082082 BEP20 DUSK"]);
     // Hide balances hides them all, anywhere.
     expect(on(bridged, { hidden: true })).toEqual(["•••• DUSK", "•••• DUSK", "•••• DUSK", "•••• BEP20 DUSK"]);
-    for (const figure of ["3.190082082", "0.001859281", "2.190082082"]) expect(everything(dom.document.body)).not.toMatch(exactly(figure));
+    for (const figure of ["3.190082082", "0.001859281", "2.190082082"]) expect(everything(dom.document.body)).not.toContain(figure);
     // A transfer that's no bridge's has no such fields but its fee.
     expect(on({ to: evm.replace("0x", ""), amount: "3190082082", feePaid: "1859281" })).toEqual([undefined, undefined, "0.001859281 DUSK", undefined]);
   });
@@ -534,7 +535,8 @@ describe("transaction details", () => {
     const view = details({ kind: TX_KIND.TRANSFER, amount: "1000000000", status: "executed", feePaid: "1856398", gasSpent: "1856398", gasPrice: "1", gasLimit: "2500000" }, { hidden: true });
     expect([view.fields["Gas used"], feeOf(view.fields)]).toEqual(["••••", "•••• DUSK"]);
     // Nor anywhere else: not in a tooltip, nor to a screen reader.
-    for (const figure of ["1,856,398", "1856398", "0.001856398"]) expect(everything(view.body)).not.toMatch(exactly(figure));
+    // Not anywhere, signed, joined to a unit (1856398LUX) or in a tooltip.
+    for (const figure of ["1,856,398", "1856398", "0.001856398"]) expect(everything(view.body)).not.toContain(figure);
   });
 
   it("names the site a transaction came from, and none for the wallet's own", () => {

@@ -75,7 +75,7 @@ const approveButton = (page) => page.locator("#approval-actions .btn-primary");
 const rejectButton = (page) => page.locator("#approval-actions .btn-outline");
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // A row's value, by its label.
 const rowValue = (page, label) => page.locator(".kv").filter({ has: page.locator(".kv-label", { hasText: new RegExp(`^${label}$`) }) }).locator(".kv-value");
 // The fold that holds the request's details, before any fold inside it.

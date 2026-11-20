@@ -45,7 +45,7 @@ describe("shield and unshield", () => {
   const confirm = () => body().querySelector(".review-actions button");
   // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed
   // by more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-  const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+  const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
   // The most a fee can be, as the form says it under the amount: "up to 0.05 DUSK", never 10.05 or −0.05.
   const upTo = (text) => new RegExp(`\\bup to ${exactly(text).source}`, "i");
   // What a Review says, each in its own place: the amount, a row's value by its label, the fee and the total.

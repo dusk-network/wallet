@@ -38,7 +38,7 @@ const short = (address) => `${address.slice(0, 6)}…${address.slice(-6)}`;
 const FEE = /^(network )?fee( charged)?$/i;
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // Everything a screen gives away: all its text, shown or not, and each element's title and aria-label.
 const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
 
@@ -227,7 +227,8 @@ describe("Activity's rows", () => {
     row = failedRow();
     expect([row.status, row.amount]).toEqual(["Failed", "•••• DUSK"]);
     expect(row.sub).not.toMatch(/\d/);
-    for (const figure of ["0.0037", "200"]) expect(everything(row.row)).not.toMatch(exactly(`${figure} DUSK`));
+    // Not anywhere, signed, joined to its unit or in a tooltip: nothing of either figure at all.
+    for (const figure of ["0.0037", "200"]) expect(everything(row.row)).not.toContain(figure);
     // Without a fee charged, no fee, a fee of 0 included.
     for (const feePaid of [undefined, "0"]) {
       setup({ local: [{ ...failed, feePaid }] });
@@ -256,7 +257,7 @@ describe("Activity's rows", () => {
     const row = rows().find((r) => r.failed);
     expect([row.status, row.amount]).toEqual(["Failed", "1 DUSK"]);
     expect(row.sub).toMatch(exactly("0.0018 DUSK"));
-    expect(row.sub).not.toMatch(exactly("0.0019 DUSK"));
+    expect(row.sub).not.toContain("0.0019");
     Object.assign(view.state, { route: "tx", txDetailHash: failed.hash, txDetailFrom: "home" });
     view.draw();
     const fee = Object.entries(fieldsOf(body())).find(([label]) => FEE.test(label))?.[1];

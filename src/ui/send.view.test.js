@@ -155,7 +155,7 @@ const oneLine = (text) => text.replace(/\s*[\r\n]+\s*/g, " ").trim();
 // name, not signed or bounded unless written so, and not followed by more digits, letters or a decimal part: 1.0025
 // isn't 11.0025, 0.005 isn't −0.005, 2,000,000 isn't 2,000,000.5, 1 DUSK isn't 0.1 DUSK, bob.dusk isn't abob.dusk.
 const whole = (value) =>
-  `${/^[\p{L}\p{N}]/u.test(value) ? "(?<![\\p{L}\\p{N}_.,+\\-−<>≤≥~])" : ""}${RegExp.escape(value)}${/[\p{L}\p{N}]$/u.test(value) ? "(?![\\p{L}\\p{N}_]|[.,]\\d)" : ""}`;
+  `${/^[\p{L}\p{N}]/u.test(value) ? "(?<![\\p{L}\\p{N}_.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)" : ""}${RegExp.escape(value)}${/[\p{L}\p{N}]$/u.test(value) ? "(?![\\p{L}\\p{N}_]|[.,]\\d)" : ""}`;
 // What a note, an error or a refusal says, in whatever words: something, with each of `values` in it whole.
 const saying = (...values) => expect.stringMatching(new RegExp(`^(?=[\\s\\S]*\\S)${values.map((value) => `(?=[\\s\\S]*${whole(value)})`).join("")}`, "u"));
 // A sentence of two sides that says each value on its own side: after the word for that side, with the other side's
@@ -307,7 +307,7 @@ describe("send to a .dusk name with both addresses", () => {
   it("says no Available for a shielded address while the shielded balance can't be read now, never 0", () => {
     const form = mount(newState(), overview({ shieldedBalance: { value: "0", spendable: "0" }, shieldedStale: true, shieldedError: "Failed to fetch" }));
     typeInto(form.to, ALICE.address);
-    expect(form.pill()).toEqual(ONLY_SHIELDED);
+    expect(form.pill()).toBe("Shielded");
     expect(isShown(dom.document.body.querySelector(".amount-avail"))).toBe(false);
     typeInto(form.to, ALICE.account);
     expect(form.balanceLine()).toEqual(saying("177.984 DUSK"));
@@ -316,11 +316,11 @@ describe("send to a .dusk name with both addresses", () => {
   it("shows the pill for a pasted account or address, where it is the only sign of the transfer type", () => {
     const form = mount(newState());
     typeInto(form.to, ALICE.account);
-    expect(form.pill()).toEqual(ONLY_PUBLIC);
+    expect(form.pill()).toBe("Public");
     typeInto(form.to, "alice.dusk");
     expect(form.pill()).toBe("");
     typeInto(form.to, ALICE.address);
-    expect(form.pill()).toEqual(ONLY_SHIELDED);
+    expect(form.pill()).toBe("Shielded");
   });
 
   it("keeps each name's pick while it is typed again, and starts a name without one on public", () => {
@@ -588,7 +588,7 @@ describe("what the To field says about what's typed", () => {
     isAccount.mockReturnValue(true);
     typeInto(form.to, ALICE.account);
     expect(visibleText(form.nameBox())).toBe("");
-    expect(form.pill()).toEqual(ONLY_PUBLIC);
+    expect(form.pill()).toBe("Public");
     expect(form.review.disabled).toBe(false);
   });
 
@@ -631,7 +631,7 @@ describe("what the To field says about what's typed", () => {
     const form = mount(newState());
     typeInto(form.to, `${ALICE.account.slice(0, 40)} ${ALICE.account.slice(40, 80)}\n${ALICE.account.slice(80)}`);
     expect(form.to.value).toBe(ALICE.account);
-    expect(form.pill()).toEqual(ONLY_PUBLIC);
+    expect(form.pill()).toBe("Public");
     expect(form.review.disabled).toBe(false);
   });
 
@@ -657,7 +657,7 @@ describe("what the To field says about what's typed", () => {
     typeInto(form.to, "alice");
     form.nameBox().querySelector("button").click();
     expect(form.to.value).toBe(BOB.account);
-    expect(form.pill()).toEqual(ONLY_PUBLIC);
+    expect(form.pill()).toBe("Public");
   });
 
   // Sofía's: "Profile" in To said "Did you mean profile.dusk?", not her own Profile 2. Registered by someone, it
@@ -690,7 +690,7 @@ describe("what the To field says about what's typed", () => {
 
     typeInto(form.to, "Profile");
     form.nameBox().querySelector("button").click();
-    expect([form.to.value, form.pill()]).toEqual([OTHER_PROFILE, ONLY_PUBLIC]);
+    expect([form.to.value, form.pill()]).toEqual([OTHER_PROFILE, "Public"]);
   });
 
   it("says which contacts' names look like another's, with each one's address", () => {
@@ -3092,9 +3092,15 @@ describe("a payment made already", () => {
   });
 
   it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {
-    const yesterday = Date.now() - 24 * 60 * 60_000;
+    // Yesterday at noon, by the calendar: said as yesterday, at its time.
+    const noon = new Date();
+    noon.setDate(noon.getDate() - 1);
+    noon.setHours(12, 0, 0, 0);
+    const yesterday = noon.getTime();
     confirm(draft(), [sentRecord({ submittedAt: yesterday })]);
     expect(again()).toEqual(saying("Alice", hhmm(yesterday)));
+    expect(again()).toMatch(/\byesterday\b/i);
+    expect(again()).not.toMatch(/\btoday\b/i);
 
     confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 30_000 })]);
     expect(again()).toEqual(saying("Alice", hhmm(Date.now() - 30_000)));

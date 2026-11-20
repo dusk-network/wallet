@@ -17,7 +17,6 @@ import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { numbersText } from "./components/SafeText.js";
 import { SWITCH_NODE_FACT } from "./notification/summary.js";
 import { shortAddress } from "./lib/strings.js";
-import { dateText } from "./lib/time.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
 const mocks = vi.hoisted(() => ({ pending: null, sent: [], answers: {}, heard: [] }));
@@ -114,7 +113,7 @@ const TESTNET = "https://testnet.nodes.dusk.network";
 
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 
 // A site's public transfer of 1 DUSK to `to` on Testnet, as rpc.js passes it on.
 const transfer = (to, over = {}) => ({
@@ -253,19 +252,26 @@ describe("a site's send while offline", () => {
 describe("connect approval", () => {
   it("says how long it stays connected, as Settings has it", async () => {
     const seesLine = () => visibleText(app.querySelectorAll(".ap-facts .list-row")[0]);
-    // A day, as one day; a week, as 7 days: never 17, or a day for a week.
+    // A day, as a day; a week, as 7 days: never 17, or a day for a week.
     await render("connect", { requestedProfiles: true, lastsMs: 86_400_000 });
-    expect(seesLine()).toMatch(/\bday\b/);
+    expect(seesLine()).toMatch(/\bfor a day\b/i);
     expect(seesLine()).not.toMatch(/\bdays\b/);
     await render("connect", { requestedProfiles: true, lastsMs: 7 * 86_400_000 });
     expect(seesLine()).toMatch(exactly("7 days"));
-    // Connected already: until when, as it goes on.
-    const end = Date.UTC(2031, 0, 15, 12);
-    await render("connect", { requestedProfiles: true, stays: true, lastsMs: 7 * 86_400_000, endsAt: end }, { permissionAccountIndex: 0 });
-    expect(seesLine()).toContain(dateText(end));
+    // Connected already: until when, as it goes on, in UTC here.
+    const zone = process.env.TZ;
+    process.env.TZ = "UTC";
+    try {
+      const end = Date.UTC(2031, 0, 15, 12);
+      await render("connect", { requestedProfiles: true, stays: true, lastsMs: 7 * 86_400_000, endsAt: end }, { permissionAccountIndex: 0 });
+      expect(seesLine()).toContain("Wed 15 Jan 2031, 12:00 UTC");
+    } finally {
+      if (zone === undefined) delete process.env.TZ;
+      else process.env.TZ = zone;
+    }
     await render("connect", { requestedProfiles: true, stays: true, lastsMs: 7 * 86_400_000, endsAt: 0 }, { permissionAccountIndex: 0 });
     // Until it's disconnected: no date, nor a number of days.
-    expect(seesLine()).not.toContain(dateText(end));
+    expect(seesLine()).not.toContain("2031");
     expect(seesLine()).not.toMatch(/\bdays?\b/);
     expect(seesLine()).toMatch(/until you disconnect/i);
   });
@@ -830,6 +836,8 @@ describe("a site's request to pay the bridge's account", () => {
   // Every part that says what arrives: one, and never a second promising an amount.
   const arrivals = () => sub().split(" · ").filter((part) => /arriv/i.test(part));
   const feePart = () => sub().split(" · ").find((part) => /fee/i.test(part)) ?? "";
+  // Every part but the fee and what's sent: none may name an amount where nothing arrives.
+  const payouts = () => sub().split(" · ").filter((part) => !/fee|sent/i.test(part));
   // What the bridge's rules (bridgeCalls.js) make of a payment: its line, and its warnings by kind,
   // "off" while the bridge doesn't pay out there, "fee" where its fee takes it all.
   const service = (params) => bridgeServiceTransfer(params);
@@ -916,6 +924,7 @@ describe("a site's request to pay the bridge's account", () => {
     expect(arrivals()).toHaveLength(1);
     expect(arrives()).toMatch(/nothing/i);
     expect(arrives()).not.toMatch(/\d/);
+    expect(payouts().join(" · ")).not.toMatch(/\d/);
     expect(feePart()).toMatch(exactly("1 DUSK"));
   });
 
@@ -1292,7 +1301,10 @@ describe("a site's token call, read with the wallet's token drivers", () => {
   // The box that holds Approve back until MAX is typed into it.
   const maxBox = () => app.querySelector(".callout.warn input");
   // The spender's ID, alone.
-  const spenderId = () => row("Spender").querySelector("code").textContent;
+  const spenderId = () => {
+    const code = row("Spender").querySelector("code");
+    return isShown(code) ? visibleText(code) : "";
+  };
   // A warning in view that the allowance is unlimited.
   const unlimited = () => app.querySelectorAll(".callout.warn").some((w) => isShown(w) && /unlimited/i.test(visibleText(w)));
 

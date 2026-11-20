@@ -106,7 +106,7 @@ const qrDownload = () => dom.document.body.querySelectorAll(".receive-address-ac
 
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
-const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 
 // What Copy and Share give for a request, each value written here: the line a person reads, first, led by who asks,
 // holding the amount asked, exactly (none where any amount will do), the test network and the memo; then the exact
@@ -114,7 +114,8 @@ const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace
 function expectRequest(text, { amount = "", lux = null, name = null, network = "", memo = "", link }) {
   const [line = ""] = String(text).split("\n");
   expect(/(\S+)$/.exec(String(text))?.[1]).toBe(link);
-  if (amount) expect(line).toMatch(exactly(amount));
+  // The ask, in its own part of the line (before the memo): that amount alone, exactly; never 10.02 for 0.02.
+  if (amount) expect(line.split(" · ")[0].match(/(?:[−+-]\s*)?\d[\d.,]*\s*DUSK/g) ?? []).toEqual([amount]);
   else expect(line).not.toMatch(/\d\s*DUSK/);
   if (name) expect(line.slice(0, name.length + 1)).toBe(`${name} `);
   for (const value of [network, memo].filter(Boolean)) expect(line).toMatch(exactly(value));
@@ -448,7 +449,7 @@ describe("receive", () => {
     // pays, together on theirs; the test network.
     expect(written).toContain("0.03 DUSK");
     expect(written).toContain("Invoice 2026-114");
-    expect(written.filter((line) => exactly("26FCH7…Tck927").test(line))).toEqual([expect.stringMatching(/(?<![\w.-])sofiadesign\.dusk(?![\w-])/)]);
+    expect(written.filter((line) => exactly("26FCH7…Tck927").test(line))).toEqual(["To sofiadesign.dusk · 26FCH7…Tck927"]);
     expect(written.filter((line) => exactly("Testnet").test(line))).toHaveLength(1);
     // As an extra check, as the app lays them out (requestCaption).
     expect(written).toEqual(requestCaption({ lux: 30_000_000n, memo: "Invoice 2026-114", to: ACCOUNT, name: "sofiadesign.dusk", network: "Testnet" }).map(({ text }) => text));
