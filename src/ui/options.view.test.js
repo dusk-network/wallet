@@ -4,7 +4,6 @@ import { RECOVERY_WORDS_MISMATCH } from "@dusk-network/app-core/recovery-words";
 import { setAccountName } from "../shared/accountNames.js";
 import { clearAddressBook, listAddressBook } from "../shared/addressBook.js";
 import { endpointProblem } from "../shared/securityPolicy.js";
-import { walletLabel } from "../shared/wallets.js";
 import { HOLD_TO_SHOW_TEXT } from "./lib/pageAway.js";
 import { accessibleName, fakeEvent, installFakeDom, isShown, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
@@ -31,6 +30,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 // Settings as the extension draws it, where dApps connect; `{ app: true }`
@@ -84,8 +84,9 @@ const errorOf = (field) =>
     .filter((el) => el?.classList.contains("field-error") && isShown(el))
     .map((el) => el.textContent)
     .join("");
-// `text` exactly: no digit, point or comma just before it, nor a digit just after (0.0025 isn't 10.0025).
-const exactly = (text) => new RegExp("(?<![\\d.,])" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\d])");
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // A site's row in Settings, connected or earlier, by its host.
 const siteRow = (host) => dom.document.body.querySelectorAll(".settings-site").find((row) => visibleText(row.querySelector(".settings-site__host")) === host);
 // The row in Security that opens `route`, whatever it's called: each row pressed until one does.
@@ -368,40 +369,63 @@ describe("profile names", () => {
 describe("settings", () => {
   describe("a site's record", () => {
     const DAY = 86_400_000;
+    const MINUTE = 60_000;
     const AT = Date.UTC(2031, 0, 15, 12);
     const SITE = "https://app.example";
     const permissions = [{ origin: SITE, walletId: ACCOUNTS[0], accountIndex: 0, lastsMs: 7 * DAY, expiresAt: AT + 7 * DAY }];
+    // What it asked, newest first, a minute apart.
     const asked = [
-      { at: AT + 3, what: "contract_call", method: "swap\u202Eyenom", answer: "rejected" },
-      { at: AT + 2, what: "transfer", answer: "approved" },
-      { at: AT + 1, what: "sign_message", answer: "closed" },
+      { at: AT + 3 * MINUTE, what: "contract_call", method: "swap\u202Eyenom", answer: "rejected" },
+      { at: AT + 2 * MINUTE, what: "transfer", answer: "approved" },
+      { at: AT + MINUTE, what: "sign_message", answer: "closed" },
       { at: AT, what: "connect", answer: "approved" },
-      { at: AT - 1, what: "switch_network", answer: "expired" },
-      { at: AT - 2, what: "watch_nft", answer: "cancelled" },
-      { at: AT - 3, what: "transfer", answer: "failed" },
-      { at: AT - 4, what: "transfer", answer: "unconfirmed" },
-      { at: AT - 5, what: "contract_call", method: "depositETHToWithValue", asked: "Bridge to DuskEVM", answer: "approved" },
+      { at: AT - MINUTE, what: "switch_network", answer: "expired" },
+      { at: AT - 2 * MINUTE, what: "watch_nft", answer: "cancelled" },
+      { at: AT - 3 * MINUTE, what: "transfer", answer: "failed" },
+      { at: AT - 4 * MINUTE, what: "transfer", answer: "unconfirmed" },
+      { at: AT - 5 * MINUTE, what: "contract_call", method: "depositETHToWithValue", asked: "Bridge to DuskEVM", answer: "approved" },
     ];
-    const siteRecords = { [ACCOUNTS[0]]: { [SITE]: { lastUsedAt: AT + 60_000, asked } } };
+    const siteRecords = { [ACCOUNTS[0]]: { [SITE]: { lastUsedAt: AT + 4 * MINUTE, asked } } };
 
-    it("shows what a site asked with its hidden characters as codes, and a payment approved but not sent or not confirmed apart from one sent", async () => {
+    // By the test's own clock, in UTC: when it was last used, until when it's connected, and what it asked, when and how
+    // each was answered. Approved is approved; a payment not sent, or not confirmed, is said as that.
+    it("shows what a site asked, when and how it was answered, its hidden characters as codes, and when it was last used and is connected until", async () => {
+      vi.stubEnv("TZ", "UTC");
       await settings({ permissions, siteRecords });
       const row = siteRow("app.example");
-      // Each thing asked, in the record's order: what it was, and how it was answered.
+      const notes = [...row.children].filter((el) => el.classList.contains("settings-site__note")).map(visibleText);
+      const note = (label) => notes.find((text) => text.startsWith(label)) ?? "";
+      expect(notes).toHaveLength(2);
+      expect(note("Last used")).toMatch(exactly("Wed 15 Jan 2031, 12:04 UTC"));
+      expect(note("Connected until")).toMatch(exactly("Wed 22 Jan 2031, 12:00 UTC"));
+      // Each thing asked, in the record's order.
       const items = row.querySelectorAll(".settings-site__ask");
-      expect(items).toHaveLength(asked.length);
-      const partOf = (entry, part) => visibleText(items[asked.indexOf(entry)].querySelector(`.settings-site__${part}`));
+      const column = (part) => items.map((li) => visibleText(li.querySelector(`.settings-site__${part}`)));
+      expect(column("answer")).toEqual([
+        "Rejected",
+        "Approved",
+        "Window closed",
+        "Approved",
+        "Not answered in time",
+        "Ended before an answer",
+        "Approved, not sent",
+        "Approved, not confirmed",
+        "Approved",
+      ]);
+      expect(column("when")).toEqual([
+        "Wed 15 Jan 2031, 12:03 UTC",
+        "Wed 15 Jan 2031, 12:02 UTC",
+        "Wed 15 Jan 2031, 12:01 UTC",
+        "Wed 15 Jan 2031, 12:00 UTC",
+        "Wed 15 Jan 2031, 11:59 UTC",
+        "Wed 15 Jan 2031, 11:58 UTC",
+        "Wed 15 Jan 2031, 11:57 UTC",
+        "Wed 15 Jan 2031, 11:56 UTC",
+        "Wed 15 Jan 2031, 11:55 UTC",
+      ]);
       // Nothing a site chose reads as something else.
       expect(row.textContent).not.toContain("\u202E");
-      expect(partOf(asked.find((a) => a.method === "swap\u202Eyenom"), "what")).toMatch(/swap.*yenom/);
-      // A payment approved and sent, one approved and not sent, and one that may not have gone: each as it was.
-      const payment = (answer) => partOf(asked.find((a) => a.what === "transfer" && a.answer === answer), "answer");
-      expect(payment("approved")).toMatch(/approved/i);
-      expect(payment("approved")).not.toMatch(/\bnot\b/i);
-      expect(payment("failed")).toMatch(/not sent/i);
-      expect(payment("failed")).not.toMatch(/confirmed/i);
-      expect(payment("unconfirmed")).toMatch(/not confirmed/i);
-      expect(payment("unconfirmed")).not.toMatch(/sent/i);
+      expect(column("what")[0]).toMatch(/swap.*yenom/);
     });
 
     it("sets how long from its Details, and new sites' on their own", async () => {
@@ -711,19 +735,20 @@ describe("the network", () => {
   it("refuses plain http to another computer, as a site's switch does, and takes it on this one", async () => {
     const testnet = { nodeUrl: "https://testnet.nodes.dusk.network", proverUrl: "https://testnet.provers.dusk.network", archiverUrl: "https://testnet.nodes.dusk.network" };
     const saved = (view) => view.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SET_NODE_URL");
-    for (const [name, typed, what] of [
-      ["Prover URL", "http://hostile-node.example", "prover"],
-      ["Archiver URL", "http://192.168.1.20:8080", "archiver"],
-      ["Node URL", "https://user:pass@node.example", "node"],
+    for (const [name, typed, what, why] of [
+      ["Prover URL", "http://hostile-node.example", "prover", /\bprover URL must start with https:\/\//],
+      ["Archiver URL", "http://192.168.1.20:8080", "archiver", /\barchiver URL must start with https:\/\//],
+      ["Node URL", "https://user:pass@node.example", "node", /\bInvalid node URL\b/],
     ]) {
       const view = await settings(testnet);
       typeInto(field(name), typed);
       saveButton().click();
       await settle();
-      // Why, as the wallet's own rule says it (securityPolicy.js), and nothing saved.
-      const problem = endpointProblem(typed, what);
-      expect(problem, typed).not.toBe("");
-      expect(shownText(view.section("Network")), typed).toContain(problem);
+      // Why, as the one alert under the addresses: which address, and what it needs. Nothing saved.
+      const alerts = view.section("Network").querySelectorAll("[role=alert]").filter(isShown).map((n) => n.textContent);
+      expect(alerts, typed).toEqual([expect.stringMatching(why)]);
+      // As the wallet's own rule says it (securityPolicy.js).
+      expect(alerts, typed).toEqual([endpointProblem(typed, what)]);
       expect(saved(view)).toEqual([]);
     }
 
@@ -776,9 +801,8 @@ describe("wallets", () => {
       { origin: "https://shop.example", walletId: W2[0], accountIndex: 1 },
     ];
     const view = await drawn({ wallets: fresh(), permissions });
-    const [first] = fresh();
     const walletOf = (host) => visibleText(siteRow(host).querySelector(".settings-site__wallet"));
-    expect(walletOf("app.example")).toBe(walletLabel(first));
+    expect(walletOf("app.example")).toBe("Wallet 1");
     // Another wallet's site: that wallet, Savings, then the profile it sees there.
     expect(walletOf("shop.example")).toMatch(/^Savings\b.*\bRainy day$/);
     // The open wallet's site changes profile here; another's doesn't.
@@ -887,7 +911,10 @@ describe("security in the app on a phone", () => {
     const { INCOMING_NOTE } = await import("./popup/views/options.js");
     const toggle = () => dom.document.body.querySelector("#incoming-notices");
     await vi.waitFor(() => expect(toggle().checked).toBe(true));
-    expect(dom.document.body.querySelector("#incoming-note").textContent).toBe(INCOMING_NOTE);
+    // How often Android looks for money that came in: every 15 minutes.
+    const note = dom.document.body.querySelector("#incoming-note").textContent;
+    expect(note).toMatch(exactly("15 minutes"));
+    expect(note).toBe(INCOMING_NOTE);
 
     toggle().checked = false;
     toggle().dispatchEvent(fakeEvent("change"));
@@ -1063,7 +1090,8 @@ describe("security in the app on a phone", () => {
       boxes().forEach((input, i) => typeInto(input, typed[i]));
       mainButton(body).click();
       await settle();
-      expect([shownErrors(body), body.querySelector(".srp-grid"), boxes()]).toEqual([[RECOVERY_WORDS_MISMATCH], null, []]);
+      expect([shownErrors(body), body.querySelector(".srp-grid"), boxes()]).toEqual([[expect.stringMatching(/\bdoesn['’]t match\b/i)], null, []]);
+      expect(shownErrors(body)).toEqual([RECOVERY_WORDS_MISMATCH]);
       // Try again: the same three, empty, with nothing asked of the wallet till Check.
       const before = asked.length;
       mainButton(body).click();

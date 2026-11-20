@@ -17,7 +17,6 @@ import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { numbersText } from "./components/SafeText.js";
 import { SWITCH_NODE_FACT } from "./notification/summary.js";
 import { shortAddress } from "./lib/strings.js";
-import { txStatusWord } from "./popup/views/txDisplay.js";
 import { dateText } from "./lib/time.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 
@@ -113,8 +112,9 @@ const decision = (decision) => mocks.sent.find((m) => m.type === "DUSK_PENDING_D
 
 const TESTNET = "https://testnet.nodes.dusk.network";
 
-// A figure exactly as written, never the head or tail of a longer one: 1.0025 not in 11.0025, 5 DUSK not in 0.5 or 15 DUSK.
-const exactly = (text) => new RegExp(`(?<![\\d.,])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 
 // A site's public transfer of 1 DUSK to `to` on Testnet, as rpc.js passes it on.
 const transfer = (to, over = {}) => ({
@@ -267,6 +267,7 @@ describe("connect approval", () => {
     // Until it's disconnected: no date, nor a number of days.
     expect(seesLine()).not.toContain(dateText(end));
     expect(seesLine()).not.toMatch(/\bdays?\b/);
+    expect(seesLine()).toMatch(/until you disconnect/i);
   });
 
   it("says what the site sees: the public account, and the shielded address only where it asks for it", async () => {
@@ -275,6 +276,9 @@ describe("connect approval", () => {
     await render("connect", { requestedProfiles: true });
     expect(facts()).toMatch(/public/i);
     expect(facts()).not.toMatch(/shielded/i);
+    // It can't move funds without your approval: said, and never the other way.
+    expect(facts()).toMatch(/without your approval/i);
+    expect(facts()).not.toMatch(/\bcan move\b/i);
     // The shielded address, asked for by a site connected already: that alone is new.
     await render("connect", { requestedProfiles: true, shieldedReceiveAddress: true, currentAccountIndex: 0, currentGrants: {} });
     expect(facts()).toMatch(/shielded/i);
@@ -823,6 +827,9 @@ describe("a site's request to pay the bridge's account", () => {
   const sub = () => visibleText(head().querySelector(".ap-sub"));
   // The part of that line that says what arrives, by its own word.
   const arrives = () => sub().split(" · ").find((part) => /arriv/i.test(part)) ?? "";
+  // Every part that says what arrives: one, and never a second promising an amount.
+  const arrivals = () => sub().split(" · ").filter((part) => /arriv/i.test(part));
+  const feePart = () => sub().split(" · ").find((part) => /fee/i.test(part)) ?? "";
   // What the bridge's rules (bridgeCalls.js) make of a payment: its line, and its warnings by kind,
   // "off" while the bridge doesn't pay out there, "fee" where its fee takes it all.
   const service = (params) => bridgeServiceTransfer(params);
@@ -861,17 +868,23 @@ describe("a site's request to pay the bridge's account", () => {
     await render("send_tx", two);
     expect([service(two).feeLux, service(two).arrivesLux]).toEqual([1_000_000_000n, 1_000_000_000n]);
     expect(sub()).toBe(bridgeServiceLine(service(two)));
+    expect(feePart()).toMatch(exactly("1 DUSK"));
+    expect(arrivals()).toHaveLength(1);
+    expect(arrives()).toMatch(exactly("1 DUSK"));
 
     const big = transfer(mainnet.account, { amount: "200001000000000", memo: EVM, ...onMainnet });
     await render("send_tx", big);
     expect(sub()).toBe(bridgeServiceLine(service(big)));
     expect(arrives()).toMatch(exactly("200,000 DUSK"));
+    expect(feePart()).toMatch(exactly("1 DUSK"));
 
     // A memo that's no address there: nothing arrives, as its warning says.
     const noAddress = transfer(mainnet.account, { amount: "2000000000", memo: "Order 1042", ...onMainnet });
     await render("send_tx", noAddress);
     expect(service(noAddress).recipientOk).toBe(false);
     expect(sub()).toBe(bridgeServiceLine(service(noAddress)));
+    expect(arrivals()).toHaveLength(1);
+    expect(arrives()).not.toMatch(/\d/);
     expect(kinds(noAddress)).toEqual([]);
     expect(warns()).toHaveLength(1);
 
@@ -879,9 +892,13 @@ describe("a site's request to pay the bridge's account", () => {
     await render("send_tx", all);
     expect(service(all).arrivesLux).toBe(0n);
     expect(sub()).toBe(bridgeServiceLine(service(all)));
+    expect(arrivals()).toHaveLength(1);
+    expect(arrives()).not.toMatch(/\d/);
     expect(kinds(all)).toEqual(["fee"]);
     expect(warns()).toEqual(titles(all));
     expect(app.querySelector(".callout.warn .muted").textContent).toBe(rules(all)[0].text);
+    // The 1 DUSK fee that takes it all.
+    expect(app.querySelector(".callout.warn .muted").textContent).toMatch(exactly("1 DUSK"));
     // Reject stays the user's choice.
     expect(approve().disabled).toBe(false);
   });
@@ -893,10 +910,13 @@ describe("a site's request to pay the bridge's account", () => {
     expect(kinds(params)).toEqual(["off"]);
     expect(warns()).toEqual(titles(params));
     expect(app.querySelector(".callout.warn .muted").textContent).toBe(rules(params)[0].text);
-    // Nothing arrives there while it isn't running: no amount at all where it says what arrives.
+    // Nothing arrives there while it isn't running: one part says what arrives, with no amount, and nothing else
+    // promises one.
     expect(sub()).toBe(bridgeServiceLine(service(params)));
-    expect(arrives()).not.toBe("");
+    expect(arrivals()).toHaveLength(1);
+    expect(arrives()).toMatch(/nothing/i);
     expect(arrives()).not.toMatch(/\d/);
+    expect(feePart()).toMatch(exactly("1 DUSK"));
   });
 
   it.each([
@@ -1271,6 +1291,10 @@ describe("a site's token call, read with the wallet's token drivers", () => {
   const amount = () => visibleText(head().querySelector(".ap-amount"));
   // The box that holds Approve back until MAX is typed into it.
   const maxBox = () => app.querySelector(".callout.warn input");
+  // The spender's ID, alone.
+  const spenderId = () => row("Spender").querySelector("code").textContent;
+  // A warning in view that the allowance is unlimited.
+  const unlimited = () => app.querySelectorAll(".callout.warn").some((w) => isShown(w) && /unlimited/i.test(visibleText(w)));
 
   it("shows a standard transfer's amount exactly, above 2^53 too, and names its recipient", async () => {
     mocks.answers.DUSK_UI_RECIPIENT_NAME = async () => ({ ok: true, result: "shop.dusk" });
@@ -1293,8 +1317,11 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     expect(title()).toMatch(/allow|spend/i);
     expect(transferTitle).not.toMatch(/allow|spend/i);
     expect(amount()).toBe("18,446,744,073.709551615 TKN");
-    expect(visibleText(row("Spender"))).toContain(ROUTER);
+    expect(spenderId()).toBe(ROUTER);
+    expect(visibleText(row("Spender"))).toMatch(/contract/i);
     expect(row("Units").textContent).toBe("18446744073709551615");
+    // Unlimited, said where it shows, with Approve waiting for MAX.
+    expect(unlimited()).toBe(true);
     expect(maxBox()).not.toBeNull();
     expect(approve().disabled).toBe(true);
   });
@@ -1331,7 +1358,8 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     await render("send_tx", tokenCall("sozu_staked_dusk", "approve", `["${pool}","18446744073709551615"]`));
     expect(amount()).toBe("18,446,744,073.709551615 TKN");
     expect(row("Units").textContent).toBe("18446744073709551615");
-    expect(visibleText(row("Spender"))).toContain(pool);
+    expect(spenderId()).toBe(pool);
+    expect(unlimited()).toBe(true);
     expect(approve().disabled).toBe(true);
     typeInto(maxBox(), "MAX");
     expect(approve().disabled).toBe(false);
@@ -1431,8 +1459,7 @@ describe("contract calls", () => {
     expect(app.querySelector(".ap-opaque")).not.toBeNull();
     expect(head().querySelector(".ap-tag")).toBeNull();
     expect(row("Method").textContent).toBe("stake");
-    expect(row("Call data").textContent).toContain("sha256=6e340b9cffb3…");
-    expect(row("Call data").textContent).toMatch(exactly("1 bytes"));
+    expect(row("Call data").textContent).toBe("1 bytes · sha256=6e340b9cffb3…17afa01d");
   });
 
   it("reads a DuskEVM deposit: its recipient and amount on top, the call data's hash and the site's words under Details", async () => {
@@ -1450,9 +1477,8 @@ describe("contract calls", () => {
     expect(folded(row("DuskEVM recipient"))).toBe(false);
     expect(row("Amount").textContent).toBe("0.1 DUSK");
     // The hash the bridge's review page shows, to match against.
-    expect(row("Call data").textContent).toContain(`sha256=${shoot.sha256.slice(0, 12)}…${shoot.sha256.slice(-8)}`);
-    expect(row("Call data").textContent).toContain("2f64b19f5ac0…731c7c2a");
-    expect(row("Call data").textContent).toMatch(exactly("40 bytes"));
+    expect(row("Call data").textContent).toBe("40 bytes · sha256=2f64b19f5ac0…731c7c2a");
+    expect(shoot.sha256).toMatch(/^2f64b19f5ac0.*731c7c2a$/);
     // The bytes and the site's own words, as they came.
     const raw = app.querySelectorAll("details").find((d) => d.querySelector("code")?.textContent === shoot.args);
     expect(raw).toBeTruthy();
@@ -1860,7 +1886,7 @@ describe("typed-data approval", () => {
     expect(value("Domain name")).toBe("Shop");
     expect(value("Domain version")).toBe("1");
     expect(value("Chain ID")).toBe("dusk:2");
-    expect(value("Verifying contract")).toMatch(/32 zero bytes/);
+    expect(value("Verifying contract")).toMatch(exactly("32 zero bytes"));
     expect(value("Primary type")).toBe("Order");
     expect([value("item · string"), value("quantity · uint64")]).toEqual(["Dusk hoodie", "2"]);
     // The whole request, as signed, and its digest.
@@ -2045,7 +2071,7 @@ describe("an approved send on a phone", () => {
     for (const hear of mocks.heard) hear({ type: "DUSK_APPROVAL_SEND_FAILED", rid: "r1", error: { message: "NetworkError when attempting to fetch resource." } });
     await settle();
     // Not sent, said so, and one way back to the site.
-    expect(visibleText(app)).toContain(txStatusWord("not_sent"));
+    expect(visibleText(app)).toMatch(/\bNot sent\b/);
     expect(bar().querySelectorAll("button")).toHaveLength(1);
     bar().querySelector("button").click();
     await settle();

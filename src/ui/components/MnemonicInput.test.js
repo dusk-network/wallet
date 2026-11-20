@@ -50,8 +50,14 @@ const leave = (field, to = null) => field.dispatchEvent(fakeEvent("focusout", { 
 const showButton = (input) => input.el.querySelector(".srp-show");
 // The numbers a sentence names, in order: the words it means, or a count.
 const numbersIn = (text) => text.match(/\d+/g) ?? [];
-// `text` exactly: no digit, point or comma just before it, nor a digit just after (13 words isn't 113 words).
-const exactly = (text) => new RegExp("(?<![\\d.,])" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\d])");
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+// Says a phrase isn't valid, in its key words ("isn't a valid recovery phrase"), and never that it is one.
+const notValid = (text, name) => {
+  expect(text, name).toMatch(/\b(?:isn['’]t|is not) a valid\b|\binvalid\b/i);
+  expect(text, name).not.toMatch(/\bis a valid\b/i);
+};
 
 describe("on a phone", () => {
   // The rule ui.css has for `selector`, its declarations.
@@ -299,7 +305,8 @@ describe("the recovery phrase's word boxes", () => {
     const blocked = new DOMException("Clipboard write was blocked", "NotAllowedError");
     dom.clipboard.writeText.mockRejectedValueOnce(blocked).mockRejectedValueOnce(blocked);
     paste(box(1), TWELVE);
-    await vi.waitFor(() => expect(said()).toBe(CLIPBOARD_KEPT_TEXT));
+    await vi.waitFor(() => expect(said()).toMatch(/\bstill on the clipboard\b/i));
+    expect(said()).toBe(CLIPBOARD_KEPT_TEXT);
     expect(words()).toEqual(TWELVE.split(" "));
 
     // No clipboard to write to at all, as in an old WebView: said too.
@@ -376,7 +383,7 @@ describe("the recovery phrase's word boxes", () => {
     }
     // Every word the list's, as many as a phrase has, its checksum wrong: not a valid phrase, naming no word or count.
     const checksum = said(() => paste(box(1), NO_CHECKSUM));
-    expect(checksum).toMatch(/valid/i);
+    notValid(checksum);
     expect(numbersIn(checksum)).toEqual([]);
     expect(said(() => paste(box(1), OTHER))).toBe("");
   });
@@ -393,7 +400,7 @@ describe("the recovery phrase's word boxes", () => {
     // Refused for its checksum: not a valid phrase, naming no word or count.
     for (const name of ["wrong checksum, 12 words", "wrong checksum, 24 words"]) {
       const told = said(() => paste(box(1), verdict(name)));
-      expect(told, name).toMatch(/valid/i);
+      notValid(told, name);
       expect(numbersIn(told), name).toEqual([]);
     }
   });
@@ -422,7 +429,7 @@ describe("the recovery phrase's word boxes", () => {
 
     typeInto(box(12), "abandon");
     const checksum = said(() => leave(box(12), null));
-    expect(checksum).toMatch(/valid/i);
+    notValid(checksum);
     expect(numbersIn(checksum)).toEqual([]);
     // Typing again takes back what was said.
     expect(said(() => typeInto(box(12), "yellow"))).toBe("");
@@ -441,7 +448,7 @@ describe("the recovery phrase's word boxes", () => {
     const { input, box, said } = mount();
     expect(input.problem()).toBe("");
     const checksum = said(() => paste(box(1), NO_CHECKSUM));
-    expect(checksum).toMatch(/valid/i);
+    notValid(checksum);
     expect(input.problem()).toBe(checksum);
     paste(box(1), OTHER);
     expect([input.problem(), input.getMnemonic()]).toEqual(["", OTHER]);

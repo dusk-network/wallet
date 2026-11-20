@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
 import { installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
-import { shortfallText } from "./lib/shortfall.js";
 import { assetTokenView, assetsOwner, assetsSectionsView } from "./popup/views/assets.js";
 import { convertConfirmView, convertFormView } from "./popup/views/convert.js";
 import { homeView } from "./popup/views/home.js";
@@ -38,8 +37,6 @@ const overview = (over = {}) => ({
   ...over,
 });
 const HIDDEN = { hideBalances: true };
-// What a form says under its amount where the public balance can't pay it, its figure hidden whatever it is.
-const TOO_MUCH = shortfallText({ missingLux: 1n, hidden: true });
 
 // The watched token, 123.45 TKN, with its balance just read.
 const assets = () => ({
@@ -79,8 +76,18 @@ async function show(nodes) {
 }
 
 const button = (text) => body.querySelectorAll("button").find((b) => b.textContent === text);
-// A value on its own in a sentence: no digit, point or comma before it, no digit after it.
-const exactly = (s) => new RegExp(`(?<![\\d.,])${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+// What a form says under its amount where the public balance can't pay it: how much short, its figure hidden, and of
+// which balance.
+const tooMuch = (el) => {
+  const said = visibleText(el);
+  expect(said).toMatch(exactly("•••• DUSK"));
+  expect(said).not.toMatch(/\d/);
+  expect(said).toMatch(/public balance/i);
+  expect(said).not.toMatch(/shielded/i);
+};
 // Everything a screen gives away: all its text, shown or not, and each element's title and aria-label.
 const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
 // None of these figures anywhere on the screen.
@@ -187,7 +194,7 @@ describe("hidden balances", () => {
     typeInto(body.querySelector("input.amount-field__input"), "5000");
     body.querySelector("button.btn-primary").click();
     await settle();
-    expect(body.querySelector(".amount-field__error").textContent).toBe(TOO_MUCH);
+    tooMuch(body.querySelector(".amount-field__error"));
     expect(state.route).toBe("convert");
 
     state.draft = { kind: TX_KIND.UNSHIELD };
@@ -258,7 +265,7 @@ describe("hidden balances", () => {
 
     // Too much: the check holds, under the field, and doesn't give the balance away.
     typeInto(body.querySelector("input.amount-field__input"), "5000");
-    expect(body.querySelector(".amount-field__error").textContent).toBe(TOO_MUCH);
+    tooMuch(body.querySelector(".amount-field__error"));
     expect(act.showToast).not.toHaveBeenCalled();
 
     // Profile 2's stake, which Profile 1 owns: staked, rewards and locked hidden.

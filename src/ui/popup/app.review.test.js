@@ -53,14 +53,15 @@ const confirmOf = (root) => root.querySelector(".review-actions button");
 const question = (t) => t.dom.document.querySelector("[role=alertdialog]");
 const stay = (t) => question(t).querySelector("[data-back]").click();
 const leave = (t) => question(t).querySelectorAll("button").find((b) => !b.hasAttribute("data-back")).click();
-// How a payment's own page says it stands (txDetails.js tx-hero-status): its tone, and its word, which a test
-// compares with the wallet's own (txStatusWord); null while that page isn't drawn.
+// How a payment's own page says it stands (txDetails.js tx-hero-status): its tone, and its word ("Completed",
+// "Failed"...); null while that page isn't drawn.
 const paymentStatus = (t) => {
   const el = t.app.querySelector(".tx-hero-status");
   return el ? { ok: el.classList.contains("is-ok"), word: el.textContent } : null;
 };
-// A figure as written, whole: 4,831,109 is no 14,831,109, 0.01 DUSK no 10.01 DUSK, 07:02 no 17:02.
-const exactly = (s) => new RegExp(`(?<![\\d.,])${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // What a row says, found by its label (a string, or a pattern for a label that may be worded otherwise); null for none.
 const rowValue = (root, label) => {
   const row = root.querySelectorAll(".kv").find((kv) => {
@@ -492,13 +493,14 @@ describe("a request's Send", () => {
     await t.render({ forceRefresh: true });
     await flush();
     expect([t.state.route, ...values()]).toEqual(["send", "", "", ""]);
-    // Saying why, the only thing said under the fields, as the wallet says it: the request's network, and the one
-    // it's on, each in its place.
+    // Saying why, the only thing said under the fields: the request's network, Testnet, and the one it's on, Mainnet,
+    // each in its place; and as the wallet's own words have it.
+    const said = t.app.querySelectorAll(".field-error").map(visibleText).filter(Boolean);
+    expect(said).toHaveLength(1);
+    expect(said[0]).toMatch(/request[^.]*Testnet/i);
+    expect(said[0]).toMatch(/you[^.]*Mainnet/i);
     const { chainMismatchText } = await import("./views/send.js");
-    const why = chainMismatchText("dusk:2", "https://nodes.dusk.network");
-    expect(why).toMatch(/request[^.]*Testnet/i);
-    expect(why).toMatch(/you[^.]*Mainnet/i);
-    expect(t.app.querySelectorAll(".field-error").map(visibleText).filter(Boolean)).toEqual([why]);
+    expect(said).toEqual([chainMismatchText("dusk:2", "https://nodes.dusk.network")]);
   });
 });
 
@@ -734,7 +736,7 @@ describe("coming back to the wallet during a payment", () => {
       }
       return undefined;
     });
-    // The wallet's own words for that status and that news.
+    // The wallet's own words for that status and that news, checked besides the words themselves.
     const { txStatusWord } = await import("./views/txDisplay.js");
     const { WENT_AFTER_ALL_TEXT } = await import("./views/sent.js");
     const toast = () => t.dom.document.body.querySelector(".toast")?.textContent ?? "";
@@ -746,14 +748,19 @@ describe("coming back to the wallet during a payment", () => {
     t.open = { ...t.open, txs: [record] };
     await t.render({ forceRefresh: true });
     await flush();
+    // Listed nowhere: no row of it, nor a word that it's not sent yet.
+    expect(t.app.querySelectorAll(".tx-row")).toEqual([]);
+    expect(t.app.textContent).not.toContain("Not sent yet");
     expect(t.app.textContent).not.toContain(txStatusWord("unsent"));
     await back();
     expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
-    expect(toast()).not.toContain(WENT_AFTER_ALL_TEXT);
+    expect(toast()).not.toMatch(/went out after all/i);
     arrived = true;
     await back();
     expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH, HASH]);
-    await vi.waitFor(() => expect(toast()).toContain(WENT_AFTER_ALL_TEXT));
+    // Then said: it went out after all.
+    await vi.waitFor(() => expect(toast()).toMatch(/went out after all/i));
+    expect(toast()).toContain(WENT_AFTER_ALL_TEXT);
   });
 
   it("looks the payment up by its ID, and says Completed with its real fee, though nothing was heard while away", async () => {
@@ -882,9 +889,8 @@ describe("the app on a phone", () => {
     await flush();
     expect(t.asked("DUSK_UI_TX_NOTICED").at(-1)).toEqual(expect.objectContaining({ hash: HASH, token: TOKEN, status: "executed", blockHeight: "4831109" }));
     expect(t.state.txDetailHash).toBe(HASH);
-    // Completed, as the notice knew it, never Not confirmed while the node can't be asked.
-    const { txStatusWord } = await import("./views/txDisplay.js");
-    expect(paymentStatus(t)).toEqual({ ok: true, word: txStatusWord("executed") });
+    // Completed, as the notice knew it, never Not confirmed (nor Failed) while the node can't be asked.
+    expect(paymentStatus(t)).toEqual({ ok: true, word: "Completed" });
     opened = { hash: "" };
   });
 
@@ -925,11 +931,11 @@ describe("the app on a phone", () => {
     const t = await popupOn("sent", { addressBook: { loaded: true, items: [] }, sent: sent() }, answer, { tauri: bridge });
     t.open = { ...t.open, txs: [record] };
     await t.render({ forceRefresh: true });
-    // The wallet's own words for Completed, and for a toast that a payment is still pending.
-    const { txStatusWord } = await import("./views/txDisplay.js");
+    // The payment's page as it says Completed (never Failed, nor Not confirmed); and a toast that a payment is still
+    // pending, in those words or the wallet's own for it.
+    const completed = { ok: true, word: "Completed" };
     const { txStatusToast } = await import("./txToast.js");
-    const completed = { ok: true, word: txStatusWord("executed") };
-    const stillPending = txStatusToast(null, "unknown").parts.at(-1).trim();
+    const stillPending = (text) => /still pending/i.test(text) || text.includes(txStatusToast(null, "unknown").parts.at(-1).trim());
     // What shows each moment: the Sent screen's phase and its current step, or the payment's own status; and the toasts.
     const shown = [];
     const now = () => ({
@@ -941,7 +947,7 @@ describe("the app on a phone", () => {
     // Never Not confirmed (its own phase) or taking long: the Sent screen looks the payment up; its own page says
     // Completed; and no toast says it's still pending.
     const wrong = (m) =>
-      m.toasts.some((text) => text.includes(stillPending)) ||
+      m.toasts.some(stillPending) ||
       (m.sent !== null && (m.sent !== "sent" || !/look/i.test(m.step))) ||
       (m.payment !== null && (m.payment.ok !== completed.ok || m.payment.word !== completed.word));
     const leaveAndComeBack = async (how) => {
@@ -1071,10 +1077,9 @@ describe("the app on a phone", () => {
     await flush();
     expect(t.state.route).toBe("sent");
 
-    // Its own: the payment's page, Completed, while the wallet's word still waits; the Sent screen, looking it up
-    // again, gone.
-    const { txStatusWord } = await import("./views/txDisplay.js");
-    const completed = { ok: true, word: txStatusWord("executed") };
+    // Its own: the payment's page, Completed (never Failed), while the wallet's word still waits; the Sent screen,
+    // looking it up again, gone.
+    const completed = { ok: true, word: "Completed" };
     opened = { hash: HASH, outcome: "executed", block: 4851400, token: TOKEN, ours: true };
     await leaveAndComeBack();
     await vi.waitFor(() => expect(paymentStatus(t)).toEqual(completed));
@@ -1507,16 +1512,19 @@ describe("a payment held as its account sent something else while it waited", ()
     t.open = { ...t.open, waitingSends: [record] };
     await t.render({ forceRefresh: true });
     await flush();
-    // The wallet's own words for it.
+    // What its step says: that it checks what the account sent ("Checking what your account sent…"), in the
+    // wallet's own words too.
     const { CHECKING_MEANWHILE_TEXT } = await import("../lib/waiting.js");
+    const checks = () => t.app.querySelectorAll(".step .step-sub").map((sub) => sub.textContent).filter((text) => /checking/i.test(text));
     const shown = () => [
-      t.app.querySelectorAll(".step .step-sub").some((sub) => sub.textContent === CHECKING_MEANWHILE_TEXT),
+      checks().length === 1,
       ...["Send it too", "Don't send"].map((text) => t.app.querySelectorAll("button").find((b) => b.textContent === text)?.disabled),
     ];
     later = Promise.withResolvers();
     t.deliver({ type: "DUSK_UI_SEND_WAITING", sendId: "s1", waits: false, held: true });
     await flush();
     expect([t.state.route, ...shown()]).toEqual(["sent", true, true, true]);
+    expect(checks()).toEqual([CHECKING_MEANWHILE_TEXT]);
     // The overview that holds it, read: its answers.
     later.resolve({ ...t.open, waitingSends: [{ ...record, held: true }] });
     later = null;

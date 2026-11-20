@@ -35,10 +35,13 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
   const mainnet = service(networks.mainnet);
   const testnet = service(networks.testnet);
   const EVM = "0x" + "ab".repeat(20);
-  // A figure exactly as written, never the head or tail of a longer one (1 DUSK not in 11 or 21 DUSK).
-  const exactly = (text) => new RegExp(`(?<![\\d.,])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
-  // A line's part, by the word that says what it is: the fee, or what arrives.
+  // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+  // more digits, letters or a decimal part (1 DUSK ≠ 11 or 21 DUSK, 0.000000001 ≠ 10.000000001).
+  const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+  // A line's part, by the word that says what it is: what's sent, the fee, or what arrives.
   const part = (line, word) => line.split(" · ").find((p) => word.test(p)) ?? "";
+  // Every part that says what arrives: one, never a second that promises an amount.
+  const arrivals = (line) => line.split(" · ").filter((p) => /arriv/i.test(p));
 
   it("are the networks' service routes: the account, the 1 DUSK fee and the chain, and testnet's isn't running", () => {
     expect([mainnet.feeLux, testnet.feeLux]).toEqual([1_000_000_000n, 1_000_000_000n]);
@@ -49,8 +52,10 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
   it("say the fee and what arrives, in one line", () => {
     const paid = bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "2000000000" });
     expect(paid).toMatchObject({ chain: "BNB Smart Chain", network: "mainnet", recipientOk: true, running: true, sentLux: 2_000_000_000n, feeLux: 1_000_000_000n, arrivesLux: 1_000_000_000n });
-    // The 1 DUSK fee, and the 1 DUSK that arrives, each in its own part.
+    // The 2 DUSK sent, the 1 DUSK fee and the 1 DUSK that arrives, each in its own part.
+    expect(part(bridgeServiceLine(paid), /sent/i)).toMatch(exactly("2 DUSK"));
     expect(part(bridgeServiceLine(paid), /fee/i)).toMatch(exactly("1 DUSK"));
+    expect(arrivals(bridgeServiceLine(paid))).toHaveLength(1);
     expect(part(bridgeServiceLine(paid), /arriv/i)).toMatch(exactly("1 DUSK"));
     expect(bridgeServiceWarnings(paid)).toEqual([]);
 
@@ -64,12 +69,14 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
     const lastLux = bridgeServiceLine(bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "1000000001" }));
     expect(part(lastLux, /arriv/i)).toMatch(exactly("0.000000001 DUSK"));
     expect(part(lastLux, /fee/i)).toMatch(exactly("1 DUSK"));
+    expect(part(lastLux, /sent/i)).toMatch(exactly("1.000000001 DUSK"));
 
     // Without an address there in the memo, nothing arrives, whatever the amount.
     for (const memo of [undefined, "", "Order 1042", EVM.replace(/[a-f]/, (c) => c.toUpperCase())]) {
       const line = bridgeServiceLine(bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo, amount: "2000000000" }));
       expect(line).toContain(noBridgeRecipientText("BNB Smart Chain"));
       expect(part(line, /fee/i)).toMatch(exactly("1 DUSK"));
+      expect(arrivals(line)).toHaveLength(1);
       expect(part(line, /arriv/i)).not.toMatch(/\d/);
     }
   });
@@ -80,8 +87,11 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
     // The fee, and nothing that arrives on Sepolia: no amount at all where it says what arrives.
     const line = bridgeServiceLine(paid);
     expect(part(line, /fee/i)).toMatch(exactly("1 DUSK"));
+    // One part says what arrives: nothing, on Sepolia; none promises an amount.
+    expect(arrivals(line)).toHaveLength(1);
+    expect(part(line, /arriv/i)).toMatch(/nothing/i);
     expect(part(line, /arriv/i)).toMatch(/Sepolia/);
-    expect(part(line, /arriv/i)).not.toMatch(/\d/);
+    expect(arrivals(line).join(" ")).not.toMatch(/\d/);
     // Another account, or another network's, is no bridge transfer.
     expect(bridgeServiceTransfer({ nodeUrl: TESTNET, to: mainnet.account, amount: "5000000000" })).toBeNull();
   });

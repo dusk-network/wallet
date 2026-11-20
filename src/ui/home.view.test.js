@@ -1,17 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { NOT_SENT_TEXT, SENT_MEANWHILE_TEXT } from "../shared/waitingSends.js";
 import { installFakeDom, visibleText } from "./testing/fakeDom.js";
-import { CHECKING_MEANWHILE_TEXT } from "./lib/waiting.js";
 import { homeView } from "./popup/views/home.js";
-import { NOT_SENT_CHOSEN_TEXT, UNCLEAR_TEXT } from "./popup/views/sent.js";
 
 // The token and NFT cards load on their own; the balance card is what matters here.
 vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// A value on its own in a sentence: no digit, point or comma before it, no digit after it.
-const exactly = (s) => new RegExp(`(?<![\\d.,])${escape(s)}(?!\\d)`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // Everything a screen gives away: all its text, shown or not, and each element's title and aria-label.
 const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
 
@@ -43,18 +41,18 @@ describe("home balance", () => {
     };
 
     const staked = draw({ lux: "1790000000", native: "0", sozu: "1790000000" });
-    expect([staked.label, staked.amount]).toEqual([expect.stringMatching(/total/i), "2.9405 DUSK"]);
+    expect([staked.label, staked.amount]).toEqual(["Total balance", "2.9405 DUSK"]);
     expect(staked.split).toEqual({ Public: "1.1505 DUSK", Shielded: "0 DUSK", Staked: "1.79 DUSK" });
 
     // Nothing staked: no line for it, and the total is still the total.
     const none = draw({ lux: "0", native: "0", sozu: "0" });
-    expect([none.label, none.amount]).toEqual([expect.stringMatching(/total/i), "1.1505 DUSK"]);
+    expect([none.label, none.amount]).toEqual(["Total balance", "1.1505 DUSK"]);
     expect(none.split).toEqual({ Public: "1.1505 DUSK", Shielded: "0 DUSK" });
 
     // The stake couldn't be read: the sum shown isn't called the total.
     const unread = draw(null);
+    expect([unread.label, unread.amount]).toEqual(["Public and shielded", "1.1505 DUSK"]);
     expect(unread.label).not.toMatch(/total/i);
-    expect(unread.amount).toBe("1.1505 DUSK");
   });
 
   // Chen's and Lena's, on phones: "Shielded · Sync failed 0 DUSK" opened with no signal, and "Shielded · Not synced
@@ -71,11 +69,11 @@ describe("home balance", () => {
     };
     // Read: 0 is 0, and the sum shown counts it.
     const read = draw({ shieldedSync: { state: "done", progress: 1, notes: 0 } });
-    expect([read.value, read.label]).toEqual(["0 DUSK", expect.stringMatching(/shielded/i)]);
-    // Not read now: no figure, and no sum shown counts it.
+    expect([read.value, read.label]).toEqual(["0 DUSK", "Public and shielded"]);
+    // Not read now: no figure, and the sum shown is the public balance alone.
     const unread = (view) => {
       expect(view.value).not.toMatch(/\d/);
-      expect(view.label).not.toMatch(/shielded/i);
+      expect(view.label).toBe("Public balance");
     };
     // After an import, or a cold start, the sync not run yet.
     unread(draw({ shieldedSync: { state: "idle", notes: 0 } }));
@@ -88,7 +86,7 @@ describe("home balance", () => {
     unread(draw({ shieldedSync: { state: "idle", notes: 0 } }, false));
     // What was read before, kept: shown, as it can't be read now, and counted.
     const kept = draw({ shieldedSync: { state: "error" }, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true }, false);
-    expect([kept.value, kept.label]).toEqual(["0.05 DUSK", expect.stringMatching(/shielded/i)]);
+    expect([kept.value, kept.label]).toEqual(["0.05 DUSK", "Public and shielded"]);
     // Lena's and Chen's, opened offline after a cold start: "Shielded · can't be read now 0 DUSK", with "Public and
     // shielded" counting it. A 0 kept from before is no reading now: no figure, and no total.
     for (const sync of [{ state: "done", progress: 1, notes: 3 }, { state: "idle", notes: 3 }]) {
@@ -115,14 +113,13 @@ describe("home balance", () => {
 
     // In the wallet's own words, never the node's, anywhere.
     const unread = draw({ balance: null, balanceError: said, shieldedError: said });
-    expect(unread.note).not.toBe("");
-    expect(unread.status).toMatch(/unavailable/i);
-    expect(unread.title).toBeTruthy();
+    expect(unread.status).toBe("Shielded · Unavailable");
+    for (const said of [unread.note, unread.title]) expect(said).toMatch(/couldn't read/i);
     expect(unread.all).not.toContain("evil.example");
 
     const failed = draw({ balance: { value: "0" }, shieldedSync: { state: "error", lastError: said } });
-    expect(failed.status).toMatch(/fail/i);
-    expect(failed.title).toBeTruthy();
+    expect(failed.status).toBe("Shielded · Sync failed");
+    expect(failed.title).toMatch(/couldn't read/i);
     expect(failed.all).not.toContain("evil.example");
   });
 });
@@ -164,8 +161,13 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(box.memo).toBe(memo);
     expect(box.made).toMatch(exactly(made));
   };
-  const SENDING = /sending/i;
-  const NOT_SENT = /^not sent(?! yet)/i;
+  // Where a box says it stands, as its title opens: Not sent yet, Sending, Not confirmed, Not sent or Sent.
+  const standing = (box) => box.title.split(": ")[0];
+  // What Don't send says: it wasn't sent, and nothing left; never that it went out already or couldn't be stopped.
+  const calledOff = (showToast) => {
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/nothing left/i));
+    for (const [said] of showToast.mock.calls) expect(said).not.toMatch(/went out|couldn't/i);
+  };
 
   afterEach(() => {
     vi.useRealTimers();
@@ -192,9 +194,9 @@ describe("payments from Send waiting for the network, on Home", () => {
     pays(going, { memo: "Hors ligne deux", made: "02:36" });
     // Chen's and Lena's: "Not sent yet … It's being sent. Cancel" as it went out. One state at a time: the one that waits
     // goes out once the network answers; the one going out says it's sending, and nothing of waiting.
-    expect(waits.title).not.toMatch(SENDING);
+    expect([standing(waits), standing(going)]).toEqual(["Not sent yet", "Sending"]);
     expect(waits.note).toMatch(/goes out/i);
-    expect(going.title).toMatch(SENDING);
+    expect(waits.note).not.toMatch(/may have gone/i);
     expect(going.note).toBe("");
     expect([waits.buttons.length, going.buttons.length]).toEqual([1, 1]);
 
@@ -203,7 +205,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     expect(sent).toEqual([{ type: "DUSK_UI_CANCEL_SEND", sendId: "s2" }]);
     // Chen's: a red Send failed for what she chose. In plain words, in no colour.
-    expect(actions.showToast).toHaveBeenCalledWith(NOT_SENT_CHOSEN_TEXT);
+    calledOff(actions.showToast);
     expect(actions.render).toHaveBeenCalledWith({ forceRefresh: true });
 
     // Hidden balances hide what it pays, anywhere; another profile's aren't this one's to list.
@@ -233,13 +235,15 @@ describe("payments from Send waiting for the network, on Home", () => {
     pays(goingBox, { memo: "Trois", made: "02:38" });
     // Not confirmed, both, as it may have gone out already: the one that waits still goes once the network answers;
     // the other is checked then, and doesn't go by itself.
-    for (const box of [waitsBox, checksBox]) expect(box.title).toMatch(/not confirmed/i);
-    expect(waitsBox.note).toBe(UNCLEAR_TEXT);
+    expect([standing(waitsBox), standing(checksBox), standing(goingBox)]).toEqual(["Not confirmed", "Not confirmed", "Sending"]);
+    for (const box of [waitsBox, checksBox]) {
+      expect(box.note).toMatch(/may have gone out/i);
+      expect(box.note).not.toMatch(/nothing was sent|not sent/i);
+    }
+    expect(waitsBox.note).toMatch(/goes out once/i);
     expect(checksBox.note).toMatch(/check/i);
     expect(checksBox.note).not.toMatch(/goes out/i);
     // The one going out says only that.
-    expect(goingBox.title).toMatch(SENDING);
-    expect(goingBox.title).not.toMatch(/not confirmed/i);
     expect(goingBox.note).toBe("");
     expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
   });
@@ -260,10 +264,11 @@ describe("payments from Send waiting for the network, on Home", () => {
     pays(failedBox, { to: "lucas-…jWmUdk", made: "02:34" });
     // Not sent, each, and why: the wallet closed, or no network, and no fee; each with Send it now or Don't send.
     for (const box of [closedBox, failedBox]) {
-      expect([box.kind, box.buttons.length]).toEqual(["home-waiting--unsent", 2]);
-      expect(box.title).toMatch(NOT_SENT);
+      expect([standing(box), box.kind, box.buttons.length]).toEqual(["Not sent", "home-waiting--unsent", 2]);
+      expect(box.note).toMatch(/nothing was sent/i);
+      expect(box.note).not.toMatch(/may have gone/i);
     }
-    expect(closedBox.note).toBe(NOT_SENT_TEXT.closed);
+    expect(closedBox.note).toMatch(/closed/i);
     expect(failedBox.note).toMatch(/no fee/i);
 
     // Send it now: straight to Review, the same amount, recipient and memo, sent there in its place; nothing dropped.
@@ -293,8 +298,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(more).toEqual([]);
     pays(box, { memo: "Hors ligne un", made: "02:34" });
     // Sent: nothing to wait for, or to call off.
-    expect(box.kind).toBe("home-waiting--went");
-    expect(box.title).toMatch(/^sent\b/i);
+    expect([standing(box), box.kind]).toEqual(["Sent", "home-waiting--went"]);
     expect([box.note, box.buttons]).toEqual(["", []]);
   });
 
@@ -325,14 +329,15 @@ describe("payments from Send waiting for the network, on Home", () => {
     // This same payment: named with its memo, said to look the same, and Don't send leads.
     const again = shown([same, other]);
     for (const value of ["0.01 DUSK", "02:37"]) expect(again.note).toMatch(exactly(value));
-    expect(again.note).toContain("Lucas (petit-fils)");
-    expect(again.note).toContain("Hors ligne un");
+    for (const value of ["Lucas (petit-fils)", "Hors ligne un"]) expect(again.note).toMatch(exactly(value));
     expect(again.note).toMatch(/same/i);
     again.lead.click();
     await vi.waitFor(() => expect(actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_CANCEL_SEND", sendId: "s1" }));
     expect(state.route).toBe("home");
-    // Nothing named: the plain sentence.
-    expect(shown(undefined).note).toBe(SENT_MEANWHILE_TEXT);
+    // Nothing named: something else, not said to be the same.
+    const plain = shown(undefined).note;
+    expect(plain).toMatch(/something else/i);
+    expect(plain).not.toMatch(/same/i);
 
     // Chen's, Marek's: "something else", Send it too live, for the seconds before it named this same payment.
     // While it's read, it says so, its answers off; past the node's time, what's known.
@@ -341,8 +346,11 @@ describe("payments from Send waiting for the network, on Home", () => {
       const box = document.body.querySelector(".home-waiting--held");
       return [visibleText(box.querySelector(".home-waiting__note")), box.querySelectorAll("button").map((b) => b.disabled)];
     };
-    expect(checking(at(2, 40) - 3_000)).toEqual([CHECKING_MEANWHILE_TEXT, [true, true]]);
-    expect(checking(at(2, 40) - 60_000)).toEqual([SENT_MEANWHILE_TEXT, [false, false]]);
+    const [reading, whileRead] = checking(at(2, 40) - 3_000);
+    expect(whileRead).toEqual([true, true]);
+    expect(reading).toMatch(/checking/i);
+    expect(reading).not.toMatch(/something else|same/i);
+    expect(checking(at(2, 40) - 60_000)).toEqual([plain, [false, false]]);
   });
 
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
@@ -371,9 +379,11 @@ describe("payments from Send waiting for the network, on Home", () => {
     // One held, still waiting; the other not sent, as the wallet stopped while it waited. For each, its account sent
     // something else meanwhile, and it offers Send it too or Don't send.
     expect([heldBox.kind, stoppedBox.kind]).toEqual(["home-waiting--held", "home-waiting--unsent"]);
-    expect(heldBox.title).not.toMatch(NOT_SENT);
-    expect(stoppedBox.title).toMatch(NOT_SENT);
-    expect([heldBox.note, stoppedBox.note]).toEqual([SENT_MEANWHILE_TEXT, SENT_MEANWHILE_TEXT]);
+    expect([standing(heldBox), standing(stoppedBox)]).toEqual(["Not sent yet", "Not sent"]);
+    for (const box of [heldBox, stoppedBox]) {
+      expect(box.note).toMatch(/something else/i);
+      expect(box.note).not.toMatch(/same/i);
+    }
     expect([heldBox.buttons.length, stoppedBox.buttons.length]).toEqual([2, 2]);
 
     // Send it too: its Review, in its place; nothing goes before Confirm there.
@@ -388,7 +398,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     buttons()[1].click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     expect(sent.at(-1)).toEqual({ type: "DUSK_UI_CANCEL_SEND", sendId: "s1" });
-    expect(actions.showToast).toHaveBeenCalledWith(NOT_SENT_CHOSEN_TEXT);
+    calledOff(actions.showToast);
     // One the wallet stopped as it waited for the answer: Send it too opens Review, as Send it now does.
     buttons()[2].click();
     await vi.waitFor(() => expect(state.route).toBe("confirm"));

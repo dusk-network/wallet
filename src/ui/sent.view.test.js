@@ -101,10 +101,15 @@ const stepSub = (i) => {
   const sub = body.querySelectorAll(".step")[i]?.querySelector(".step-sub");
   return sub ? visibleText(sub) : "";
 };
+// What a step says it is, as shown: its status ("Not sent", "Completed"), whatever its state's class.
+const stepTitle = (i) => {
+  const title = body.querySelectorAll(".step")[i]?.querySelector(".step-title");
+  return title ? visibleText(title) : "";
+};
 const screen = () => visibleText(body);
-// A value as written, on its own: 0.0025 DUSK, never 10.0025 or 0.00255 DUSK.
-const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-const exactly = (text) => new RegExp(`(?<![\\d.,])${escaped(text)}(?![\\d])`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // When it was sent, and from which balance: the line that gives its time.
 const sentLine = () => body.querySelectorAll(".step-sub, .kv-value").map(visibleText).find((text) => /\d\d:\d\d/.test(text)) ?? "";
 // A row's value, by its label: the fee's, whatever its row is called, and the memo's.
@@ -162,11 +167,11 @@ describe("after Confirm", () => {
     expect(state.route).toBe("sent");
     const to = body.querySelector(".sent-line .mono");
     expect([visibleText(body.querySelector(".sent-amount")), visibleText(to), to.title]).toEqual(["1,500 DUSK", "21n5nc…fMMLNz", OTHER]);
-    expect([phase(), stepStates()]).toEqual(["sending", ["current", "upcoming", "upcoming"]]);
+    expect([phase(), stepStates(), stepTitle(0)]).toEqual(["sending", ["current", "upcoming", "upcoming"], "Sending"]);
 
     reply.resolve({ ok: true, result: { hash: HASH } });
     await settle();
-    expect([phase(), stepStates()]).toEqual(["sent", ["done", "current", "upcoming"]]);
+    expect([phase(), stepStates(), stepTitle(1)]).toEqual(["sent", ["done", "current", "upcoming"], "Sent to the network"]);
     // Its ID, its memo and the most its fee costs.
     expect(visibleText(txId())).toBe("3e6a0e…ae84ba");
     expect(memo()).toBe("Lunch");
@@ -200,7 +205,7 @@ describe("after Confirm", () => {
     expect(noteTxStatus(state.sent, { hash: "ff".repeat(32), status: "failed" })).toBe(false);
     expect(noteTxStatus(state.sent, { hash: HASH, status: "executed", feePaid: "312345", blockHeight: "1234567" })).toBe(true);
     app.draw();
-    expect(stepStates()).toEqual(["done", "done", "done"]);
+    expect([stepStates(), stepTitle(2)]).toEqual([["done", "done", "done"], "Completed"]);
     // Its block, under Completed; the balance it went from; and its fee to the last lux, as its transaction's details
     // say it.
     expect(stepSub(2)).toMatch(exactly("1,234,567"));
@@ -224,31 +229,34 @@ describe("after Confirm", () => {
 
     noteTxStatus(state.sent, { hash: HASH, status: "failed", error: "Out of gas", feePaid: "2500000" });
     app.draw();
-    expect(stepStates()).toEqual(["done", "done", "failed"]);
+    expect([stepStates(), stepTitle(2)]).toEqual([["done", "done", "failed"], "Failed"]);
+    // Why: it ran out of gas.
+    expect(stepSub(2)).toMatch(/out of gas/i);
     expect(stepSub(2)).toContain(txErrorText("Out of gas"));
     expect(fee()).toMatch(exactly("0.0025 DUSK"));
 
     // Dropped before it ran: nothing was charged, and the watcher's code isn't a reason.
     noteTxStatus(state.sent, { hash: HASH, status: "removed", error: "reconciliation_unavailable" });
     app.draw();
-    expect(stepStates()[2]).toBe("failed");
+    expect([stepStates()[2], stepTitle(2)]).toEqual(["failed", "Failed"]);
     expect(screen()).not.toMatch(/0\.0025|reconciliation_unavailable/);
   });
 
-  it.each(["Failed to deserialize the buffer", "Unknown error code: 251"])(
-    "says plainly that nothing went out when the wallet can't build it: %s",
-    async (message) => {
-      const state = reviewState();
-      const app = popup(state);
-      await settle();
-      (await app.confirm()).resolve({ error: { message } });
-      await settle();
-      expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
-      // In words, not the engine's.
-      expect(stepSub(0)).toContain(reasonText(message));
-      expect(screen()).not.toContain(message);
-    }
-  );
+  it.each([
+    ["Failed to deserialize the buffer", /couldn't read the address/i],
+    ["Unknown error code: 251", /couldn't build/i],
+  ])("says plainly that nothing went out when the wallet can't build it: %s", async (message, why) => {
+    const state = reviewState();
+    const app = popup(state);
+    await settle();
+    (await app.confirm()).resolve({ error: { message } });
+    await settle();
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
+    // In words, not the engine's.
+    expect(stepSub(0)).toMatch(why);
+    expect(stepSub(0)).toContain(reasonText(message));
+    expect(screen()).not.toContain(message);
+  });
 
   it("doesn't claim nothing went out when the reply was lost, and keeps the review to go back to", async () => {
     const state = reviewState();
@@ -257,8 +265,8 @@ describe("after Confirm", () => {
     (await app.confirm()).resolve({ error: { message: "The message port closed before a response was received." } });
     await settle();
     // Not confirmed: it may have gone out, so Activity is to be checked before it's sent again.
-    expect([phase(), stepStates()[0]]).toEqual(["unconfirmed", "unknown"]);
-    expect(stepSub(0)).toMatch(/Activity/);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["unconfirmed", "unknown", "Not confirmed"]);
+    expect(stepSub(0)).toMatch(/check Activity/i);
     expect(fee()).toMatch(exactly("0.0025 DUSK"));
     // The draft stays for Back, and nothing says no fee was charged.
     expect(screen()).not.toMatch(/no fee/i);
@@ -274,7 +282,8 @@ describe("after Confirm", () => {
     const socket = "WebSocket connection failed to wss://testnet.nodes.dusk.network/on (readyState=3)";
     (await app.confirm()).resolve({ error: { message: socket } });
     await settle();
-    expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
+    expect(stepSub(0)).toMatch(/couldn't reach the network/i);
     expect(stepSub(0)).toContain(reasonText(socket));
     // No fee charged, and none of the socket's words.
     expect(screen()).not.toMatch(/0\.0025|WebSocket|readyState|wss:/);
@@ -284,7 +293,7 @@ describe("after Confirm", () => {
     await settle();
     (await second.confirm()).resolve({ error: { message: "Engine call timed out", data: { sent: false } } });
     await settle();
-    expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
   });
 
   it("keeps a send handed over without a clear answer by its ID, and says Completed with its fee once the node has it", async () => {
@@ -294,14 +303,14 @@ describe("after Confirm", () => {
     await settle();
     (await app.confirm()).resolve({ error: { message: "Failed to fetch", data: { sent: "unknown", hash: HASH } } });
     await settle();
-    expect([phase(), stepStates()[0]]).toEqual(["unconfirmed", "unknown"]);
-    expect(stepSub(0)).toMatch(/Activity/);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["unconfirmed", "unknown", "Not confirmed"]);
+    expect(stepSub(0)).toMatch(/check Activity/i);
     expect(visibleText(txId())).toBe("3e6a0e…ae84ba");
     // Looked up once the signal is back: in a block, with its fee.
     expect(noteTxStatus(state.sent, { hash: HASH, status: "executed" })).toBe(true);
     ov.txs = [{ hash: HASH, status: "executed", feePaid: "2136028", blockHeight: "4817567" }];
     app.draw();
-    expect([phase(), stepStates()]).toEqual(["sent", ["done", "done", "done"]]);
+    expect([phase(), stepStates(), stepTitle(2)]).toEqual(["sent", ["done", "done", "done"], "Completed"]);
     expect(stepSub(2)).toMatch(exactly("4,817,567"));
     expect(sentLine()).toMatch(/public/i);
     expect(sentLine()).not.toMatch(/shielded/i);
@@ -318,15 +327,17 @@ describe("after Confirm", () => {
     expect([phase(), stepStates()[0], cancelButton()]).toEqual(["sending", "current", null]);
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
     app.draw();
-    // Waiting, as it's offline: never said to have gone out maybe, and called off with Cancel.
+    // Waiting, as it's offline: nothing has left the wallet, never that it may have gone out, and Cancel calls it off.
     expect([phase(), stepStates()[0]]).toEqual(["sending", "current"]);
     expect(stepSub(0)).toMatch(/offline/i);
+    expect(stepSub(0)).toMatch(/nothing has left your wallet/i);
+    expect(stepSub(0)).not.toMatch(/may have gone out/i);
     expect(stepSub(0)).not.toContain(UNCLEAR_TEXT);
     expect(cancelButton()).toBeTruthy();
     // Where the wallet couldn't wait for it, it says it wasn't sent.
     sending.resolve({ error: { message: "NetworkError when attempting to fetch resource." } });
     await settle();
-    expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
   });
 
   // Chen's: the Wi-Fi went just as a payment was handed over; the screen said "Nothing has left your wallet yet" of a
@@ -339,15 +350,20 @@ describe("after Confirm", () => {
     // The wallet says it's being handed over (DUSK_UI_SEND_WAITING, handedOver).
     state.sent.handedOver = true;
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
+    // It may have gone out already: never that nothing has left the wallet.
+    const mayHaveGone = () => {
+      expect([stepStates()[0], cancelButton()]).toEqual(["current", null]);
+      expect(stepSub(0)).toMatch(/may have gone out/i);
+      expect(stepSub(0)).not.toMatch(/nothing has left/i);
+      expect(stepSub(0)).toContain(UNCLEAR_TEXT);
+    };
     app.draw();
-    expect([stepStates()[0], cancelButton()]).toEqual(["current", null]);
-    expect(stepSub(0)).toContain(UNCLEAR_TEXT);
+    mayHaveGone();
     // Online, its answer lost: looked up, and sent once if it didn't go.
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
     state.sent.waits = true;
     app.draw();
-    expect([stepStates()[0], cancelButton()]).toEqual(["current", null]);
-    expect(stepSub(0)).toContain(UNCLEAR_TEXT);
+    mayHaveGone();
   });
 
   it("says a payment that waits for the network does, and Cancel calls it off: not sent, no fee", async () => {
@@ -364,6 +380,8 @@ describe("after Confirm", () => {
     state.sent.waits = true;
     app.draw();
     expect([phase(), stepStates()[0]]).toEqual(["sending", "current"]);
+    expect(stepSub(0)).toMatch(/nothing has left your wallet/i);
+    expect(stepSub(0)).not.toMatch(/may have gone out/i);
     expect(stepSub(0)).not.toContain(UNCLEAR_TEXT);
     expect(cancelButton()).toBeTruthy();
 
@@ -373,8 +391,9 @@ describe("after Confirm", () => {
     expect(app.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_CANCEL_SEND", sendId: state.sent.sendId });
     sending.resolve({ error: { message: SEND_CANCELLED_TEXT, data: { sent: false, cancelled: true } } });
     await settle();
-    // Chosen, so in no colour (Chen's: a red Send failed), and no fee.
-    expect([phase(), stepStates()[0]]).toEqual(["not_sent", "upcoming"]);
+    // Chosen, so in no colour (Chen's: a red Send failed): not sent, nothing left the wallet, and no fee.
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "upcoming", "Not sent"]);
+    expect(stepSub(0)).toMatch(/nothing left your wallet/i);
     expect(screen()).not.toMatch(/0\.0025/);
   });
 
@@ -388,12 +407,13 @@ describe("after Confirm", () => {
     app.actions.send.mockImplementation(async (message) => (message.type === "DUSK_UI_CANCEL_SEND" ? { ok: true, result: { cancelled: false } } : {}));
     cancelButton().click();
     await settle();
-    // Said, and nothing called off.
+    // Said: it went out already; and nothing called off.
     expect(app.actions.showToast).toHaveBeenCalledTimes(1);
+    expect(app.actions.showToast).toHaveBeenCalledWith(expect.stringMatching(/went out already/i));
     expect(phase()).toBe("sending");
     sending.resolve({ ok: true, result: { hash: HASH } });
     await settle();
-    expect([phase(), stepStates(), cancelButton()]).toEqual(["sent", ["done", "current", "upcoming"], null]);
+    expect([phase(), stepStates(), stepTitle(1), cancelButton()]).toEqual(["sent", ["done", "current", "upcoming"], "Sent to the network", null]);
   });
 
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
@@ -411,14 +431,15 @@ describe("after Confirm", () => {
     // The wallet says it's held (DUSK_UI_SEND_WAITING, held): not sent, said so, and nothing of closing the wallet.
     Object.assign(state.sent, { waits: false, held: true });
     app.draw();
-    expect([phase(), stepStates()[0]]).toEqual(["sending", "unknown"]);
-    expect(stepSub(0)).not.toBe("");
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["sending", "unknown", "Not sent yet"]);
+    expect(stepSub(0)).toMatch(/your account sent something else/i);
     expect(note()).toBeNull();
 
     // While what its account sent is read: it says so, Send it too and Don't send off till it's known.
     const held = { sendId: state.sent.sendId, to: OTHER, lux: dusk(1500), memo: "Lunch", profileIndex: 0, privacy: "public", waiting: true, held: true };
     ov.waitingSends = [{ ...held, checking: Date.now() }];
     app.draw();
+    expect(stepSub(0)).toMatch(/checking what your account sent/i);
     expect(stepSub(0)).toBe(CHECKING_MEANWHILE_TEXT);
     expect([button("Send it too").disabled, button("Don't send").disabled, button("Done").disabled]).toEqual([true, true, false]);
 
@@ -426,7 +447,7 @@ describe("after Confirm", () => {
     // looks like this same payment.
     ov.waitingSends = [{ ...held, meanwhile: [{ hash: "ef".repeat(32), to: OTHER, lux: dusk(1500), memo: "Lunch", at: Date.now() }] }];
     app.draw();
-    for (const value of [/(?<![\d.,])1,?500 DUSK/, /21n5nc…fMMLNz/, /\d\d:\d\d/, /Lunch/, /same payment/]) expect(stepSub(0)).toMatch(value);
+    for (const value of [/(?<![\d.,+\-−<>≤≥~])1,?500 DUSK(?![\dA-Za-z]|[.,]\d)/, /21n5nc…fMMLNz/, /\d\d:\d\d/, /“Lunch”/, /same payment/]) expect(stepSub(0)).toMatch(value);
     expect([button("Send it too").disabled, button("Don't send").disabled]).toEqual([false, false]);
     // That being the same payment, Don't send leads, not Send it too.
     expect(body.querySelector(".sent-actions .btn-primary")).toBe(button("Don't send"));
@@ -448,7 +469,7 @@ describe("after Confirm", () => {
     expect(app.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_CANCEL_SEND", sendId: state.sent.sendId });
     sending.resolve({ error: { message: SEND_CANCELLED_TEXT, data: { sent: false, cancelled: true } } });
     await settle();
-    expect([phase(), stepStates()[0]]).toEqual(["not_sent", "upcoming"]);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "upcoming", "Not sent"]);
   });
 
   it("says a send other than a payment from Send can't reach the network offline, never that it waits", async () => {
@@ -460,7 +481,7 @@ describe("after Confirm", () => {
     app.draw();
     // Tried once: no ID to wait by, nothing to call off, and no word of going out later.
     expect([state.sent.sendId, stepStates()[0], cancelButton()]).toEqual(["", "current", null]);
-    expect(stepSub(0)).toMatch(/offline/i);
+    expect(stepSub(0)).toMatch(/offline[\s\S]*can't reach the network/i);
     expect(stepSub(0)).not.toMatch(/goes out/i);
   });
 
@@ -489,7 +510,7 @@ describe("after Confirm", () => {
     (await app.confirm()).resolve({ error: { message: "Insufficient balance" } });
     await settle();
 
-    expect([phase(), stepStates()]).toEqual(["not_sent", ["failed", "upcoming", "upcoming"]]);
+    expect([phase(), stepStates(), stepTitle(0)]).toEqual(["not_sent", ["failed", "upcoming", "upcoming"], "Not sent"]);
     expect(stepSub(0)).toContain("Insufficient balance");
     // Its memo; no fee, no note that it goes on, nothing to look up.
     expect(memo()).toBe("Lunch");
@@ -510,7 +531,9 @@ describe("after Confirm", () => {
     const reply = JSON.stringify({ error: "Invalid input: Tx 7abc0686 not accepted: this transaction is invalid Value spent larger than account holds" });
     (await app.confirm()).resolve({ error: { message: reply } });
     await settle();
-    expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
+    // The node's refusal in words: the balance doesn't cover it.
+    expect(stepSub(0)).toMatch(/doesn't cover/i);
     expect(stepSub(0)).toContain(reasonText(reply));
     expect(screen()).not.toContain("{");
     expect(screen()).not.toContain("Invalid input");
@@ -523,7 +546,7 @@ describe("after Confirm", () => {
     const refusal = "hostile-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). Nothing was signed, because a signature here could count on the other network.";
     (await app.confirm()).resolve({ error: { message: refusal } });
     await settle();
-    expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
     expect(stepSub(0)).toContain(refusal);
   });
 
@@ -534,7 +557,7 @@ describe("after Confirm", () => {
       await settle();
       (await app.confirm()).resolve({ error: { message: error } });
       await settle();
-      expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
+      expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
       expect(stepSub(0)).toContain(error);
     }
   );
@@ -548,7 +571,7 @@ describe("after Confirm", () => {
     expect(app.actions.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_SEND_TX", walletId: ACCOUNT }));
     reply.resolve({ error: { message: "The wallet changed while you reviewed it." } });
     await settle();
-    expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
     expect(stepSub(0)).toContain("The wallet changed while you reviewed it.");
   });
 
@@ -574,7 +597,7 @@ describe("after Confirm", () => {
 
     it("sends nothing once the switch has begun, and says so", async () => {
       await expect(confirmWhile(true)).resolves.toEqual([]);
-      expect([phase(), stepStates()[0]]).toEqual(["not_sent", "failed"]);
+      expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["not_sent", "failed", "Not sent"]);
     });
 
     it("sends only from the wallet reviewed, which the wallet refuses once another is open", async () => {
@@ -615,7 +638,7 @@ describe("after Confirm", () => {
     expect(state.route).toBe("home");
     reply.resolve({ error: { message: "Insufficient balance" } });
     await settle();
-    expect(app.actions.showToast).toHaveBeenCalledWith({ text: expect.stringContaining("Insufficient balance"), tone: "bad" });
+    expect(app.actions.showToast).toHaveBeenCalledWith({ text: expect.stringMatching(/failed[\s\S]*Insufficient balance/i), tone: "bad" });
     // The review is still there to go back to.
     expect(state.draft).toMatchObject({ to: OTHER, amountLux: dusk(1500) });
   });
@@ -649,7 +672,7 @@ describe("after Confirm", () => {
     confirmButton().click();
     await settle();
     expect(state.route).toBe("convert_confirm");
-    expect(body.querySelector(".review-actions > .field-error").textContent).not.toBe("");
+    expect(body.querySelector(".review-actions > .field-error").textContent).toMatch(/gas limit[\s\S]*gas price/i);
     expect(app.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
 
     editor.setGas({ limit: "30000000", price: "1" });
@@ -736,35 +759,46 @@ describe("Tell me when it arrives, on a phone", () => {
   // Chen's, Sofía's and Marek's: promised, and nothing came once they left Firefox or the app.
   it("offers it, asks the phone nothing until it's tapped, and says the notice comes while the wallet stays open", async () => {
     const shown = await draw([null]);
-    // Offered: nothing asked of the phone, and no notice promised yet.
-    expect([shown.asked, shown.said(), Boolean(shown.ask())]).toEqual([["DUSK_UI_NOTICES"], [KEEP_OPEN_TEXT], true]);
+    // Offered: nothing asked of the phone, and no notice promised yet, only that it goes on while its Keep open tab
+    // stays open.
+    expect([shown.asked, shown.said(), Boolean(shown.ask())]).toEqual([["DUSK_UI_NOTICES"], [expect.stringMatching(/keep open tab/i)], true]);
+    expect(shown.said().join(" ")).not.toMatch(/notice comes/i);
+    expect(shown.said()).toEqual([KEEP_OPEN_TEXT]);
     shown.ask().click();
     await settle();
     expect(shown.asked).toEqual(["DUSK_UI_NOTICES", "DUSK_UI_NOTICES_ASK"]);
     // For the send on screen, which the app's Android looks for once the wallet's left.
     expect(shown.messages.at(-1)).toMatchObject({ type: "DUSK_UI_NOTICES_ASK", hash: HASH });
     // Its notice comes while the wallet stays open; nothing more to tap.
-    expect([shown.said(), shown.ask()]).toEqual([[FIREFOX_NOTICE_COMES_TEXT], null]);
+    expect([shown.said(), shown.ask()]).toEqual([[expect.stringMatching(/notice comes only while the wallet stays open/i)], null]);
+    expect(shown.said()).toEqual([FIREFOX_NOTICE_COMES_TEXT]);
   });
 
   // After a no in Firefox, the phone's settings didn't bring them back: Firefox's own question does, when tapped.
   it("says once in Firefox that notices are off after a no, with Ask again, and asks only when it's tapped", async () => {
     const shown = await draw([null, "off", "asked"]);
+    // Off, as it says in words, never on; with the button that asks again, and no notice promised.
+    const saysOff = () => {
+      expect([shown.off(), Boolean(shown.ask())]).toEqual([true, true]);
+      expect(shown.said()).toContainEqual(expect.stringMatching(/notices are off/i));
+      expect(shown.said().join(" ")).not.toMatch(/notices are on|notice comes/i);
+    };
     shown.ask().click();
     await settle();
-    // Off, said so, with the button that asks again, no notice promised; and the wallet told it was said.
-    expect([shown.off(), Boolean(shown.ask())]).toEqual([true, true]);
-    expect(shown.said()).not.toContain(FIREFOX_NOTICE_COMES_TEXT);
+    // Off, said so; and the wallet told it was said.
+    saysOff();
     expect(shown.asked).toContain("DUSK_UI_NOTICES_SAID");
     // Drawn again, the same send's Sent still says it, and has asked nothing more.
     await shown.show();
-    expect([shown.off(), Boolean(shown.ask())]).toEqual([true, true]);
+    saysOff();
     expect(shown.asked.filter((type) => type === "DUSK_UI_NOTICES_ASK")).toHaveLength(1);
-    // Asked again on its tap alone, for this send: then the notice comes.
+    // Asked again on its tap alone, for this send: then the notice comes, and nothing says they're off.
     shown.ask().click();
     await settle();
     expect(shown.messages.at(-1)).toMatchObject({ type: "DUSK_UI_NOTICES_ASK", again: true, hash: HASH });
-    expect([shown.off(), shown.said()]).toEqual([false, [FIREFOX_NOTICE_COMES_TEXT]]);
+    expect([shown.off(), shown.said()]).toEqual([false, [expect.stringMatching(/notice comes/i)]]);
+    expect(shown.said().join(" ")).not.toMatch(/notices are off/i);
+    expect(shown.said()).toEqual([FIREFOX_NOTICE_COMES_TEXT]);
     // A new window's, where the wallet says it was said: the tap, and nothing asked by itself.
     const later = await draw(["off-said"]);
     expect([later.off(), Boolean(later.ask()), later.asked]).toEqual([false, true, ["DUSK_UI_NOTICES"]]);

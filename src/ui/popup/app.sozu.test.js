@@ -70,6 +70,7 @@ const menuItem = (dom, menu, text) =>
 // the wallet locked.
 const saysSwitched = (app) => {
   const text = app.querySelector(".sozu-notice")?.textContent ?? "";
+  expect(text).toMatch(/nothing was sent/i);
   expect(text).toMatch(/network|profile/i);
   expect(text).not.toMatch(/lock/i);
 };

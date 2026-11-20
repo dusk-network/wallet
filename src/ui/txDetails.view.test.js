@@ -5,28 +5,28 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { keptArrivals } from "../shared/bridgeArrival.js";
 import { TX_KIND } from "../shared/constants.js";
-import { explorerTxUrl } from "../shared/explorer.js";
-import { nameCheckNote } from "../shared/nodeNetwork.js";
-import { REPLACED_TEXT } from "../shared/waitingSends.js";
-import { walletLabel } from "../shared/wallets.js";
 import { installFakeDom, settle, visibleText } from "./testing/fakeDom.js";
 import { recordedEvm, recordedMigration } from "./testing/recordedEvm.js";
 import { entryOf } from "../shared/fixtures/rows.js";
 import { activityKey, activityRows } from "./popup/activity.js";
-import { dateText } from "./lib/time.js";
-import { NOT_SENT_FOLLOWED_TEXT } from "./popup/views/sent.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
-import { txStatusWord } from "./popup/views/txDisplay.js";
-import { AFTER_ALL_TEXT, afterAllUnseen } from "./popup/views/txRow.js";
+import { afterAllUnseen } from "./popup/views/txRow.js";
 
+// Times as a popup in UTC shows them.
+process.env.TZ = "UTC";
 const HASH = "ab".repeat(32);
 const NODE = "https://testnet.nodes.dusk.network";
+// Where each network's explorer shows a transaction, as its file says.
+const TESTNET_TX = "https://explorer.testnet.dusk.network/transactions/transaction/?id=";
+const MAINNET_TX = "https://explorer.dusk.network/transactions/transaction/?id=";
+const DEVNET_TX = "https://explorer.devnet.dusk.network/transactions/transaction/?id=";
 // The network fee's field, as a sent, a failed or a dropped transaction labels it.
 const FEE = /^(network )?fee( charged)?$/i;
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-// A value on its own in a sentence: no digit, point or comma before it, no digit after it.
-const exactly = (s) => new RegExp(`(?<![\\d.,])${escape(s)}(?!\\d)`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // Values in a sentence, in this order: where a transaction is, then where you are.
 const inOrder = (...values) => new RegExp(values.map(escape).join("[\\s\\S]*"));
 // The row of a field in a transaction's details, by its label.
@@ -41,6 +41,18 @@ const statusOf = (root) => {
   const status = root.querySelector(".tx-hero-status");
   return { status: status ? visibleText(status) : "", tone: status?.className.split(" ").find((c) => c.startsWith("is-")) };
 };
+// How many explorer buttons there are, and what each opens, by the chain its label names: `chain`'s, else Dusk's.
+const explorers = async (root, chain) => {
+  const buttons = root.querySelectorAll(".tx-explorer-btn");
+  const opened = {};
+  for (const button of buttons) {
+    dom.window.open = vi.fn(() => ({}));
+    button.click();
+    await settle();
+    opened[visibleText(button).includes(chain) ? chain : "Dusk"] = dom.window.open.mock.calls;
+  }
+  return [buttons.length, opened];
+};
 
 let dom;
 
@@ -51,6 +63,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -77,8 +90,9 @@ describe("a name read through a node the wallet doesn't know", () => {
 
   it("says whose word it is in a transaction's details, and nothing on a network's own node or with no name", () => {
     const { note } = details({ ...transfer, nodeUrl: CUSTOM, toName: "bob.dusk" }, { own: { nodeUrl: CUSTOM } });
-    expect(note).toBe(nameCheckNote(CUSTOM));
-    expect(note).toContain("my-node.example:8443");
+    // The node, by its name, and that the wallet doesn't know it.
+    expect(note).toMatch(exactly("my-node.example:8443"));
+    expect(note).toMatch(/doesn't know/i);
     expect(details({ ...transfer, toName: "bob.dusk" }).note).toBe("");
     expect(details({ ...transfer, nodeUrl: CUSTOM }, { own: { nodeUrl: CUSTOM } }).note).toBe("");
   });
@@ -103,12 +117,14 @@ describe("transaction details", () => {
       };
     };
     let view = show({ ...stake, status: "unsent", signedTx: "ab12" });
-    expect([view.status, view.buttons.length]).toEqual([txStatusWord("unsent"), 2]);
-    expect(view.note).not.toBe("");
+    expect([view.status, view.buttons.length]).toEqual(["Not sent yet", 2]);
+    // Nothing has left, never that it may have gone.
+    expect(view.note).toMatch(/nothing has left/i);
+    expect(view.note).not.toMatch(/may have gone/i);
     // No fee charged: its fee field has no amount.
     expect(view.fee).toBeTruthy();
     expect(view.fee).not.toMatch(/[1-9]/);
-    expect(visibleText(view.body)).not.toContain(txStatusWord("submitted"));
+    expect(visibleText(view.body)).not.toContain("Pending");
     view.buttons[0].click();
     await settle();
     expect(actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RESEND_TX", hash: HASH });
@@ -119,7 +135,8 @@ describe("transaction details", () => {
     await settle();
     expect(actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_DROP_TX", hash: HASH });
     // Astra's: its hand-over had no clear answer, so it may still arrive; said so, never that nothing left.
-    expect(actions.showToast).toHaveBeenLastCalledWith(NOT_SENT_FOLLOWED_TEXT);
+    expect(actions.showToast.mock.lastCall[0]).toMatch(/still arrives/i);
+    expect(actions.showToast.mock.lastCall[0]).not.toMatch(/nothing left/i);
     expect([state.route, state.txDetailHash]).toEqual(["activity", null]);
 
     // Send it now handed it over, and its answer was lost: it may have gone, and is looked up, never said to have failed.
@@ -131,18 +148,19 @@ describe("transaction details", () => {
     view.buttons[0].click();
     await settle();
     expect(actions.showToast).toHaveBeenCalledTimes(1);
-    expect(actions.showToast.mock.lastCall[0]).toMatch(/may/i);
-    expect(actions.showToast.mock.lastCall[0]).not.toMatch(/fail|couldn't/i);
+    expect(actions.showToast.mock.lastCall[0]).toMatch(/may have gone out/i);
+    expect(actions.showToast.mock.lastCall[0]).not.toMatch(/fail|couldn't|not sent/i);
     // Chosen not to be sent, and arrived after all: Completed, and said so; one that simply went says nothing.
     view = show({ ...stake, status: "executed", wentAfterAll: Date.now(), afterAllSeen: Date.now() });
-    expect(view.status).toBe(txStatusWord("executed"));
-    expect(view.note).not.toBe("");
+    expect(view.status).toBe("Completed");
+    expect(view.note).toMatch(/went out after/i);
     expect(show({ ...stake, status: "executed" }).note).toBe("");
 
     state.route = "tx";
     state.txDetailHash = HASH;
     view = show({ ...stake, status: "not_sent" });
-    expect([view.status, view.note, view.buttons]).toEqual([txStatusWord("not_sent"), REPLACED_TEXT, []]);
+    expect([view.status, view.buttons]).toEqual(["Not sent", []]);
+    expect(view.note).toMatch(/took its place/i);
   });
 
   // Lena's: she said Don't send, it went out anyway, and its screen turned into a plain green "Sent at …": she
@@ -163,13 +181,13 @@ describe("transaction details", () => {
       const body = dom.document.body;
       return [visibleText(body.querySelector(".tx-hero-status")), visibleText(body.querySelector(".tx-hero-note"))];
     };
-    expect(show()).toEqual([AFTER_ALL_TEXT, expect.stringMatching(exactly("20:41"))]);
+    expect(show()).toEqual(["Sent after you chose not to send", expect.stringMatching(exactly("20:41"))]);
     // Opened: it's kept as seen, and this look still says it.
     await vi.waitFor(async () => expect((await txs.getTxMeta(HASH))?.afterAllSeen).toEqual(expect.any(Number)));
-    expect(show({ afterAllSeen: Date.now() })[0]).toBe(AFTER_ALL_TEXT);
+    expect(show({ afterAllSeen: Date.now() })[0]).toBe("Sent after you chose not to send");
     // The next look: Completed, with what happened, and when, in its note.
     state.afterAllOpen = null;
-    expect(show({ afterAllSeen: Date.now() })).toEqual([txStatusWord("executed"), expect.stringMatching(exactly("20:41"))]);
+    expect(show({ afterAllSeen: Date.now() })).toEqual(["Completed", expect.stringMatching(exactly("20:41"))]);
   });
 
   // Round 40's review: "It went out at …" said when the wallet handed it over or saw it go, which can be long after,
@@ -185,7 +203,7 @@ describe("transaction details", () => {
     dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
     // Said, with no time: its block gives none.
     const note = visibleText(dom.document.body.querySelector(".tx-hero-note"));
-    expect(note).not.toBe("");
+    expect(note).toMatch(/went out after/i);
     expect(note).not.toMatch(/\d/);
     // Back in Activity, the overview not read again: no longer marked.
     state.afterAllOpen = null;
@@ -198,7 +216,7 @@ describe("transaction details", () => {
     const method = fieldRow(view.body, "Method");
     expect(method.querySelector(".safe-text > span").textContent).toBe("pay\\u202eevol_ot\\u202c");
     expect(method.querySelector(".safe-text__flag")).not.toBeNull();
-    expect(view.name).toContain("pay\\u202eevol_ot\\u202c");
+    expect(view.name).toMatch(/(?:^|\s)pay\\u202eevol_ot\\u202c$/);
     expect(visibleText(view.body)).not.toContain(rlo);
   });
 
@@ -236,7 +254,7 @@ describe("transaction details", () => {
   it("says a deposit to DuskEVM Arrived once it's there, and opens its transaction on DuskEVM's explorer", async () => {
     const evm = "0x5A3d8e1B7c2f4A6b9e0D1C3f5A7b9C2D4e6F8a01";
     const l2 = "0x029e2c6ebfe60452800c97eaa2ac36f40039812679c9cee414ea6a8b1877d61b";
-    const l2Url = `${networks.testnet.duskEvm.explorerUrl}/tx/${l2}`;
+    const l2Url = `https://explorer.testnet.evm.dusk.network/tx/${l2}`;
     const deposit = {
       kind: TX_KIND.CONTRACT_CALL,
       contractId: duskEvmContracts(2).bridge,
@@ -246,44 +264,38 @@ describe("transaction details", () => {
       bridgeTo: evm,
       status: "executed",
     };
-    // The URLs the explorer buttons open, each clicked.
-    const opened = async (body) => {
-      dom.window.open = vi.fn(() => ({}));
-      for (const button of body.querySelectorAll(".tx-explorer-btn")) button.click();
-      await settle();
-      for (const call of dom.window.open.mock.calls) expect(call.slice(1)).toEqual(["_blank", "noopener,noreferrer"]);
-      return dom.window.open.mock.calls.map(([url]) => url).sort();
-    };
     const arrivedAt = Date.UTC(2026, 9, 27, 5, 52, 13);
     // Found there, and kept (bridgeArrival.js).
     keptArrivals().set(HASH, { hash: l2, at: arrivedAt });
     const view = details({ ...deposit, timestamp: arrivedAt - 60_000 });
     keptArrivals().delete(HASH);
-    expect(view.status).toMatch(/arrived/i);
-    expect(view.tone).toBe("is-ok");
+    expect([view.status, view.tone]).toEqual(["Arrived", "is-ok"]);
+    expect(view.status).not.toMatch(/not arrived/i);
     // When it arrived, under when it was sent.
-    expect([view.fields.Date, view.fields.Arrived]).toEqual([dateText(arrivedAt - 60_000), dateText(arrivedAt)]);
+    expect([view.fields.Date, view.fields.Arrived]).toEqual(["Tue 27 Oct 2026, 05:51 UTC", "Tue 27 Oct 2026, 05:52 UTC"]);
     // Its transaction there: opened on DuskEVM's explorer, and copied in full.
     const there = fieldRow(view.body, "DuskEVM transaction");
     expect(visibleText(there.querySelector(".tx-id"))).toBe("0x029e…d61b");
     dom.window.open = vi.fn(() => ({}));
     there.querySelector(".tx-id").click();
     await settle();
-    expect(dom.window.open).toHaveBeenCalledWith(l2Url, "_blank", "noopener,noreferrer");
+    expect(dom.window.open.mock.calls).toEqual([[l2Url, "_blank", "noopener,noreferrer"]]);
     there.querySelector(".mini-btn").click();
     await settle();
     expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(l2);
-    // And from its own button, beside Dusk's explorer's.
-    expect(await opened(view.body)).toEqual([explorerTxUrl(NODE, HASH), l2Url].sort());
+    // And from its own button, beside Dusk's explorer's, which opens it on Dusk.
+    expect(await explorers(view.body, "DuskEVM")).toEqual([
+      2,
+      { Dusk: [[`${TESTNET_TX}${HASH}`, "_blank", "noopener,noreferrer"]], DuskEVM: [[l2Url, "_blank", "noopener,noreferrer"]] },
+    ]);
     // Its contract keeps the network's name for it under Technical details.
     expect(view.fields.Contract).toMatch(/^DuskEVM bridge(?!\w)/);
 
     // Not there yet: it went through, and nothing more.
     const onItsWay = details(deposit);
-    expect(onItsWay.status).toBe(txStatusWord("executed"));
-    expect(onItsWay.status).not.toMatch(/arrived/i);
+    expect(onItsWay.status).toBe("Completed");
     expect([onItsWay.fields.Arrived, onItsWay.fields["DuskEVM transaction"]]).toEqual([undefined, undefined]);
-    expect(await opened(onItsWay.body)).toEqual([explorerTxUrl(NODE, HASH)]);
+    expect(await explorers(onItsWay.body, "DuskEVM")).toEqual([1, { Dusk: [[`${TESTNET_TX}${HASH}`, "_blank", "noopener,noreferrer"]] }]);
   });
 
   it("says what a migration paid on its own chain once that chain answers, its approval too, to the wei", async () => {
@@ -307,7 +319,7 @@ describe("transaction details", () => {
     await vi.waitFor(() => expect(actions.render).toHaveBeenCalled());
     const fields = draw();
     // What the approval and the migration paid there, together; and what was sent there.
-    expect(fields[FEE_THERE]).toMatch(/^0\.00000474855 BNB(?![\d.])/);
+    expect(fields[FEE_THERE]).toMatch(exactly("0.00000474855 BNB"));
     expect(fields.Sent).toBe("1,041.53106263 BEP20 DUSK");
     // The migration's transaction there, copied in full.
     const there = fieldRow(dom.document.body, "BNB Smart Chain transaction");
@@ -380,9 +392,11 @@ describe("transaction details", () => {
     dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
     const body = dom.document.body;
     const fields = fieldsOf(body);
-    expect(statusOf(body).status).toBe(txStatusWord("removed"));
+    expect(statusOf(body).status).toBe("Dropped");
     // Its 3 DUSK stayed in the wallet.
-    expect(visibleText(body.querySelector(".tx-hero-note"))).toMatch(exactly("3 DUSK"));
+    const note = visibleText(body.querySelector(".tx-hero-note"));
+    expect(note).toMatch(exactly("3 DUSK"));
+    expect(note).toMatch(/stayed/i);
     // Nothing sent, taken by the bridge or to arrive.
     expect(["Sent", "Bridge fee", "You receive", "Received"].filter((label) => label in fields)).toEqual([]);
     // No fee charged: its fee field has no amount.
@@ -391,10 +405,14 @@ describe("transaction details", () => {
   });
 
   it("follows DUSK bridged to BNB Smart Chain to its end: on its way, late, then what arrived and where", async () => {
+    // Noon on 20 November 2026.
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(Date.UTC(2026, 10, 20, 12, 0, 0));
     const MAINNET = "https://nodes.dusk.network";
     const bsc = routes(networks.mainnet).find((r) => r.id === "dusk-to-bsc");
     const evm = "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F";
     const payout = `0x${"7c".repeat(32)}`;
+    const payoutUrl = `https://bscscan.com/tx/${payout}`;
     const on = (tx) => {
       const ov = { nodeUrl: MAINNET, txs: [{ hash: HASH, nodeUrl: MAINNET, status: "executed", kind: TX_KIND.TRANSFER, to: bsc.account, memo: evm, amount: "3000000000", ...tx }] };
       const state = { route: "tx", txDetailHash: HASH, txDetailFrom: "home", addressBook: { loaded: true, items: [] } };
@@ -402,55 +420,52 @@ describe("transaction details", () => {
       const body = dom.document.body;
       return { body, ...statusOf(body), fields: fieldsOf(body) };
     };
-    // What a status says: on its way, late, or arrived.
-    const [ON_ITS_WAY, LATE, ARRIVED] = [/on its way/i, /late|longer/i, /arrived/i];
-    const says = (view, word) => {
-      expect(view.status).toMatch(word);
-      for (const other of [ON_ITS_WAY, LATE, ARRIVED].filter((w) => w !== word)) expect(view.status).not.toMatch(other);
-    };
+    // Its amounts: what was sent, the bridge's fee, and what arrives or arrived.
+    const ledger = ({ fields }) => [fields.Sent, fields["Bridge fee"], fields["You receive"], fields.Received];
     const sentAt = Date.now() - 60_000;
 
     const going = on({ finalizedAt: sentAt });
-    says(going, ON_ITS_WAY);
-    expect(going.tone).toBe("is-pending");
-    // Sent, the bridge's fee, then what arrives, each exact.
-    expect([going.fields.Sent, going.fields["Bridge fee"], going.fields["You receive"]]).toEqual(["3 DUSK", "1 DUSK", "2 BEP20 DUSK"]);
+    expect([going.status, going.tone]).toEqual(["On its way", "is-pending"]);
+    expect(ledger(going)).toEqual(["3 DUSK", "1 DUSK", "2 BEP20 DUSK", undefined]);
 
     const late = on({ finalizedAt: Date.now() - 3 * bsc.typicalSeconds * 1000 });
-    says(late, LATE);
-    expect(late.tone).toBe("is-pending");
+    expect([late.status, late.tone]).toEqual(["Taking longer than usual", "is-pending"]);
 
     const arrivedAt = sentAt + 30_000;
     keptArrivals().set(HASH, { hash: payout, at: arrivedAt });
     const arrived = on({ finalizedAt: sentAt });
     keptArrivals().delete(HASH);
-    says(arrived, ARRIVED);
-    expect(arrived.tone).toBe("is-ok");
-    // What arrived, no longer what's to come, and when.
-    expect([arrived.fields.Received, arrived.fields["You receive"], arrived.fields.Arrived]).toEqual(["2 BEP20 DUSK", undefined, dateText(arrivedAt)]);
-    // Where: its transaction there, opened there, from its field and from its own button.
+    expect([arrived.status, arrived.tone]).toEqual(["Arrived", "is-ok"]);
+    expect(arrived.status).not.toMatch(/not arrived/i);
+    // What was sent and the bridge's fee as before, what arrived no longer to come, and when.
+    expect(ledger(arrived)).toEqual(["3 DUSK", "1 DUSK", undefined, "2 BEP20 DUSK"]);
+    expect(arrived.fields.Arrived).toBe("Fri 20 Nov 2026, 11:59 UTC");
+    // Where: its transaction there, opened there from its field and from its own button; Dusk's button opens Dusk's.
     const there = fieldRow(arrived.body, "BNB Smart Chain transaction");
     expect(visibleText(there.querySelector(".tx-id"))).toBe(`${payout.slice(0, 6)}…${payout.slice(-4)}`);
-    const payoutUrl = `${networks.mainnet.routes.chains.bsc.explorerUrl}/tx/${payout}`;
     dom.window.open = vi.fn(() => ({}));
     there.querySelector(".tx-id").click();
-    for (const button of arrived.body.querySelectorAll(".tx-explorer-btn")) button.click();
     await settle();
-    expect(dom.window.open.mock.calls.map(([url]) => url).sort()).toEqual([payoutUrl, explorerTxUrl(MAINNET, HASH), payoutUrl].sort());
+    expect(dom.window.open.mock.calls).toEqual([[payoutUrl, "_blank", "noopener,noreferrer"]]);
+    expect(await explorers(arrived.body, "BNB Smart Chain")).toEqual([
+      2,
+      { Dusk: [[`${MAINNET_TX}${HASH}`, "_blank", "noopener,noreferrer"]], "BNB Smart Chain": [[payoutUrl, "_blank", "noopener,noreferrer"]] },
+    ]);
 
     // Past the week it's looked for, nothing says it's still on its way, or what it pays.
     const old = on({ finalizedAt: Date.now() - 8 * 86_400_000 });
-    expect(old.status).toBe(txStatusWord("executed"));
-    expect([old.fields.Sent, old.fields["Bridge fee"], old.fields["You receive"], old.fields.Received]).toEqual(["3 DUSK", "1 DUSK", undefined, undefined]);
+    expect(old.status).toBe("Completed");
+    expect(ledger(old)).toEqual(["3 DUSK", "1 DUSK", undefined, undefined]);
 
     // Nothing can arrive from what the bridge doesn't pay: no more than its fee, no address, or one that failed.
     for (const tx of [{ amount: "1000000000" }, { memo: "" }]) {
       const none = on({ finalizedAt: sentAt, ...tx });
-      expect(none.status).toBe(txStatusWord("executed"));
+      expect(none.status).toBe("Completed");
       expect(none.fields["You receive"]).toBeUndefined();
     }
     const failed = on({ finalizedAt: sentAt, status: "failed" });
-    expect(["Sent", "Bridge fee", "You receive", "Received"].filter((label) => label in failed.fields)).toEqual([]);
+    expect(failed.status).toBe("Failed");
+    expect(ledger(failed)).toEqual([undefined, undefined, undefined, undefined]);
   });
 
   it("says one transfer's amounts to the last lux, the network fee between what's sent and what arrives", () => {
@@ -500,6 +515,7 @@ describe("transaction details", () => {
     // What a failure kept says so to the last lux too, hidden with balances.
     const failed = details({ ...send, amount: "53082083", status: "failed" });
     expect(failed.note).toMatch(exactly("0.053082083 DUSK"));
+    expect(failed.note).toMatch(/stayed/i);
     // A token's amount, which a row cuts at 6 decimals.
     const token = details({
       kind: TX_KIND.CONTRACT_CALL,
@@ -557,12 +573,11 @@ describe("transaction details", () => {
       await settle();
       return [visibleText(body.querySelector(".tx-missing")), dom.window.open.mock.lastCall?.[0]];
     };
-    const onTestnet = explorerTxUrl(NODE, hash);
-    expect(onTestnet).toContain("testnet");
+    const onTestnet = `${TESTNET_TX}${hash}`;
     // Where it is, then where you are.
     expect(await shown({ nodeUrl: "https://nodes.dusk.network", accounts: [A] })).toEqual([expect.stringMatching(inOrder("Testnet", "Mainnet")), onTestnet]);
-    expect(await shown({ nodeUrl: NODE, accounts: [B], selectedAccountIndex: 0 })).toEqual([expect.stringMatching(exactly(walletLabel(wallets[0]))), onTestnet]);
-    expect(await shown({ nodeUrl: NODE, accounts: [A, B], selectedAccountIndex: 1 })).toEqual([expect.stringMatching(/profile/i), onTestnet]);
+    expect(await shown({ nodeUrl: NODE, accounts: [B], selectedAccountIndex: 0 })).toEqual([expect.stringMatching(exactly("Wallet 1")), onTestnet]);
+    expect(await shown({ nodeUrl: NODE, accounts: [A, B], selectedAccountIndex: 1 })).toEqual([expect.stringMatching(/another profile/i), onTestnet]);
 
     // Its record gone once the history had it: the history it's kept in says,
     // under the key its writer keeps each network's under.
@@ -572,7 +587,7 @@ describe("transaction details", () => {
     const inHistory = (nodeUrl, account, txHash) => commitActivityStep(activityOwnerKey(activityNetworkKey(nodeUrl), account), [{ hash: txHash, blockHeight: 7 }], () => ({ covered: [[0, 9]] }));
     await inHistory(NODE, B, hash);
     expect(await shown({ nodeUrl: "https://nodes.dusk.network", accounts: [A] })).toEqual([expect.stringMatching(inOrder("Testnet", "Mainnet")), onTestnet]);
-    expect(await shown({ nodeUrl: NODE, accounts: [A] })).toEqual([expect.stringMatching(exactly(walletLabel(wallets[1]))), onTestnet]);
+    expect(await shown({ nodeUrl: NODE, accounts: [A] })).toEqual([expect.stringMatching(exactly("Savings")), onTestnet]);
   });
 
   // Astra's: a node of one's own pinned to Testnet, then to Mainnet: an older send of
@@ -601,11 +616,11 @@ describe("transaction details", () => {
     try {
       // On Testnet's own node, what the node signs for not known here: called by its own name.
       noteChainId(CUSTOM, null);
-      expect(await open({ nodeUrl: NODE })).toEqual([expect.stringMatching(inOrder("my-node.example:8443", "Testnet")), explorerTxUrl(NODE, txHash)]);
+      expect(await open({ nodeUrl: NODE })).toEqual([expect.stringMatching(inOrder("my-node.example:8443", "Testnet")), `${TESTNET_TX}${txHash}`]);
       // It signs for Mainnet now: the chain its record says, never the one it signs for now.
       noteChainId(CUSTOM, networks.mainnet.chainId);
       const [where, opened] = await open({ nodeUrl: CUSTOM, chainId: networks.mainnet.chainId });
-      expect([where, opened]).toEqual([expect.stringMatching(inOrder("Testnet", "my-node.example:8443")), explorerTxUrl(NODE, txHash)]);
+      expect([where, opened]).toEqual([expect.stringMatching(inOrder("Testnet", "my-node.example:8443")), `${TESTNET_TX}${txHash}`]);
       expect(where).not.toContain("Mainnet");
     } finally {
       noteChainId(CUSTOM, null);
@@ -614,9 +629,9 @@ describe("transaction details", () => {
 
   // Astra's: Devnet's and other nodes' histories are kept by the node's origin, not by name.
   it.each([
-    ["Devnet", "https://devnet.nodes.dusk.network", "Devnet"],
-    ["a node of its own", "https://my-node.example:8443", "my-node.example:8443"],
-  ])("says where a transaction of %s is from its history, on that node and on another network", async (_, node, name) => {
+    ["Devnet", "https://devnet.nodes.dusk.network", "Devnet", DEVNET_TX],
+    ["a node of its own", "https://my-node.example:8443", "my-node.example:8443", null],
+  ])("says where a transaction of %s is from its history, on that node and on another network", async (_, node, name, explorerTx) => {
     const A = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
     const B = "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
     const txHash = `${node.length % 10}f`.repeat(32);
@@ -637,9 +652,10 @@ describe("transaction details", () => {
       await settle();
       return [visibleText(dom.document.body.querySelector(".tx-missing")), dom.window.open.mock.lastCall?.[0] ?? null];
     };
-    const explorer = explorerTxUrl(node, txHash);
-    // On that node, Profile 1 open: Profile 2's, and its explorer, where the node has one.
-    expect(await shown({ nodeUrl: node })).toEqual([expect.stringMatching(/profile/i), explorer]);
+    // Its explorer, where its node has one.
+    const explorer = explorerTx ? `${explorerTx}${txHash}` : null;
+    // On that node, Profile 1 open: Profile 2's.
+    expect(await shown({ nodeUrl: node })).toEqual([expect.stringMatching(/another profile/i), explorer]);
     // On Mainnet: that node's network, then Mainnet.
     expect(await shown({ nodeUrl: "https://nodes.dusk.network" })).toEqual([expect.stringMatching(inOrder(name, "Mainnet")), explorer]);
   });

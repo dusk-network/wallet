@@ -15,30 +15,32 @@ describe("what a row says", () => {
     const nodeUrl = tx.nodeUrl ?? ctx.nodeUrl ?? TESTNET;
     return describeTx(rowOf(tx, { nodeUrl }), { ...ctx, nodeUrl });
   };
-  // What a row says it did, before its name and in the line under it: a grant approves and never revokes, a revoke
-  // the other way round.
-  const says = (d, word, not) => {
-    for (const said of [d.lead, subText(d, "14:32")]) {
-      expect(said).toMatch(word);
-      expect(said).not.toMatch(not);
-    }
-  };
 
   it("names whom a token approval lets spend, and shows an allowance of 0 as a revoke", () => {
     const spender = "c".repeat(40);
     const contactName = (address) => (address === spender ? "Jan (flour)" : "");
     const token = { type: "DRC20", symbol: "TKN", decimals: 2, op: "approve", spender };
+    // A grant, to the contact it is, by the spender's whole address; how much of which token.
     const approve = describeRecord({ kind: TX_KIND.CONTRACT_CALL, status: "executed", asset: { ...token, valueUnits: "1234" } }, { contactName });
-    // Whom it lets spend, as the contact it is, by the spender's whole address; and how much of which token.
-    expect([approve.name, approve.address, amountText(approve.amount, false)]).toEqual(["Jan (flour)", spender, "12.34 TKN"]);
-    says(approve, /approv/i, /revok/i);
+    expect([approve.lead, approve.name, approve.address, subText(approve, "14:32"), amountText(approve.amount, false)]).toEqual([
+      "Approved TKN for",
+      "Jan (flour)",
+      spender,
+      "Approval · 14:32",
+      "12.34 TKN",
+    ]);
+    // An allowance of 0 takes it back: a revoke, never a grant.
     const revoke = describeRecord({ kind: TX_KIND.CONTRACT_CALL, status: "executed", asset: { ...token, valueUnits: "0" } });
-    expect([revoke.name, revoke.address, revoke.isAddress, amountText(revoke.amount, false)]).toEqual(["cccccc…cccccc", spender, true, "0 TKN"]);
-    says(revoke, /revok/i, /approv/i);
+    expect([revoke.lead, revoke.name, revoke.address, revoke.isAddress, subText(revoke, "14:32"), amountText(revoke.amount, false)]).toEqual([
+      "Revoked TKN for",
+      "cccccc…cccccc",
+      spender,
+      true,
+      "Revoke · 14:32",
+      "0 TKN",
+    ]);
+    for (const said of [revoke.lead, subText(revoke, "14:32")]) expect(said).not.toMatch(/approv/i);
     // Without a spender on record, the token and what it allows.
-    const unnamed = describeRecord({ kind: TX_KIND.CONTRACT_CALL, status: "executed", asset: { ...token, spender: undefined, valueUnits: "0" } });
-    expect(unnamed.name).toMatch(/revok/i);
-    expect(unnamed.name).not.toMatch(/approv/i);
-    expect(unnamed.name).toContain("TKN");
+    expect(describeRecord({ kind: TX_KIND.CONTRACT_CALL, status: "executed", asset: { ...token, spender: undefined, valueUnits: "0" } }).name).toBe("Revoke TKN");
   });
 });

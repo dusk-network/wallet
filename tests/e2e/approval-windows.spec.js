@@ -73,8 +73,9 @@ async function open(page, pending, { held = false } = {}) {
 // The approval's buttons, by their place in its bar rather than their words.
 const approveButton = (page) => page.locator("#approval-actions .btn-primary");
 const rejectButton = (page) => page.locator("#approval-actions .btn-outline");
-// A figure exactly as written, never the head or tail of a longer one (1.5 not in 11.5, 2,000,000 not in 12,000,000).
-const exactly = (text) => new RegExp(`(?<![\\d.,])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // A row's value, by its label.
 const rowValue = (page, label) => page.locator(".kv").filter({ has: page.locator(".kv-label", { hasText: new RegExp(`^${label}$`) }) }).locator(".kv-value");
 // The fold that holds the request's details, before any fold inside it.
@@ -195,8 +196,8 @@ test("a DuskEVM deposit shows what it does on top, and its bytes' hash under Det
   await detailsFold(page).click();
   await callData.scrollIntoViewIfNeeded();
   await expect(callData).toBeVisible();
-  await expect(callData).toHaveText(exactly("40 bytes"));
-  await expect(callData).toContainText("2f64b19f5ac0…731c7c2a");
+  // As the bridge's review page shows it, to match against: nothing before or after.
+  await expect(callData).toHaveText("40 bytes · sha256=2f64b19f5ac0…731c7c2a");
   const [recipientY, callY] = await Promise.all([recipient.boundingBox(), callData.boundingBox()]).then((boxes) => boxes.map((b) => b.y));
   expect(recipientY).toBeLessThan(callY);
 });

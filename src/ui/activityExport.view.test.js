@@ -5,7 +5,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 import { entryOf } from "../shared/fixtures/rows.js";
-import { shortEvmAddress } from "./lib/strings.js";
 import { installFakeDom, isShown, settle, visibleText } from "./testing/fakeDom.js";
 import { recordedEvm, recordedMigration } from "./testing/recordedEvm.js";
 import { activityView } from "./popup/views/activityView.js";
@@ -171,8 +170,9 @@ const panel = () => body().querySelector("#activity-export");
 // Export, and Save CSV, its panel's one button: by where they are, not their words.
 const exportToggle = () => body().querySelector(".activity-export-toggle");
 const saveCsv = () => panel().querySelector("button");
-// A value whole, as a number reads: no digit, point or comma just before it, nor a digit just after (1 isn't 11).
-const exactly = (value) => new RegExp(`(?<![\\d.,])${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 const fieldError = () => panel().querySelectorAll(".field-error").filter(isShown).map((el) => el.textContent).join("");
 
 // The file saved, by its columns' names.
@@ -208,6 +208,10 @@ describe("Activity's Export", () => {
     expect(saved).toHaveLength(1);
     expect(saved[0].blob.type).toBe("text/csv;charset=utf-8");
     const text = await saved[0].blob.text();
+    // Koinly's universal columns, written here; as an extra check, app-core's (CSV_COLUMNS).
+    expect(text.split("\r\n")[0]).toBe(
+      "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Fee Currency,Net Worth Amount,Net Worth Currency,Tag,Description,TxHash,Account Name,Account,Counterparty Name,Counterparty,Internal Transfer,Memo"
+    );
     expect(text.split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
     const lines = await linesOf();
     // All of it, oldest first, whatever the page shows or the filters pick.
@@ -367,8 +371,15 @@ describe("Activity's Export", () => {
   describe("with a wallet that changes while the file is made", () => {
     const OTHER_WALLET = FAUCET;
     const THEIRS = { hash: "e1".repeat(32), kind: "transfer", direction: "out", value: "9000000000", fee: "1000000", success: true, timestamp: AT, blockHeight: 4_650_000 };
-    // What a read the wallet changed under says, in the app's own words.
+    // What a read the wallet changed under says, written here: the wallet changed, so nothing was saved; not that the
+    // node failed. As an extra check, the app's own words.
     const CHANGED = new ActivityChangedError().message;
+    const expectChanged = () => {
+      expect(fieldError()).toMatch(/wallet changed/i);
+      expect(fieldError()).toMatch(/nothing was saved/i);
+      expect(fieldError()).not.toMatch(/\bnode\b/i);
+      expect(fieldError()).toBe(CHANGED);
+    };
     const exporting = async (options) => {
       page("/full.html");
       setup(options);
@@ -383,7 +394,7 @@ describe("Activity's Export", () => {
     ])("takes no shielded history that's %s, and saves nothing", async (_, of) => {
       await exporting({ shielded: { ...of, profileIndex: 0, entries: [THEIRS] } });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it("saves nothing when the wallet says its read stopped as another opened", async () => {
@@ -392,7 +403,7 @@ describe("Activity's Export", () => {
         open: { isUnlocked: true, nodeUrl: NODE, accounts: [OTHER_WALLET], selectedAccountIndex: 0 },
       });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it.each([
@@ -403,14 +414,14 @@ describe("Activity's Export", () => {
     ])("saves nothing when it's %s by the time the file is made", async (_, open) => {
       await exporting({ open });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it("saves nothing when the wallet locks during the overview that checks it", async () => {
       // The overview's status was taken before its balance reads: only the wallet's status is as of now.
       await exporting({ status: { accounts: [], isUnlocked: false } });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it("says so of a read that stopped as the wallet changed, not that the node failed", async () => {
@@ -419,7 +430,7 @@ describe("Activity's Export", () => {
         open: { isUnlocked: true, nodeUrl: NODE, accounts: [OTHER_WALLET], selectedAccountIndex: 0 },
       });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it("saves its own shielded history as ever, with nothing changed", async () => {
@@ -430,19 +441,25 @@ describe("Activity's Export", () => {
 
   it("saves nothing half read: a history it can't have whole says so", async () => {
     page("/full.html");
+    // Said, written here: the whole history couldn't be read, so nothing was saved; not that the wallet changed.
+    const expectHalfRead = () => {
+      expect(fieldError()).toMatch(/whole history/i);
+      expect(fieldError()).toMatch(/nothing was saved/i);
+      expect(fieldError()).not.toMatch(/wallet changed/i);
+    };
     setup({ history: { sync: vi.fn(async () => Promise.reject(new Error("offline"))) } });
     exportToggle().click();
     saveCsv().click();
     await settle();
     expect(saved).toHaveLength(0);
-    expect(fieldError()).not.toBe("");
+    expectHalfRead();
 
     setup({ history: { read: vi.fn(async () => ({ entries: [], state: {}, complete: false, coveredTo: 0 })) } });
     exportToggle().click();
     saveCsv().click();
     await settle();
     expect(saved).toHaveLength(0);
-    expect(fieldError()).not.toBe("");
+    expectHalfRead();
   });
 
   it("says what it left out, and that shielded activity is still coming", async () => {
@@ -510,7 +527,8 @@ describe("Activity's Export", () => {
     saveCsv().click();
     await settle();
     expect(saved).toHaveLength(1);
-    // Said: lines with no value in euros, by the currency's own name.
+    // Said: lines with no value in euros, the currency named, written here; as an extra check, by the app's own name for it.
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(exactly("euro"));
     expect(actions.showToast.mock.calls.at(-1)[0]).toContain(currencyName("EUR", 1));
   });
 
@@ -608,7 +626,7 @@ describe("Activity's Export", () => {
     // Its one line, and no fees said to be in the file from that address.
     const told = stranger.actions.showToast.mock.calls.at(-1)[0];
     expect(told).toMatch(exactly("1"));
-    expect(told).not.toContain(shortEvmAddress(owner));
+    expect(told).not.toMatch(exactly("0x4E4B…FF46"));
 
     // From the address the profile bridged DUSK to before: booked.
     page("/full.html");
@@ -630,7 +648,7 @@ describe("Activity's Export", () => {
     // The one migration's fee missing, on its chain, and no fees said to be in the file.
     expect(down.toast).toMatch(exactly("1"));
     expect(down.toast).toContain("BNB Smart Chain");
-    expect(down.toast).not.toContain(shortEvmAddress(owner));
+    expect(down.toast).not.toMatch(exactly("0x4E4B…FF46"));
     // Nor its approvals and revokes there, or on Ethereum: maybe in another profile's file.
     expect(down.toast).toMatch(/profile/);
 
@@ -645,7 +663,7 @@ describe("Activity's Export", () => {
     expect(up.toast).not.toMatch(/\bread\b/);
     expect(up.toast).not.toMatch(/profile/);
     // Nandini's: it named none of the EVM addresses whose fees it has. And how far back its approvals were read, on their chain.
-    expect(up.toast).toContain(shortEvmAddress(owner));
+    expect(up.toast).toMatch(exactly("0x4E4B…FF46"));
     expect(up.toast).toContain("BNB Smart Chain");
 
     // Together, to the wei, what the payout's details say it paid there.
@@ -663,7 +681,7 @@ describe("Activity's Export", () => {
         .querySelectorAll(".tx-detail > .group > .kv")
         .find((kv) => {
           const label = kv.querySelector(".kv-label").textContent;
-          return label.includes(route.chain.name) && /fee/i.test(label);
+          return label.includes("BNB Smart Chain") && /fee/i.test(label);
         });
       return row?.querySelector(".kv-value > span").childNodes.filter((node) => node.nodeType === 3).map((node) => node.data).join("");
     };
@@ -800,8 +818,8 @@ describe("Activity's Export", () => {
     // A transfer out to BNB Smart Chain sends what reached it there, and pays the bridge's fee with the network's.
     expect(first.byHash[toOther.hash]).toMatchObject({ "Sent Amount": "1", "Sent Currency": "DUSK", "Fee Amount": "1.00185", Description: `To BNB Smart Chain, bridge fee 1 DUSK · ${other}` });
     // The addresses whose fees the file has: both; and whose file each is, known: none said to be another profile's.
-    expect(first.toast).toContain(shortEvmAddress(owner));
-    expect(first.toast).toContain(shortEvmAddress(other));
+    expect(first.toast).toMatch(exactly("0x4E4B…FF46"));
+    expect(first.toast).toMatch(exactly("0x5A17…9c0d"));
     expect(first.toast).not.toMatch(/profile/);
 
     // Profile 2 bridged to it first: Profile 2's file has it, and this one doesn't.
@@ -811,8 +829,8 @@ describe("Activity's Export", () => {
     ]);
     const second = await exportOnce();
     expect(second.lines).toEqual(owners);
-    expect(second.toast).toContain(shortEvmAddress(owner));
-    expect(second.toast).not.toContain(shortEvmAddress(other));
+    expect(second.toast).toMatch(exactly("0x4E4B…FF46"));
+    expect(second.toast).not.toMatch(exactly("0x5A17…9c0d"));
     expect(second.toast).not.toMatch(/profile/);
 
     // Whose it is can't be read: in no file, and the toast says it may be in another profile's.
@@ -880,6 +898,8 @@ describe("Activity's Export", () => {
     const [[items]] = storageSessionSet.mock.calls;
     const [key] = Object.keys(items);
     const handed = items[key];
+    // Kept under its own ID, written here; as an extra check, the app's own key for it.
+    expect(key).toBe(`dusk_activity_export_v1:${handed.id}`);
     expect(key).toBe(handedExportKey(handed.id));
     expect(handed.choices).toMatchObject({ period: "2026-3", withContacts: true, fiat: false, excel: false });
     expect(runtimeGetURL).toHaveBeenCalledWith(`full.html?route=activity&save=${handed.id}`);
@@ -929,6 +949,7 @@ describe("Activity's Export", () => {
     const handed = Object.values(kept);
     expect(handed).toHaveLength(2);
     expect(new Set(handed.map((h) => h.id)).size).toBe(2);
+    expect(Object.keys(kept).sort()).toEqual(handed.map((h) => `dusk_activity_export_v1:${h.id}`).sort());
     expect(Object.keys(kept).sort()).toEqual(handed.map((h) => handedExportKey(h.id)).sort());
 
     // The first export's tab: its file, Q3's, and the second export's still there.
@@ -938,7 +959,7 @@ describe("Activity's Export", () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${first.id}` });
     await saveHandedExport({ state: setup().state });
     expect((await linesOf(0)).map((l) => l.TxHash)).toEqual(Q3);
-    expect(Object.keys(kept)).toEqual([handedExportKey(second.id)]);
+    expect(Object.keys(kept)).toEqual([`dusk_activity_export_v1:${second.id}`]);
     // The second's: Q4's.
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${second.id}` });
     await saveHandedExport({ state: setup().state });
@@ -973,14 +994,14 @@ describe("Activity's Export", () => {
   it("asks for an unlock first, in a tab that opened locked", async () => {
     page("/full.html");
     const id = "00000000-0000-4000-8000-000000000002";
-    const key = handedExportKey(id);
+    const key = `dusk_activity_export_v1:${id}`;
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${id}` });
     storageSessionGet.mockImplementationOnce(async () => ({ [key]: { id, choices: { period: "all" } } }));
     const tab = setup({ ov: { isUnlocked: false } });
     await saveHandedExport({ state: tab.state, render: tab.actions.render });
     expect(saved).toHaveLength(0);
     // Said: unlock first.
-    expect(tab.state.activityExport.error).toBeTruthy();
+    expect(tab.state.activityExport.error).toMatch(/unlock/i);
   });
 });
 

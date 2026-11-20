@@ -4,12 +4,8 @@ import fixture from "../shared/fixtures/activity-testnet.json";
 import { historyEntry, parseHistoryEntry } from "@dusk-network/app-core/history";
 import { TX_KIND } from "../shared/constants.js";
 import { installFakeDom, visibleText } from "./testing/fakeDom.js";
-import { lookAlikeText } from "./lib/contactNames.js";
-import { shortAddress } from "./lib/strings.js";
 import { homeView } from "./popup/views/home.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
-import { txStatusWord } from "./popup/views/txDisplay.js";
-import { AFTER_ALL_TEXT } from "./popup/views/txRow.js";
 import { activityKey } from "./popup/activity.js";
 
 // The token and NFT cards load on their own.
@@ -37,10 +33,12 @@ const NODE = fixture.nodeUrl;
 const FAUCET = fixture.accounts[A].receiver[0].events[0].data.sender;
 const SENDER = fixture.accounts[A].receiver[1].events[0].data.sender;
 const dusk = (n) => (BigInt(n) * 1_000_000_000n).toString();
+const short = (address) => `${address.slice(0, 6)}…${address.slice(-6)}`;
 // The network fee's field, as a sent, a failed or a dropped transaction labels it.
 const FEE = /^(network )?fee( charged)?$/i;
-// A value on its own in a sentence: no digit, point or comma before it, no digit after it.
-const exactly = (s) => new RegExp(`(?<![\\d.,])${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // Everything a screen gives away: all its text, shown or not, and each element's title and aria-label.
 const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
 
@@ -131,7 +129,7 @@ describe("Activity's rows", () => {
     ];
     draw();
     const row = rowWith("+1,000 DUSK");
-    expect([row.name, row.alias, row.alike]).toEqual(["Estudio M\u0430rta", shortAddress(SENDER), lookAlikeText({ kind: "contact" })]);
+    expect([row.name, row.alias, row.alike]).toEqual(["Estudio M\u0430rta", short(SENDER), "Looks like another contact"]);
     // A name like no other's has no mark.
     state.addressBook.items = [{ name: "Estudio M\u0430rta", address: SENDER }];
     draw();
@@ -162,7 +160,7 @@ describe("Activity's rows", () => {
     };
     setup({ local: [pending] });
     const own = rowWith("−5 DUSK");
-    expect([own.name, own.status, own.pending]).toEqual(["faucet.dusk", txStatusWord("submitted"), true]);
+    expect([own.name, own.status, own.pending]).toEqual(["faucet.dusk", "Pending", true]);
     // Completed rows say nothing about it.
     for (const row of rows().filter((r) => r.row !== own.row)) expect([row.status, row.pending]).toEqual(["", false]);
 
@@ -171,7 +169,7 @@ describe("Activity's rows", () => {
     view.state.addressBook = { loaded: true, items: [{ name: "Faucet (test)", address: FAUCET }] };
     view.draw();
     const named = rowWith("−5 DUSK");
-    expect([named.name, named.alias, named.status]).toEqual(["Faucet (test)", "faucet.dusk", txStatusWord("submitted")]);
+    expect([named.name, named.alias, named.status]).toEqual(["Faucet (test)", "faucet.dusk", "Pending"]);
   });
 
   // Lena's: after Don't send, a payment that went out anyway was a plain Sent row after a few seconds, and she
@@ -190,10 +188,10 @@ describe("Activity's rows", () => {
       wentAfterAll: NOW.getTime() - 10_000,
     };
     const view = setup({ local: [went] });
-    expect(rowWith("−5 DUSK").afterAll).toBe(AFTER_ALL_TEXT);
+    expect(rowWith("−5 DUSK").afterAll).toBe("Sent after you chose not to send");
     // Opened, it's said there; then a row as any other.
     rowWith("−5 DUSK").row.querySelector("button.tx-open").click();
-    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe(AFTER_ALL_TEXT);
+    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Sent after you chose not to send");
     view.ov.txs = [{ ...went, afterAllSeen: NOW.getTime() }];
     view.state.route = "home";
     view.draw();
@@ -220,20 +218,21 @@ describe("Activity's rows", () => {
     };
     setup({ local: [failed] });
     let row = failedRow();
-    // Failed, the fee it paid, and its amount without a sign: nothing left.
-    expect([row.status, row.amount]).toEqual([txStatusWord("failed"), "200 DUSK"]);
+    // Failed, never Completed; the fee it paid, and its amount without a sign: nothing left.
+    expect([row.status, row.amount]).toEqual(["Failed", "200 DUSK"]);
+    expect(row.status).not.toMatch(/completed/i);
     expect(row.sub).toMatch(exactly("0.0037 DUSK"));
     // Hide balances hides the fee too, as it does the amount, wherever the row says them.
     setup({ local: [failed], hidden: true });
     row = failedRow();
-    expect([row.status, row.amount]).toEqual([txStatusWord("failed"), "•••• DUSK"]);
+    expect([row.status, row.amount]).toEqual(["Failed", "•••• DUSK"]);
     expect(row.sub).not.toMatch(/\d/);
     for (const figure of ["0.0037", "200"]) expect(everything(row.row)).not.toMatch(exactly(`${figure} DUSK`));
     // Without a fee charged, no fee, a fee of 0 included.
     for (const feePaid of [undefined, "0"]) {
       setup({ local: [{ ...failed, feePaid }] });
       row = failedRow();
-      expect([row.status, row.amount]).toEqual([txStatusWord("failed"), "200 DUSK"]);
+      expect([row.status, row.amount]).toEqual(["Failed", "200 DUSK"]);
       expect(row.sub, String(feePaid)).not.toMatch(/\d/);
     }
   });
@@ -255,7 +254,7 @@ describe("Activity's rows", () => {
     };
     const view = setup({ local: [failed] });
     const row = rows().find((r) => r.failed);
-    expect(row.amount).toBe("1 DUSK");
+    expect([row.status, row.amount]).toEqual(["Failed", "1 DUSK"]);
     expect(row.sub).toMatch(exactly("0.0018 DUSK"));
     expect(row.sub).not.toMatch(exactly("0.0019 DUSK"));
     Object.assign(view.state, { route: "tx", txDetailHash: failed.hash, txDetailFrom: "home" });
@@ -274,18 +273,23 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
   };
   // Its row: the one that paid 100 DUSK.
   const row = () => rowWith("−100 DUSK");
-  const unknown = txStatusWord("unknown", { final: true });
   // The details' status, and its state: is-neutral for one nothing waits on.
   const hero = () => {
     const status = body().querySelector(".tx-hero-status");
     return [visibleText(status), status.className.split(" ").find((c) => c.startsWith("is-"))];
+  };
+  // Its note: final on chain, its outcome being looked up; never that the wallet stopped waiting for it.
+  const lookedUp = () => {
+    const note = visibleText(body().querySelector(".tx-hero-note"));
+    expect(note).toMatch(/looked up/i);
+    expect(note).not.toMatch(/stopped waiting/i);
   };
 
   it("says its outcome is unknown, neither completed nor pending", () => {
     const view = setup();
     unfetched(view);
     view.draw();
-    expect([row().status, row().pending]).toEqual([unknown, false]);
+    expect([row().status, row().pending]).toEqual(["Unknown", false]);
   });
 
   it("opens on an unknown outcome, says it is being looked up, and looks it up", () => {
@@ -295,8 +299,8 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     detail.load.mockClear();
     view.draw();
     expect(detail.load).toHaveBeenCalledWith(expect.objectContaining({ state: view.state }), entry.hash);
-    expect(hero()).toEqual([unknown, "is-neutral"]);
-    expect(visibleText(body().querySelector(".tx-hero-note"))).not.toBe("");
+    expect(hero()).toEqual(["Unknown", "is-neutral"]);
+    lookedUp();
   });
 
   it("takes the wallet's own pending send it has as final, its outcome unknown, and looks it up too", () => {
@@ -308,11 +312,11 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     view.draw();
     expect(detail.load).toHaveBeenCalledWith(expect.objectContaining({ state: view.state }), entry.hash);
     // In a finalized block: not pending, whatever the wallet's watcher last saw.
-    expect(hero()).toEqual([unknown, "is-neutral"]);
-    expect(visibleText(body().querySelector(".tx-hero-note"))).not.toBe("");
+    expect(hero()).toEqual(["Unknown", "is-neutral"]);
+    lookedUp();
     // And its row the same.
     view.state.route = "home";
     view.draw();
-    expect([row().status, row().pending]).toEqual([unknown, false]);
+    expect([row().status, row().pending]).toEqual(["Unknown", false]);
   });
 });

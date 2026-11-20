@@ -15,8 +15,9 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// A figure exactly as written, never the head or tail of a longer one (0.005 not in 10.005, 2,000,000 not in 12,000,000).
-const exactly = (text) => new RegExp(`(?<![\\d.,])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // The fee's value and the total's (or what comes back), each in its own element.
 const feeValue = (editor) => visibleText(editor.querySelector(".gas-fee-value"));
 const totalValue = (editor) => visibleText(editor.querySelector(".gas-total-value"));

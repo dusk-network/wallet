@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { RECOVERY_WORDS_MISMATCH } from "@dusk-network/app-core/recovery-words";
 import { accessibleName, fakeEvent, installFakeDom, isShown, settle, typeInto, typeKeys, visibleText } from "./testing/fakeDom.js";
 import { passwordManagerView } from "./testing/passwordManager.js";
-import { HOLD_TO_SHOW_TEXT } from "./lib/pageAway.js";
 import {
   onboardingCreateConfirmView,
   onboardingCreatePasswordView,
@@ -13,7 +12,7 @@ import {
   restoreWalletView,
 } from "./popup/views/onboarding.js";
 import { changePasswordView, removeWalletView } from "./popup/views/wallets.js";
-import { FINGERPRINTS_CHANGED_TEXT, WRONG_PASSWORD_TEXT, lockedView } from "./popup/views/locked.js";
+import { FINGERPRINTS_CHANGED_TEXT, lockedView } from "./popup/views/locked.js";
 
 const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 // Check your recovery words: each box asked filled with the phrase's word at its place.
@@ -54,8 +53,14 @@ const describedBy = (el) =>
 const errorOf = (el) => describedBy(el).find((n) => n.classList.contains("field-error"))?.textContent ?? "";
 // The numbers a sentence names, in order: the words it means, or a count.
 const numbersIn = (text) => text.match(/\d+/g) ?? [];
-// `text` exactly: no digit, point or comma just before it, nor a digit just after (8 characters isn't 18 characters).
-const exactly = (text) => new RegExp("(?<![\\d.,])" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\d])");
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+// Says a phrase isn't valid, in its key words ("isn't a valid recovery phrase"), and never that it is one.
+const notValid = (text) => {
+  expect(text).toMatch(/\b(?:isn['’]t|is not) a valid\b|\binvalid\b/i);
+  expect(text).not.toMatch(/\bis a valid\b/i);
+};
 // The password the wallets here share, where one's added or removed.
 const SHARED_PASSWORD = "input[autocomplete=current-password]";
 // Two wallets here, by number.
@@ -113,7 +118,7 @@ describe("setting up and unlocking", () => {
     // A whole phrase put in at once is checked then, before Import: not a valid phrase, naming no word or count.
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
     const checksum = errorOf(group);
-    expect(checksum).toMatch(/valid/i);
+    notValid(checksum);
     expect(numbersIn(checksum)).toEqual([]);
     mainButton(body).click();
     await settle();
@@ -189,7 +194,9 @@ describe("setting up and unlocking", () => {
       wordBoxes(body).forEach((input, i) => typeInto(input, typed[i]));
       mainButton(body).click();
       await settle();
-      expect(body.querySelectorAll("[role=alert]").filter(isShown).map((el) => el.textContent)).toEqual([RECOVERY_WORDS_MISMATCH]);
+      const said = body.querySelectorAll("[role=alert]").filter(isShown).map((el) => el.textContent);
+      expect(said).toEqual([expect.stringMatching(/\bdoesn['’]t match\b/i)]);
+      expect(said).toEqual([RECOVERY_WORDS_MISMATCH]);
       expect(visibleText(body)).not.toContain("abandon");
       expect([body.querySelector(".srp-grid"), wordBoxes(body)]).toEqual([null, []]);
       expect([state.route, state.onboard.reveal, acts.send.mock.calls]).toEqual(["onboard_create_confirm", false, []]);
@@ -275,7 +282,7 @@ describe("setting up and unlocking", () => {
     await settle();
     // Not a valid phrase, naming no word or count, and nothing restored.
     const checksum = errorOf(group);
-    expect(checksum).toMatch(/valid/i);
+    notValid(checksum);
     expect(numbersIn(checksum)).toEqual([]);
     expect(acts.send).not.toHaveBeenCalled();
 
@@ -342,7 +349,7 @@ describe("a new recovery phrase", () => {
     const acts = actions();
     const body = show(onboardingCreatePhraseView({ state, actions: acts }));
     const blurred = () => body.querySelector(".srp-grid").classList.contains("srp-grid--blur");
-    expect([blurred(), body.querySelectorAll(".phrase-tools button").map((b) => b.textContent)]).toEqual([true, [HOLD_TO_SHOW_TEXT]]);
+    expect([blurred(), body.querySelectorAll(".phrase-tools button").map((b) => b.textContent)]).toEqual([true, [expect.stringMatching(/^hold\b/i)]]);
     const hold = body.querySelector(".phrase-tools button");
     hold.click();
     expect([blurred(), state.onboard.reveal]).toEqual([true, false]);
@@ -687,7 +694,8 @@ describe("fingerprint unlock", () => {
     const { asked } = phone({ on: true, unlock: { ok: false, reason: "invalidated" } });
     const acts = actions();
     const body = show(lockedView({ state: {}, actions: acts }));
-    await vi.waitFor(() => expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
+    await vi.waitFor(() => expect(notes(body)).toContainEqual(expect.stringMatching(/\bfingerprints changed\b.*\bfingerprint unlock is off\b/i)));
+    expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT);
     expect(isShown(outlineButton(body))).toBe(false);
     typeInto(unlockPassword(body), "typed password");
     mainButton(body).click();
@@ -702,7 +710,8 @@ describe("fingerprint unlock", () => {
     const { asked } = phone({ available: true, on: false, lost: true });
     const acts = actions();
     const body = show(lockedView({ state: {}, actions: acts }));
-    await vi.waitFor(() => expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
+    await vi.waitFor(() => expect(notes(body)).toContainEqual(expect.stringMatching(/\bfingerprints changed\b.*\bfingerprint unlock is off\b/i)));
+    expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT);
     expect(isShown(outlineButton(body))).toBe(false);
     expect(asked.map(([action]) => action)).toEqual(["status"]);
     typeInto(unlockPassword(body), "typed password");
@@ -716,7 +725,8 @@ describe("fingerprint unlock", () => {
     const { asked } = phone({ available: false, on: false, lost: true });
     const acts = actions();
     const body = show(lockedView({ state: {}, actions: acts }));
-    await vi.waitFor(() => expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
+    await vi.waitFor(() => expect(notes(body)).toContainEqual(expect.stringMatching(/\bfingerprints changed\b.*\bfingerprint unlock is off\b/i)));
+    expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT);
     typeInto(unlockPassword(body), "typed password");
     mainButton(body).click();
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["disable", undefined]));
@@ -731,8 +741,8 @@ describe("fingerprint unlock", () => {
     await settle();
     // Said under the password: fingerprint unlock is off, not that a password typed is wrong.
     const said = visibleText(body.querySelector("#unlock-error"));
-    expect(said).toMatch(/fingerprint/i);
-    expect(said).not.toBe(WRONG_PASSWORD_TEXT);
+    expect(said).toMatch(/\bpassword changed\b.*\bfingerprint unlock is off\b/i);
+    expect(said).not.toMatch(/\bwrong password\b/i);
   });
 
   it("offers it beside a new wallet's password, and asks for the fingerprint once the wallet is made", async () => {

@@ -43,10 +43,11 @@ describe("shield and unshield", () => {
   const button = (text) => body().querySelectorAll("button").find((b) => b.textContent === text);
   // A Review's Confirm, whatever it says: the one button at the Review's end (FormControls.js reviewActions).
   const confirm = () => body().querySelector(".review-actions button");
-  // A figure as written, whole: 1,482.8883 DUSK is no 11,482.8883 DUSK, 0.05 DUSK no 10.05 DUSK.
-  const exactly = (s) => new RegExp(`(?<![\\d.,])${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`);
-  // The most a fee can be, as the form says it under the amount: "up to 0.05 DUSK", never 10.05.
-  const upTo = (s) => new RegExp(`\\bup to ${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`, "i");
+  // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed
+  // by more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+  const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+  // The most a fee can be, as the form says it under the amount: "up to 0.05 DUSK", never 10.05 or −0.05.
+  const upTo = (text) => new RegExp(`\\bup to ${exactly(text).source}`, "i");
   // What a Review says, each in its own place: the amount, a row's value by its label, the fee and the total.
   const reviewed = () => ({
     amount: visibleText(body().querySelector(".review-head .balance-amount")),

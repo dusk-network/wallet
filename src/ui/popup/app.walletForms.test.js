@@ -77,8 +77,9 @@ const WORD = (n) => `input[aria-label="Word ${n}"]`;
 const PASSWORD = "input[type=password]";
 const fieldsOf = (app, selectors) => app.querySelectorAll(selectors.join(", "));
 const typeAll = (fields) => fields.forEach((f, i) => typeInto(f, accessibleName(f).startsWith("Word") ? WORDS[i] : "typed password"));
-// `text` exactly: no digit, point or comma just before it, nor a digit just after (5 DUSK isn't 0.5 or 15 DUSK).
-const exactly = (text) => new RegExp("(?<![\\d.,])" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\d])");
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 // A form's main button, whatever it says: the primary or destructive one shown.
 const mainButton = (app) => app.querySelectorAll("button.btn-primary, button.btn-destructive").find(isShown);
 // The error shown under a field, as the field is described by it.

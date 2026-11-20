@@ -110,14 +110,19 @@ describe("a node that answers again before the balance does", () => {
       return el && !el.hidden ? el.textContent : "";
     };
     const offline = () => (pill.querySelector(".net-status-dot")?.className ?? "").includes("net-status--offline");
-    // The balance shown, and whether it's said to be maybe out of date (home.js balance-stale).
+    // The balance shown, and what's said of it under it (home.js balance-stale): that it may be out of date, never
+    // that it's current; "" where nothing is said.
     const balance = () => app.querySelector(".balance-amount").textContent;
-    const stale = () => app.querySelector(".balance-stale") !== null;
+    const note = () => app.querySelector(".balance-stale")?.textContent ?? "";
+    const maybeOutOfDate = () => {
+      expect(note()).toMatch(/may be out of date/i);
+      expect(note()).not.toMatch(/\bcurrent\b|up to date/i);
+    };
     try {
       const { render } = await import("./app.js");
       await render();
       await settle();
-      expect([balance(), stale()]).toEqual(["1.0477 DUSK", false]);
+      expect([balance(), note()]).toEqual(["1.0477 DUSK", ""]);
 
       // The node goes silent, and holds the balance's reads: said, of the network, not of the browser, and the
       // balance read last kept, said to be maybe out of date.
@@ -125,7 +130,8 @@ describe("a node that answers again before the balance does", () => {
       holding = true;
       vi.advanceTimersByTime(15_000);
       await vi.waitFor(() => expect(words()).toMatch(/network/i));
-      expect([offline(), balance(), stale()]).toEqual([true, "1.0477 DUSK", true]);
+      expect([offline(), balance()]).toEqual([true, "1.0477 DUSK"]);
+      maybeOutOfDate();
 
       // It answers its check again, the balance's read still held: back at once, the balance still maybe out of date.
       silent = false;
@@ -133,13 +139,14 @@ describe("a node that answers again before the balance does", () => {
       vi.advanceTimersByTime(15_000);
       await vi.waitFor(() => expect(reads()).toBeGreaterThan(before));
       await settle();
-      expect([words(), offline(), balance(), stale()]).toEqual(["", false, "1.0477 DUSK", true]);
+      expect([words(), offline(), balance()]).toEqual(["", false, "1.0477 DUSK"]);
+      maybeOutOfDate();
 
       // A balance read since: shown, and no longer said to be out of date.
       holding = false;
       for (const resolve of held.splice(0)) resolve(read("2000000000"));
       await vi.waitFor(() => expect(balance()).toBe("2 DUSK"));
-      expect(stale()).toBe(false);
+      expect(note()).toBe("");
     } finally {
       vi.useRealTimers();
     }
