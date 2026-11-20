@@ -238,7 +238,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect([standing(waitsBox), standing(checksBox), standing(goingBox)]).toEqual(["Not confirmed", "Not confirmed", "Sending"]);
     for (const box of [waitsBox, checksBox]) {
       expect(box.note).toMatch(/may have gone out/i);
-      expect(box.note).not.toMatch(/nothing was sent|not sent/i);
+      expect(box.note).not.toMatch(/nothing (was )?sent|nothing left|not sent/i);
     }
     expect(waitsBox.note).toMatch(/goes out once/i);
     expect(checksBox.note).toMatch(/check/i);

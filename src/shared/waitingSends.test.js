@@ -673,7 +673,7 @@ describe("a public payment handed to the node without a clear answer", () => {
     await waiting.stopWaitingSends("locked", host);
     const error = await sent;
     expect(error.data).toMatchObject({ sent: "unknown", hash: "c7" });
-    expect(error.message).not.toMatch(/nothing was sent/i);
+    expect(error.message).not.toMatch(/nothing was sent|nothing left/i);
     expect(await kept()).toEqual([expect.objectContaining({ sendId: "s1", unclear: true, checks: true })]);
     // Back, the node asked: it never had it, and its nonce is unused.
     network.says = "absent";

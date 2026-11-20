@@ -750,7 +750,7 @@ describe("coming back to the wallet during a payment", () => {
     await flush();
     // Listed nowhere: no row of it, nor a word that it's not sent yet.
     expect(t.app.querySelectorAll(".tx-row")).toEqual([]);
-    expect(t.app.textContent).not.toContain("Not sent yet");
+    expect(t.app.textContent).not.toContain("Held");
     expect(t.app.textContent).not.toContain(txStatusWord("unsent"));
     await back();
     expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
