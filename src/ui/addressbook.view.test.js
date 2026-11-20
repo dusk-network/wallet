@@ -134,7 +134,9 @@ describe("contacts", () => {
 
   it("lists contacts by name with their address and first letter, and leaves Delete all to Settings", async () => {
     let view = mount();
-    expect(dom.document.body.querySelector('input[type="search"]').getAttribute("aria-label")).toBe("Search contacts");
+    // Named for screen readers; what it searches, in the box.
+    const search = dom.document.body.querySelector('input[type="search"]');
+    expect([search.getAttribute("aria-label"), search.getAttribute("placeholder")]).toEqual(["Search contacts", "Search name or address…"]);
     expect(view.buttons()).toEqual(["← Back", "New contact"]);
     expect(visibleText(dom.document.body.querySelector(".contacts-empty"))).toBe("No contacts yet.");
 

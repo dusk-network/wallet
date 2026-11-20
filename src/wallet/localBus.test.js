@@ -622,7 +622,7 @@ describe("a payment from Send that can't reach the network before it goes out", 
     const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0003", walletId: "account of wallet A", params });
     await vi.waitFor(() => expect(heard()).toHaveLength(1));
     await localSend({ type: "DUSK_UI_LOCK" });
-    await expect(response).resolves.toMatchObject({ error: { message: "The wallet locked first. Nothing left your wallet." } });
+    await expect(response).resolves.toMatchObject({ error: { message: "The wallet locked before the network answered. Nothing left your wallet." } });
 
     engine.unlocked = true;
     statusChecks.nodeAnswers = true;

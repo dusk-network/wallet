@@ -218,10 +218,9 @@ export function addressBookView(ov, { state, actions } = {}) {
       ? items.filter((e) => [e?.name, e?.address, e?.duskName].some((v) => searchKey(v).includes(q)))
       : items;
 
-    // The title names the list, so the search has no label of its own, nor
-    // more than "Search" in it: it finds by name, address and .dusk name.
+    // The title names the list, so the search has no label of its own.
     const search = searchInput({
-      placeholder: "Search",
+      placeholder: "Search name or address…",
       "aria-label": "Search contacts",
       value: String(ab.query ?? ""),
       oninput: (e) => {

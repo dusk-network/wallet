@@ -267,11 +267,12 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
   const tokens = Array.isArray(st?.tokens) ? st.tokens : [];
   const nfts = Array.isArray(st?.nfts) ? st.nfts : [];
 
-  // A token by its name, its symbol beside its balance; by its symbol where it has no name.
+  // A token by its name, "DRC20 token" where it has none, its symbol beside
+  // its balance, also while that isn't read ("— TKN").
   const tokenRows = tokens.map((t) => {
     const cid = String(t?.contractId ?? "");
     const sym = String(t?.symbol ?? "").trim() || "TOKEN";
-    const name = String(t?.name ?? "").trim() || sym;
+    const name = String(t?.name ?? "").trim() || "DRC20 token";
     const dec = Number(t?.decimals ?? 0) || 0;
     const balUnits = st?.balances?.[cid];
     const bal = balUnits != null ? formatTokenUnits(balUnits, dec, { maxFrac: UI_DISPLAY_DECIMALS }) : "—";
@@ -291,7 +292,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
       [
         h("span", { class: "row-icon asset-letter", "aria-hidden": "true", text: sym.slice(0, 1).toUpperCase() }),
         h("span", { class: "row-main" }, [h("span", { class: "row-title", text: name, title: cid })]),
-        h("span", { class: "tx-amount asset-amt" }, [balance(hidden, bal), bal === "—" ? null : h("span", { class: "tx-unit", text: ` ${sym}` })].filter(Boolean)),
+        h("span", { class: "tx-amount asset-amt" }, [balance(hidden, bal), h("span", { class: "tx-unit", text: ` ${sym}` })]),
       ]
     );
   });

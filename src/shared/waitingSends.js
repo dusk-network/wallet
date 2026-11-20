@@ -50,11 +50,11 @@ export { SEND_CANCELLED_TEXT };
 /** How long a waiting payment waits before the network is asked again, where the browser doesn't say first that it's back. */
 export const ASK_AGAIN_AFTER_MS = 5_000;
 
-/** Why a waiting payment wasn't sent, as the wallet stopped waiting for it before the network answered. */
+/** Why a waiting payment wasn't sent, as the wallet stopped waiting for it. */
 export const NOT_SENT_TEXT = Object.freeze({
-  closed: "The wallet closed first. Nothing left your wallet.",
-  locked: "The wallet locked first. Nothing left your wallet.",
-  switched: "Another wallet was opened first. Nothing left your wallet.",
+  closed: "The wallet closed before the network answered. Nothing left your wallet.",
+  locked: "The wallet locked before the network answered. Nothing left your wallet.",
+  switched: "Another wallet was opened before the network answered. Nothing left your wallet.",
 });
 
 // Why the wallet stopped waiting on a payment that may have gone out.

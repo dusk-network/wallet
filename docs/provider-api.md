@@ -516,7 +516,7 @@ array elements. The preview remains bounded to 200 rows, depth 8 and 2048 source
 code points per string; clipping is disclosed. Byte previews summarize decoded
 hex bytes, including uppercase-prefixed and prefixless input.
 
-**Full signing request** expands a read-only, keyboard-scrollable escaped-JSON
+**Full signing request (escaped JSON)** expands a read-only, keyboard-scrollable
 view of the complete domain, schema, message and wallet-injected origin, including
 omitted preview values and original bytes. Non-ASCII characters use `\uXXXX`
 escapes (surrogate pairs for supplementary characters); parsing the JSON recovers

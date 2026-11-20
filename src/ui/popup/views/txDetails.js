@@ -30,12 +30,11 @@ import { waiting } from "../../components/Waiting.js";
 import { REPLACED_TEXT } from "../../../shared/waitingSends.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
-// then its date, memo, fee and the profile it left or reached; a transfer to
-// another chain that arrived adds when, and its transaction there. Its ID,
-// which opens the explorer, with Copy, and its block, gas, finality and a
-// call's contract sit under Details, labelled as in every Dusk app. A row
-// shows an amount short; here it's exact, the fee too. Hide balances hides
-// the amount; the fee stays.
+// then its date, memo, fee, the profile it left or reached, and its ID, which
+// opens the explorer; a transfer to another chain that arrived adds when, and
+// its transaction there. Block, gas, finality and a call's contract sit under
+// Details, labelled as in every Dusk app. A row shows an amount short; here
+// it's exact, the fee too. Hide balances hides the amount; the fee stays.
 
 const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 
@@ -56,8 +55,9 @@ function statusNote(tx, desc, hidden) {
   const shielded = tx?.privacy === "shielded";
   const a = desc.amount;
   const stayed = !desc.unsent || !a || a.text ? "" : hidden ? " The amount stayed in your wallet." : ` The ${a.exact ?? a.value} ${a.unit} stayed in your wallet.`;
+  // That no fee was charged, its Fee row says.
   if (tx?.dropped) {
-    return `The network dropped it before it ran. No fee charged.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
+    return `The network dropped it before it ran.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
   }
   // Chosen not to be sent, and arrived after all (txReconcile.js): when, too,
   // as its block says (wentAt).
@@ -146,9 +146,9 @@ function profileValue(ov, tx, rail) {
 // A fee, hidden as amounts are with Hide balances.
 const feeValue = (text, hidden) => h("span", {}, [balance(hidden, text), " DUSK"]);
 
-// The fee; none for one dropped, held or not sent, whose note says nothing was charged.
+// The fee; none charged for one dropped, held or not sent.
 function feeRow(tx, desc, hidden) {
-  if (tx?.dropped || tx?.status === "unsent" || tx?.status === "not_sent") return null;
+  if (tx?.dropped || tx?.status === "unsent" || tx?.status === "not_sent") return kv("Fee", "None charged");
   if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Fee", feeValue(formatDuskExact(tx.fee), hidden));
   const limit = tx?.gasLimit ?? 0n;
   const price = tx?.gasPrice ?? 0n;
@@ -520,13 +520,14 @@ export function txDetailsView(ov, { state, actions } = {}) {
     ledger ? null : feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,
+    kv("Transaction ID", [idButton, copyId]),
     arrivalRow,
   ].filter(Boolean));
 
-  // Details stay open across redraws (a sync can redraw this view): the ID first.
+  // Details stay open across redraws (a sync can redraw this view).
   const tech = h("details", { class: "advanced tx-tech", open: Boolean(state?.txTechOpen) }, [
     h("summary", { text: "Details" }),
-    h("div", { class: "group group--inset" }, [kv("Transaction ID", [idButton, copyId]), ...technicalRows(tx, ov, nodeUrl, showToast, hidden)]),
+    h("div", { class: "group group--inset" }, technicalRows(tx, ov, nodeUrl, showToast, hidden)),
   ]);
   tech.addEventListener("toggle", () => {
     if (state) state.txTechOpen = tech.open;

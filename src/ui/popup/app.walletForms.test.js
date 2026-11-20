@@ -213,8 +213,8 @@ describe("the password on big sends, in Settings", () => {
   it("says what it asks on in the app without sites, which only the extension has", async () => {
     const note = (app) => app.querySelector(".settings-note").textContent;
     const ext = await popupAt("send_password");
-    // The switch is the title's, and says only On.
-    expect(ext.app.querySelector("label[for=send-password-on]").textContent).toBe("On");
+    // The switch says what it does.
+    expect(ext.app.querySelector("label[for=send-password-on]").textContent).toBe("Ask for the password on big sends");
     expect(note(ext.app)).toBe("Counts sends, stakes, shielding and site requests, network fee included. Token transfers and unknown contracts always ask.");
     vi.stubGlobal("browser", undefined);
     globalThis.window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => null), transformCallback: () => 0 };

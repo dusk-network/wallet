@@ -85,7 +85,7 @@ const lessMotion = () => Boolean(globalThis.window?.matchMedia?.("(prefers-reduc
 /**
  * Asks before a request paid already is copied or shared again, on its own
  * card, so nothing hides it: "This request was paid already, on <date>."
- * with Copy anyway, Share anyway or Download anyway, and Cancel; only its
+ * with Copy anyway, Share anyway or Save anyway, and Cancel; only its
  * anyway gives it out (Sofía's, Nandini's, Marek's and Chen's: Copy said only
  * Copied, Share sent a fresh "asks you to pay" for an invoice paid twice, and
  * in the app the one toast that said so hid under Android's clipboard preview).

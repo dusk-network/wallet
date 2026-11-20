@@ -15,7 +15,7 @@ import { duskNameOwners, duskNamesNetwork, lookupPrimaryName } from "../../../sh
 import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
-import { isPhone } from "../../lib/device.js";
+import { isPhone, thisDevice } from "../../lib/device.js";
 import { isTauriRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress, siteName } from "../../lib/strings.js";
@@ -31,12 +31,11 @@ import { appNoticesAllowed, askAppNotices } from "../../../platform/notices.js";
 import { watchIncomingAgain } from "../incoming.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
+import { resetKeptText } from "./wallets.js";
 
 // Settings: the wallets, the profile, security, connected sites, contacts and
 // the network, then Advanced (custom fee, Delete all contacts), Reset wallet
 // on its own, and About: the version, and the terms of use and privacy policy.
-// What a button's own page says (Reset's warning, Change password's every
-// wallet) is said there, not here too.
 
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
@@ -589,12 +588,15 @@ export function optionsView(ov, { state, actions } = {}) {
     lockChoices.map((opt) => h("option", { value: String(opt.value), text: opt.label }))
   );
   autoLockSelect.value = leaving ? "leave" : String(currentAutoLock);
-  // Under the choice only what it doesn't say: what Immediately is, in the
-  // app, and with more than one wallet here, that it's every one's.
+  // Under the choice what it means: after a time without use, or, Immediately
+  // in the app, as the app is left; with more than one wallet here, every one.
   const lockNote = h("p", { class: "settings-note" });
   const sayLock = (onLeave) => {
-    lockNote.textContent = onLeave ? "Locks as you leave the app." : lockAll ? "For every wallet here." : "";
-    lockNote.hidden = !lockNote.textContent;
+    lockNote.textContent = onLeave
+      ? "Locks as you leave the app."
+      : lockAll
+        ? "Locks every wallet after this long without use."
+        : "Locks after this long without use.";
   };
   autoLockSelect.addEventListener("change", async () => {
     const onLeave = autoLockSelect.value === "leave";
@@ -723,12 +725,10 @@ export function optionsView(ov, { state, actions } = {}) {
         details,
       ].filter(Boolean));
     }
-    // Each profile by its name alone, which no other profile's can be: Active
-    // profile, above, shows its account.
     const sel = h(
       "select",
       { "aria-label": `Profile for ${host}` },
-      displayAccounts.map((_acct, i) => named(i, h("option", { value: String(i) }), () => verified.get(i) || profileLabelOf(ov, i)))
+      displayAccounts.map((_acct, i) => named(i, h("option", { value: String(i) })))
     );
     sel.value = String(Math.max(0, Math.min(idx, displayAccounts.length - 1)));
     sel.addEventListener("change", async () => {
@@ -1102,8 +1102,8 @@ export function optionsView(ov, { state, actions } = {}) {
     ]
   );
 
-  // Reset, on a screen of its own, which says what it removes: the password
-  // first, as for removing a wallet.
+  // Reset, on a screen of its own: the password first, as for removing a wallet.
+  const resetKept = resetKeptText();
   const resetBtn = h("button", {
     class: "btn-destructive",
     type: "button",
@@ -1151,6 +1151,7 @@ export function optionsView(ov, { state, actions } = {}) {
       (sayLock(leaving), lockNote),
       fingerRow,
       changePasswordBtn,
+      changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
       sendPasswordRow || phraseRow || checkWordsRow ? h("div", { class: "group" }, [phraseRow, checkWordsRow, sendPasswordRow].filter(Boolean)) : null,
     ]),
     inApp && ov?.isUnlocked ? section("Notices", [incomingRow(ov, { actions })]) : null,
@@ -1160,7 +1161,13 @@ export function optionsView(ov, { state, actions } = {}) {
     section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), switchError, nodeDetails]),
     // Advanced is its own section, its title the disclosure's.
     h("section", { class: "settings-section" }, [advanced]),
-    section("Reset", [resetBtn], "settings-section--danger"),
+    section("Reset", [
+      h("p", {
+        class: "settings-note",
+        text: `Removes every wallet, with its ${resetKept}, from ${thisDevice()}, and goes back to Mainnet. Funds stay on Dusk; you need each recovery phrase to use them again.`,
+      }),
+      resetBtn,
+    ], "settings-section--danger"),
     section("About", [
       installedVersion ? h("p", { class: "settings-note", text: `Dusk Wallet v${installedVersion}` }) : null,
       h("p", { class: "settings-note settings-legal" }, [

@@ -179,8 +179,8 @@ describe("hidden balances", () => {
     typeInto(to, OTHER_ACCOUNT);
     await settle();
     expect(seen(body.querySelector(".amount-avail__text"))).toEqual([
-      "Available •••• DUSK",
-      "Available hidden DUSK",
+      "Available after fees •••• DUSK",
+      "Available after fees hidden DUSK",
     ]);
     // The fee isn't a balance.
     expect(body.querySelector(".amount-fee-note").textContent).toBe("Fee up to 0.0025 DUSK");
@@ -190,7 +190,7 @@ describe("hidden balances", () => {
     // Shielded: what's spendable now, the rest held for a pending transaction.
     typeInto(to, ADDRESS);
     await settle();
-    expect(visibleText(body.querySelector(".amount-avail__text"))).toBe("Available •••• DUSK");
+    expect(visibleText(body.querySelector(".amount-avail__text"))).toBe("Available after fees •••• DUSK");
     expect(body.querySelector(".amount-fee-note").textContent).toBe(
       "Fee up to 0.05 DUSK · Part of your shielded DUSK waits on a pending transaction"
     );
@@ -206,8 +206,8 @@ describe("hidden balances", () => {
     const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
     await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
     const lines = () => [".amount-avail__text", ".amount-fee-note"].map((sel) => visibleText(body.querySelector(sel)));
-    expect(lines()).toEqual(["Available •••• DUSK", "Fee up to 0.05 DUSK"]);
-    expect(screenReaderText(body.querySelector(".amount-avail__text"))).toBe("Available hidden DUSK");
+    expect(lines()).toEqual(["Available after fees •••• DUSK", "Fee up to 0.05 DUSK"]);
+    expect(screenReaderText(body.querySelector(".amount-avail__text"))).toBe("Available after fees hidden DUSK");
     body.querySelector(".amount-avail button").click();
     expect(body.querySelector("input.amount-field__input").value).toBe("1482.8883");
 
@@ -221,7 +221,7 @@ describe("hidden balances", () => {
 
     state.draft = { kind: TX_KIND.UNSHIELD };
     await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
-    expect(lines()).toEqual(["Available •••• DUSK", "Fee up to 0.05 DUSK"]);
+    expect(lines()).toEqual(["Available after fees •••• DUSK", "Fee up to 0.05 DUSK"]);
   });
 
   it("hide token balances on the dashboard and on the token's page", async () => {
@@ -273,8 +273,8 @@ describe("hidden balances", () => {
     const state = { route: "stake", staking: staking(owner(), "native") };
     await draw(state);
     expect(seen(body.querySelector(".amount-avail span"))).toEqual([
-      "Available •••• DUSK",
-      "Available hidden DUSK",
+      "Available •••• DUSK from your public balance",
+      "Available hidden DUSK from your public balance",
     ]);
     button("Max").click();
     expect(state.staking.stakeAmountDusk).toBe("1482.8383");
@@ -308,7 +308,7 @@ describe("hidden balances", () => {
       ["•••• DUSK", "hidden DUSK"],
     ]);
     expect(visibleText(body.querySelector(".stake-sum .stake-cap"))).toBe("Locked: •••• DUSK. It's still yours, and unstaking returns it.");
-    expect(visibleText(body.querySelector(".stake-avail"))).toBe("Available •••• DUSK");
+    expect(visibleText(body.querySelector(".stake-avail"))).toBe("Available •••• DUSK from your public balance");
     // Advanced keeps what isn't a balance.
     expect(body.querySelectorAll("details.advanced .kv").map(visibleText)).toContain("Active fromActive now");
   });
@@ -344,7 +344,7 @@ describe("hidden balances", () => {
     expect(st.depositAmountDusk).toBe("1482.9233");
     // What Max filled in gets a share of the balance: hidden too.
     expect(visibleText(body.querySelector(".stake-estimate .stake-estimate__main"))).toBe(
-      "You get about •••• stDUSK, worth about •••• DUSK."
+      "You get about •••• stDUSK, worth about •••• DUSK now."
     );
     // Sozu's fee off it in DUSK gives the amount away: hidden, its rate shown.
     expect(seen(body.querySelector(".sozu-terms"))).toEqual(["Deposit fee 0.25% · •••• DUSK", "Deposit fee 0.25% · hidden DUSK"]);

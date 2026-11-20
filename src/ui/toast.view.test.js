@@ -185,8 +185,8 @@ describe("unlock", () => {
     pwd.value = "wrong";
     dom.document.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
     await settle();
-    // Amélie's: it says what to try, not just that it's wrong; Forgot password? under it is the way back.
-    expect([error.hidden, error.textContent, error.getAttribute("role")]).toEqual([false, "Wrong password. Check Caps Lock.", "alert"]);
+    // Amélie's: it says what to try, not just that it's wrong: the password as typed, then the recovery phrase.
+    expect([error.hidden, error.textContent, error.getAttribute("role")]).toEqual([false, "Wrong password. Check Caps Lock, or restore with your recovery phrase below.", "alert"]);
     expect([pwd.getAttribute("aria-invalid"), pwd.getAttribute("aria-describedby")]).toEqual(["true", "unlock-error"]);
     expect(showToast).not.toHaveBeenCalled();
 
@@ -198,7 +198,7 @@ describe("unlock", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     dom.document.querySelectorAll("button").find((b) => b.textContent === "Unlock").click();
     await settle();
-    expect(error.textContent).toBe("Wrong password.");
+    expect(error.textContent).toBe("Wrong password. Try again, or restore with your recovery phrase below.");
   });
 });
 

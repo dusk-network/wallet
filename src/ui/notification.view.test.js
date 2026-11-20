@@ -299,7 +299,7 @@ describe("connect approval", () => {
     await render("connect", { requestedProfiles: true });
 
     const facts = app.querySelectorAll(".ap-facts .list-row").map(visibleText);
-    expect(facts).toEqual(["Sees your public account, .dusk name and balanceUntil you disconnect it", "Can't move funds without your approval"]);
+    expect(facts).toEqual(["Sees your public account, .dusk name and balanceUntil you disconnect it", "Can't move funds or get a signature without your approval"]);
     // The profile picked shows once, in its card.
     expect(visibleText(app.querySelector(".ap-facts"))).not.toContain(shortAddress(MAIN));
     expect(app.textContent).not.toContain("only be able to use");
@@ -356,8 +356,7 @@ describe("connect approval", () => {
     await render("connect", { requestedProfiles: true, shieldedReceiveAddress: true, currentAccountIndex: 0, currentGrants: {} });
     expect(head().querySelector("h1").textContent).toBe("Share your shielded address?");
     const facts = () => app.querySelectorAll(".ap-facts .row-title").map((t) => t.textContent);
-    // A share alone gives nothing that moves funds.
-    expect(facts()).toEqual(["Can send you shielded payments, not see your shielded balance"]);
+    expect(facts()).toEqual(["Gets your shielded address", "Can't move funds or get a signature without your approval"]);
     expect(buttons()).toEqual(["Reject", "Share"]);
     pastClickGuard();
     approve().click();
@@ -368,8 +367,8 @@ describe("connect approval", () => {
     expect(head().querySelector("h1").textContent).toBe("Connect and share your shielded address?");
     expect(facts()).toEqual([
       "Sees your public account, .dusk name and balance",
-      "Can send you shielded payments, not see your shielded balance",
-      "Can't move funds without your approval",
+      "Gets your shielded address",
+      "Can't move funds or get a signature without your approval",
     ]);
     expect(buttons()).toEqual(["Reject", "Connect"]);
   });
@@ -381,12 +380,12 @@ describe("connect approval", () => {
       { permissionAccountIndex: 1 }
     );
     const facts = () => app.querySelectorAll(".ap-facts .row-title").map((t) => t.textContent);
-    expect(facts()).toContain("Can send you shielded payments, not see your shielded balance");
+    expect(facts()).toContain("Gets your shielded address");
 
     const radio = app.querySelectorAll(".profile-option input")[0];
     radio.checked = true;
     radio.dispatchEvent(fakeEvent("change"));
-    expect(facts()).not.toContain("Can send you shielded payments, not see your shielded balance");
+    expect(facts()).not.toContain("Gets your shielded address");
     pastClickGuard();
     approve().click();
     await vi.waitFor(() => expect(decision("approve")?.approvedParams).toEqual({ accountIndex: 0, shieldedReceiveAddress: false }));
@@ -795,8 +794,8 @@ describe("a site's request to pay", () => {
   // What a public transfer makes visible to everyone: only what applies, under
   // the profile's verified name or else its account. A shielded one: nothing.
   it.each([
-    ["with a memo, under its verified name", transfer(BOB, { memo: "Order 1042" }), {}, "Public: anyone can see the amount, memo, alice.dusk and the recipient."],
-    ["without a memo, under its verified name", transfer(BOB), {}, "Public: anyone can see the amount, alice.dusk and the recipient."],
+    ["with a memo, under its verified name", transfer(BOB, { memo: "Order 1042" }), {}, "Public: anyone can see the amount, memo, your name alice.dusk and the recipient."],
+    ["without a memo, under its verified name", transfer(BOB), {}, "Public: anyone can see the amount, your name alice.dusk and the recipient."],
     ["with a memo, for a profile without a name", transfer(BOB, { memo: "Order 1042" }), { duskNames: {} }, "Public: anyone can see the amount, memo, your account and the recipient."],
     ["without a memo, for a profile without a name", transfer(BOB), { duskNames: {} }, "Public: anyone can see the amount, your account and the recipient."],
     ["for a shielded transfer", transfer(ADDRESS, { privacy: "shielded", memo: "Order 1042" }), {}, null],
@@ -826,16 +825,11 @@ describe("a site's request to pay", () => {
     }
   });
 
-  // The copy audit's: a recipient that's no contact shows in full where the payment is approved, as on Send's Review.
-  it("shows a recipient that's no contact in full on the main view, and a contact's or a profile's under Details", async () => {
-    for (const [to, onMain] of [
-      [CAROL, true],
-      [BOB, false],
-      [SAVINGS, false],
-    ]) {
+  it("shows the recipient in full on the main view, a contact's and a profile's too", async () => {
+    for (const to of [CAROL, BOB, SAVINGS]) {
       await render("send_tx", transfer(to));
       expect(row("To").textContent).toBe(to);
-      expect(Boolean(row("To").closest("details")), to).toBe(!onMain);
+      expect(row("To").closest("details"), to).toBeNull();
     }
   });
 
@@ -894,14 +888,14 @@ describe("a site's request to pay the bridge's account", () => {
     expect(head().querySelector("h1").textContent).toBe("Bridge to Sepolia");
     expect(visibleText(head().querySelector(".ap-amount"))).toBe("2 DUSK");
     expect(tag()).toBe("Known bridge account");
-    // Whom it pays out to, once and in full, on the main view; the bridge's own account, which the tag vouches for, under Details.
+    // Whom it pays out to, in full in its row, and the bridge's own account, both on the main view.
     expect(head().querySelector(".ap-recipient")).toBeNull();
     expect(visibleText(row("Recipient on Sepolia"))).toBe(EVM);
     expect(row("Recipient on Sepolia").closest("details")).toBeNull();
     expect(visibleText(row("To"))).toBe(`The bridge's account for Sepolia${testnet.account}`);
-    expect(row("To").closest("details")).not.toBeNull();
+    expect(row("To").closest("details")).toBeNull();
     expect(row("Memo")).toBeUndefined();
-    expect(app.querySelector(".ap-visible").textContent).toBe("Public: anyone can see the amount, alice.dusk and the recipient.");
+    expect(app.querySelector(".ap-visible").textContent).toBe("Public: anyone can see the amount, your name alice.dusk and the recipient.");
     expect(buttons()).toEqual(["Reject", "Bridge 2 DUSK"]);
     expect(warns()).toEqual([OFF]);
     // No name to look up for the bridge's account.
@@ -924,24 +918,24 @@ describe("a site's request to pay the bridge's account", () => {
     await render("send_tx", transfer(mainnet.account, { amount: "200001000000000", memo: EVM, ...onMainnet }));
     expect(visibleText(head().querySelector(".ap-sub"))).toBe("Bridge fee 1 DUSK · 200,000 DUSK arrives");
 
-    // A memo that's no address there: nothing arrives, which its warning says, in place of the line.
+    // A memo that's no address there: nothing arrives, as the line and its warning say.
     await render("send_tx", transfer(mainnet.account, { amount: "2000000000", memo: "Order 1042", ...onMainnet }));
-    expect(head().querySelector(".ap-sub")).toBeNull();
+    expect(visibleText(head().querySelector(".ap-sub"))).toBe("Bridge fee 1 DUSK · Nothing arrives without a BNB Smart Chain address in the memo");
     expect(warns()).toEqual(["The memo isn't an address on BNB Smart Chain"]);
 
     await render("send_tx", transfer(mainnet.account, { amount: "1000000000", memo: EVM, ...onMainnet }));
-    expect(head().querySelector(".ap-sub")).toBeNull();
+    expect(visibleText(head().querySelector(".ap-sub"))).toBe("Bridge fee 1 DUSK · Nothing arrives on BNB Smart Chain");
     expect(warns()).toEqual(["Nothing arrives on BNB Smart Chain"]);
     expect(app.querySelector(".callout.warn .muted").textContent).toBe("The 1 DUSK bridge fee takes it all.");
     // Reject stays the user's choice.
     expect(approve().disabled).toBe(false);
   });
 
-  it("says the testnet bridge to Sepolia isn't paying out now, in place of what arrives", async () => {
+  it("says the testnet bridge to Sepolia isn't paying out now, with its fee and that nothing arrives", async () => {
     await render("send_tx", transfer(testnet.account, { amount: "5000000000", memo: EVM }));
     expect(warns()).toEqual([OFF]);
     expect(app.querySelector(".callout.warn .muted").textContent).toBe("Nothing sent to it would arrive.");
-    expect(head().querySelector(".ap-sub")).toBeNull();
+    expect(visibleText(head().querySelector(".ap-sub"))).toBe("Bridge fee 1 DUSK · Nothing arrives on Sepolia");
   });
 
   it.each([
@@ -1052,7 +1046,7 @@ describe("a fee the site chose", () => {
     networkPrice("1");
     await render("send_tx", transfer(BOB, { amount: "10000000", gas: { limit: "10000000", price: "50" }, feeFromSite: { limit: true, price: true } }));
     await settle();
-    expect(fee()).toBe("High fee: 50× the network's priceUse network price");
+    expect(fee()).toBe("This site chose a high fee: 50× the network's priceUse network price");
     const editor = app.querySelector("dusk-gas-editor");
     app.querySelector(".ap-site-fee button").click();
     expect(editor.setGas).toHaveBeenLastCalledWith({ limit: "10000000", price: "1" });
@@ -1064,7 +1058,7 @@ describe("a fee the site chose", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
     await render("send_tx", transfer(BOB, { gas: { limit: "2500000", price: "5" }, feeFromSite: { limit: true, price: true } }));
     await settle();
-    expect(fee()).toContain("High fee: 2,5× the network's price");
+    expect(fee()).toContain("This site chose a high fee: 2,5× the network's price");
   });
 
   it("says it of the site's own fee only: a fee changed here puts it away, and the site's brings it back", async () => {
@@ -1294,10 +1288,9 @@ describe("the recipient of a site's request to send", () => {
     answerName("carol.dusk");
     await render("send_tx", params);
     await settle();
-    // Short on the main view, whole for screen readers and under Details.
-    expect([visibleText(row("Spender")), screenReaderText(row("Spender"))]).toEqual([shortAddress(CAROL), CAROL]);
-    const whole = app.querySelector("details").querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Spender");
-    expect(visibleText(whole.querySelector(".kv-value"))).toBe(CAROL);
+    // In full on the main view, as who can move the token.
+    expect(row("Spender").textContent).toBe(CAROL);
+    expect(row("Spender").closest("details")).toBeNull();
     expect(nameAsks()).toEqual([]);
   });
 });
@@ -1338,18 +1331,26 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     expect([row("To").textContent, row("Units").textContent]).toEqual([SHOP, "9007199254740993"]);
   });
 
-  it("shows a standard approval of the most there is as unlimited, its exact figure under Details, with Approve waiting for MAX", async () => {
+  it("shows a standard approval of the most there is exactly, its spender in full, with Approve waiting for MAX", async () => {
     await render("send_tx", tokenCall("drc20_standard", "approve", `{"spender":{"Contract":"${ROUTER}"},"amount":18446744073709551615}`));
-    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "Unlimited TKN"]);
-    expect(visibleText(row("Spender"))).toBe(`A contract${shortAddress(ROUTER)}`);
-    // The figure, the units and the spender's whole ID, under Details.
-    expect([row("Amount").textContent, row("Units").textContent]).toEqual(["18,446,744,073.709551615 TKN", "18446744073709551615"]);
-    expect([row("Amount").closest("details"), row("Units").closest("details")].every(Boolean)).toBe(true);
-    expect(app.querySelector("details").textContent).toContain(ROUTER);
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "18,446,744,073.709551615 TKN"]);
+    // A contract the network doesn't name, in full, its first and last six in bold; the units, on the main view.
+    expect([visibleText(row("Spender")), row("Units").textContent]).toEqual([`A contract${ROUTER}`, "18446744073709551615"]);
+    expect(row("Spender").querySelectorAll("b").map((b) => b.textContent)).toEqual([ROUTER.slice(0, 6), ROUTER.slice(-6)]);
+    expect([row("Spender").closest("details"), row("Units").closest("details")]).toEqual([null, null]);
     expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Unlimited allowance");
-    expect(visibleText(app.querySelector(".callout.warn .muted"))).toBe("The spender can move all your TKN, now and later.");
+    expect(visibleText(app.querySelector(".callout.warn .muted"))).toBe("The spender can move all your TKN, now and later. Only continue if you trust it.");
     expect(buttons()).toEqual(["Reject", "Approve all TKN"]);
     expect(approve().disabled).toBe(true);
+  });
+
+  // GeorgianDusk's: a 6…6 contract ID can be matched by a look-alike; one the network names can stay short.
+  it("shows a spender the network names by that name and 6…6, its whole ID under Details", async () => {
+    const pool = networks.testnet.sozu.fallbacks.pool;
+    await render("send_tx", tokenCall("sozu_staked_dusk", "approve", `["${pool}","5"]`));
+    expect(visibleText(row("Spender"))).toBe(`Sozu pool · ${shortAddress(pool)}`);
+    const whole = app.querySelector("details").querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Spender ID");
+    expect(whole.querySelector(".kv-value").textContent).toBe(pool);
   });
 
   it("names a shielded address and a contract as they are, and whose tokens a transfer_from moves", async () => {
@@ -1375,8 +1376,8 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     // A contract ID with a 0, which Sozu's driver writes in hex.
     const pool = "10".repeat(32);
     await render("send_tx", tokenCall("sozu_staked_dusk", "approve", `["${pool}","18446744073709551615"]`));
-    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "Unlimited TKN"]);
-    expect(visibleText(row("Spender"))).toBe(`A contract${shortAddress(pool)}`);
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "18,446,744,073.709551615 TKN"]);
+    expect(visibleText(row("Spender"))).toBe(`A contract${pool}`);
     expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Unlimited allowance");
     expect(approve().disabled).toBe(true);
     typeInto(app.querySelector(".callout.warn input"), "MAX");
@@ -1468,7 +1469,7 @@ describe("a site's token call, read with the wallet's token drivers", () => {
 
       give(STAKED);
       await shown;
-      expect([amount(), head().querySelector(".ap-sub")]).toEqual(["10 stDUSK", null]);
+      expect([amount(), visibleText(head().querySelector(".ap-sub"))]).toEqual(["10 stDUSK", "Staked Dusk · DRC20"]);
       expect(visibleText(row("Token"))).toBe(`Staked Dusk (stDUSK) · ${shortAddress("11".repeat(32))}`);
       expect(unreadNote()).toBeNull();
       expect(buttons()).toEqual(["Reject", "Approve 10 stDUSK"]);
@@ -1817,7 +1818,7 @@ describe("a site's request while the wallet is locked", () => {
   it("asks to set up a wallet that has none, with Reject beside it", async () => {
     await renderShop("connect", {}, { hasVault: false });
     expect(title()).toBe("No wallet yet");
-    expect(app.querySelector(".ap-head .ap-sub").textContent).toBe("Set one up, then try again on the site.");
+    expect(app.querySelector(".ap-head .ap-sub").textContent).toBe("Create or import one, then try again on the site.");
     expect(bar().querySelectorAll("button").map((b) => b.textContent)).toEqual(["Reject", "Set up wallet"]);
   });
 });
@@ -2011,7 +2012,7 @@ describe("typed-data approval", () => {
       ["Request from", "Domain name", "Domain version", "Chain ID", "Verifying contract", "Primary type", "item · string", "quantity · uint64"].map(value)
     ).toEqual(["https://shop.example", "Shop", "1", "dusk:2", "None (32 zero bytes)", "Order", "Dusk hoodie", "2"]);
     const summaries = app.querySelectorAll("details summary").map((s) => s.textContent);
-    expect(summaries).toEqual(["Full signing request", "Digest"]);
+    expect(summaries).toEqual(["Full signing request (escaped JSON)", "Digest (check it against the site's)"]);
     expect(JSON.parse(app.querySelector("textarea").textContent)).toEqual(input);
     expect(app.querySelector(".ap-digest").textContent).toBe(hashTypedDataHex(input));
     expect(button("Sign").disabled).toBe(false);

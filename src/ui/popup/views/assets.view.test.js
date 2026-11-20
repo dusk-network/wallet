@@ -49,11 +49,15 @@ describe("tokens and NFTs on Home", () => {
       [{ contractId: TOKEN, tokenId: "7", symbol: "ART", name: "Art" }]
     );
     draw(state);
-    // The symbol once, by the balance (the letter is its icon); a token with no name goes by its symbol.
+    // The symbol once, by the balance (the letter is its icon); a token with no name says it's a DRC20 token.
     expect(section().querySelectorAll(".asset-row").map(visibleText)).toEqual(["TToken123.45 TKN", "ART #7Art"]);
     state.assets = assets([{ contractId: TOKEN, symbol: "TKN", decimals: 2 }]);
     draw(state);
-    expect(section().querySelectorAll(".asset-row").map(visibleText)).toEqual(["TTKN123.45 TKN"]);
+    expect(section().querySelectorAll(".asset-row").map(visibleText)).toEqual(["TDRC20 token123.45 TKN"]);
+    // Its balance not read yet: the symbol still shows, by the dash.
+    state.assets = { ...assets([{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }]), balances: {} };
+    draw(state);
+    expect(section().querySelectorAll(".asset-row").map(visibleText)).toEqual(["TToken— TKN"]);
     state.assets = assets(
       [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }],
       [{ contractId: TOKEN, tokenId: "7", symbol: "ART", name: "Art" }]

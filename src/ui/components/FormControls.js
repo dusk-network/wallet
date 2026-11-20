@@ -82,17 +82,16 @@ export function fieldError(field, { markInvalid = true } = {}) {
 
 /**
  * The password the wallets here share, for a change to them (adding one,
- * removing one): "Password", with no placeholder, `hint` under it where one
- * is given (Add wallet's: "One password unlocks every wallet here."), and its
- * error under that.
- * @param {{ onEnter?: () => void, hint?: string }} [opts]
+ * removing one): "Password", with no placeholder, a line under it that says
+ * one password unlocks them all, and its error under that.
+ * @param {{ onEnter?: () => void }} [opts]
  */
-export function unlockPasswordField({ onEnter, hint = "" } = {}) {
+export function unlockPasswordField({ onEnter } = {}) {
   const input = passwordInput({ autocomplete: "current-password", onEnter });
-  const hintEl = hint ? fieldHint(input, hint) : null;
+  const hint = fieldHint(input, "One password unlocks every wallet here.");
   const error = fieldError(input);
   input.addEventListener("input", () => error.show(""));
-  return { input, error, els: [passwordForm([fieldLabel(input, "Password"), input, hintEl, error.el])] };
+  return { input, error, els: [passwordForm([fieldLabel(input, "Password"), input, hint, error.el])] };
 }
 
 /**

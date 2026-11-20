@@ -941,9 +941,9 @@ export function activityRows(ov, state, whole = null) {
     shielded: whole?.shielded ?? ours?.shielded,
     state: whole?.meta ?? ours?.meta,
   });
-  // A send of the wallet's own the network never had (txReconcile.js): Not
-  // sent yet, or Not sent where another took its place, as its record says,
-  // never Pending, nor Not confirmed (Chen's).
+  // A send of the wallet's own the network never had (txReconcile.js): Held,
+  // or Not sent where another took its place, as its record says, never
+  // Sending, nor Not confirmed (Chen's).
   const unsent = new Map(sent.filter((tx) => tx?.status === "unsent" || tx?.status === "not_sent").map((tx) => [String(tx.hash ?? "").toLowerCase(), tx.status]));
   if (!unsent.size) return rows;
   return rows.map((row) => (row?.source === "sent" && unsent.has(String(row.hash ?? "").toLowerCase()) ? { ...row, status: unsent.get(String(row.hash).toLowerCase()) } : row));

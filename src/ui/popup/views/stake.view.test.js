@@ -467,7 +467,7 @@ describe("staking overview", () => {
   // What each choice says it pays a year, past what it is, then the one note under both of when and that it's not promised.
   const rateLines = (each = (el) => visibleText(el)) => {
     const note = body.querySelector(".stake-rates-note");
-    return [...body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(each).slice(1)), note ? each(note) : ""];
+    return [...body.querySelectorAll(".stake-choices > button").map((b) => [...b.querySelectorAll(".row-sub")].map(each).filter((line) => line.startsWith("About"))), note ? each(note) : ""];
   };
 
   it("opens Liquid staking on Stake, also after an unstake left it on Unstake, as Lena's stake again", async () => {
@@ -492,13 +492,13 @@ describe("staking overview", () => {
       fifteen.status = { ...fifteen.status, fees: { ...fifteen.status.fees, reward: { numerator: "15", denominator: "100" } } };
       popup({ route: "stake", staking: staking(), sozu: fifteen }, ov(), { rewardRate: 0.23498725582204427 });
       const subs = () => rateLines((el) => visibleText(el).replace(/\s/g, " "));
-      await vi.waitFor(() => expect(subs()).toEqual([["About 23 % a year"], ["About 20 % a year, after Sozu's 15 %"], "Rates at today's stake, not promised."]), { timeout: 4_000 });
+      await vi.waitFor(() => expect(subs()).toEqual([["About 23 % a year across the network"], ["About 20 % a year, after Sozu's 15 %"], "Rates at today's stake, not promised."]), { timeout: 4_000 });
     } finally {
       vi.unstubAllGlobals();
     }
   });
 
-  it("says about what each choice pays a year, once read: native lately, Sozu after its fee, not promised once under both", async () => {
+  it("says about what each choice pays a year, once read: native across the network lately, Sozu after its fee, not promised once under both", async () => {
     const fifteen = sozu();
     fifteen.status = { ...fifteen.status, fees: { ...fifteen.status.fees, reward: { numerator: "15", denominator: "100" } } };
     const state = { route: "stake", staking: staking(), sozu: fifteen };
@@ -506,7 +506,7 @@ describe("staking overview", () => {
     const { actions } = popup(state, ov(), { rewardRate: 0.23498725582204427 });
     const subs = () => rateLines();
     expect(subs()).toEqual([[], [], ""]);
-    await vi.waitFor(() => expect(subs()).toEqual([["About 23% a year"], ["About 20% a year, after Sozu's 15%"], "Rates at today's stake, not promised."]));
+    await vi.waitFor(() => expect(subs()).toEqual([["About 23% a year across the network"], ["About 20% a year, after Sozu's 15%"], "Rates at today's stake, not promised."]));
     expect(visibleText(body).match(/not promised/gi)).toHaveLength(1);
     // Asked once for this network, whatever is drawn again.
     actions.render();
@@ -526,13 +526,13 @@ describe("staking overview", () => {
     const state = { route: "stake", staking: staking(), sozu: loading };
     const { draw } = popup(state, ov(), { rewardRate: 0.8615 });
     const subs = () => rateLines();
-    await vi.waitFor(() => expect(subs()).toEqual([["About 86% a year"], [], "Rates at today's stake, not promised."]));
+    await vi.waitFor(() => expect(subs()).toEqual([["About 86% a year across the network"], [], "Rates at today's stake, not promised."]));
     // Liquid staking's read is done: its status names the pool. Measured over other days, each says its own.
     const done = sozu();
     Object.assign(state.sozu, { ...done, status: { ...done.status, contracts: { ...done.status.contracts, pool: grown } } });
     draw();
     await vi.waitFor(() =>
-      expect(subs()).toEqual([["About 86% a year at today's stake"], ["About 21% a year over the last 30 days, after Sozu's 10%"], "Not promised."])
+      expect(subs()).toEqual([["About 86% a year across the network at today's stake"], ["About 21% a year over the last 30 days, after Sozu's 10%"], "Not promised."])
     );
   });
 
@@ -543,7 +543,7 @@ describe("staking overview", () => {
     popup(state, ov(), { rewardRate: 0.8615, stakingFigures: { provisioners: [{ amount: { value: "1" }, eligibility: 0 }], tipHeight: 4_800_000 } });
     const subs = () => rateLines();
     // The same days for both: said once, under them.
-    await vi.waitFor(() => expect(subs()).toEqual([["About 88% a year"], ["About 79% a year, after Sozu's 10%"], "Rates over the last 30 days, not promised."]));
+    await vi.waitFor(() => expect(subs()).toEqual([["About 88% a year across the network"], ["About 79% a year, after Sozu's 10%"], "Rates over the last 30 days, not promised."]));
   });
 
   // Lena's: with the node silent, Staking swapped 89% and 99% over the last 30 days for "88% at today's stake" and a
@@ -553,7 +553,7 @@ describe("staking overview", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-11-11T04:00:00Z"));
     const subs = () => rateLines();
-    const measured = [["About 89% a year"], ["About 21% a year, after Sozu's 10%"], "Rates over the last 30 days, not promised."];
+    const measured = [["About 89% a year across the network"], ["About 21% a year, after Sozu's 10%"], "Rates over the last 30 days, not promised."];
     // A pool of its own: what the popup keeps of its growth for an hour stays with this test.
     const kept = "7b".repeat(32);
     const withPool = () => {
@@ -582,7 +582,7 @@ describe("staking overview", () => {
     // A day on, they're too old to stand for the last 30 days: the estimate, saying what it is.
     vi.setSystemTime(new Date("2026-11-12T04:00:01Z"));
     silent();
-    await vi.waitFor(() => expect(subs()).toEqual([["About 88% a year"], [], "Rates at today's stake, not promised."]));
+    await vi.waitFor(() => expect(subs()).toEqual([["About 88% a year across the network"], [], "Rates at today's stake, not promised."]));
   });
 
   // Lena's 94%, kept from one read, stood for a day where every app had read 88% since: a native rate is kept for
@@ -596,18 +596,18 @@ describe("staking overview", () => {
     const to = { height: 4_795_200, at: Date.parse("2026-11-10T03:30:00Z") };
     nativeMeasure.value = { rate: 0.9405, days: 30, perBlock: 15_689_599_089n, staked: 2_000_000_000_000_000n, blocks: 6, from: { height: to.height - 30 * 8_640, at: to.at - 30 * 86_400_000 }, to };
     popup({ route: "stake", staking: staking(), sozu: sozu() }, ov(), { rewardRate: 0.8811, stakingFigures: { provisioners: [{ amount: { value: "1" }, eligibility: 0 }], tipHeight: to.height + 8_820 } });
-    await vi.waitFor(() => expect(subs()).toEqual([["About 94% a year"], ["About 85% a year, after Sozu's 10%"], "Rates over the last 30 days, not promised."]));
+    await vi.waitFor(() => expect(subs()).toEqual([["About 94% a year across the network"], ["About 85% a year, after Sozu's 10%"], "Rates over the last 30 days, not promised."]));
 
     // The node silent: still that day of blocks, the rate kept stands.
     nativeMeasure.value = null;
     const silent = () => popup({ route: "stake", staking: staking(), sozu: sozu({ loaded: false, loading: true, status: null }) }, ov(), { rewardRate: 0.8811 });
     silent();
-    await vi.waitFor(() => expect(subs()).toEqual([["About 94% a year"], [], "Rates over the last 30 days, not promised."]));
+    await vi.waitFor(() => expect(subs()).toEqual([["About 94% a year across the network"], [], "Rates over the last 30 days, not promised."]));
 
     // 31 minutes on, the tip is past the next day's line: another day's figure, so the estimate, saying what it is.
     vi.setSystemTime(new Date("2026-11-11T04:31:00Z"));
     silent();
-    await vi.waitFor(() => expect(subs()).toEqual([["About 88% a year"], [], "Rates at today's stake, not promised."]));
+    await vi.waitFor(() => expect(subs()).toEqual([["About 88% a year across the network"], [], "Rates at today's stake, not promised."]));
   });
 
   it("works Sozu's rate out from native staking's as shown, so both wallets give the same figure", async () => {
@@ -615,7 +615,7 @@ describe("staking overview", () => {
     const state = { route: "stake", staking: staking(), sozu: sozu() };
     popup(state, ov(), { rewardRate: 0.8615 });
     const subs = () => rateLines();
-    await vi.waitFor(() => expect(subs()).toEqual([["About 86% a year"], ["About 77% a year, after Sozu's 10%"], "Rates at today's stake, not promised."]));
+    await vi.waitFor(() => expect(subs()).toEqual([["About 86% a year across the network"], ["About 77% a year, after Sozu's 10%"], "Rates at today's stake, not promised."]));
   });
 
   it("estimates with the Sozu of the node's own network: asked again once a custom node's chain ID is read, never another network's fee", async () => {
@@ -650,10 +650,10 @@ describe("staking overview", () => {
     popup(state);
 
     const figures = () => [...body.querySelectorAll(".stake-sum__two > div")].map(visibleText);
-    // The zero says nothing's staked natively; what's with Sozu, in stDUSK under it.
+    // The zero says nothing's staked natively; what's with Sozu, in stDUSK under it, rewards included.
     expect(figures()).toEqual([
       "Staked natively0 DUSK",
-      "With Sozu0.0997 DUSK0.0318 stDUSK",
+      "With Sozu0.0997 DUSK0.0318 stDUSK, rewards included",
       "Native rewards0 DUSK",
     ]);
     expect(visibleText(body)).not.toContain("Nothing staked yet");
@@ -683,7 +683,7 @@ describe("staking overview", () => {
 
     expect([...body.querySelectorAll(".stake-sum__two > div")].map(visibleText)).toEqual([
       "Staked natively2,000 DUSK",
-      "With Sozu0.0997 DUSK0.0318 stDUSK",
+      "With Sozu0.0997 DUSK0.0318 stDUSK, rewards included",
       "Native rewards3 DUSK",
     ]);
     expect([...body.querySelectorAll(".stake-sum button")].map(visibleText)).toEqual(["Unstake", "Claim rewards", "Unstake from Sozu"]);
@@ -884,7 +884,7 @@ describe("staking overview", () => {
     ]);
     expect(choices.map((b) => [...b.querySelectorAll(".row-sub")].map(visibleText))).toEqual([
       ["From 1,000 DUSK · needs your own node"],
-      ["Any amount · no node needed"],
+      ["Any amount · no node needed", "You get stDUSK for your share"],
     ]);
     // Nothing is chosen for you: no pressed or selected choice, no amount to fill in yet.
     for (const choice of choices) {
@@ -895,7 +895,7 @@ describe("staking overview", () => {
     }
     expect(body.querySelectorAll(".tab.is-active")).toEqual([]);
     expect(body.querySelectorAll("input").filter(isShown)).toEqual([]);
-    expect(visibleText(body.querySelector(".stake-avail"))).toBe("Available 1,482.9383 DUSK");
+    expect(visibleText(body.querySelector(".stake-avail"))).toBe("Available 1,482.9383 DUSK from your public balance");
   });
 
   it("heads the two choices Stake, short in the ledger's capitals, as the web wallet does", () => {
@@ -1028,7 +1028,7 @@ describe("staking overview", () => {
     const big = body.querySelectorAll(".stake-sum .stake-big");
     expect(big.map(visibleText)).toEqual(["•••• DUSK", "•••• DUSK"]);
     expect(big.map(screenReaderText)).toEqual(["hidden DUSK", "hidden DUSK"]);
-    expect(visibleText(body.querySelector(".stake-avail"))).toBe("Available •••• DUSK");
+    expect(visibleText(body.querySelector(".stake-avail"))).toBe("Available •••• DUSK from your public balance");
     expect(visibleText(body.querySelector(".stake-sum"))).toContain("Locked: •••• DUSK.");
   });
 });
@@ -1065,7 +1065,7 @@ describe("native staking", () => {
     expect(field("Stake amount").value).toBe("1000");
     expect(body.querySelector(".amount-field__error").hidden).toBe(true);
     expect(button("Review stake").disabled).toBe(false);
-    expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available 1,482.9383 DUSK");
+    expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available 1,482.9383 DUSK from your public balance");
 
     // Max leaves this stake's fee and the fee to unstake later, and says both.
     button("Max").click();
@@ -1138,8 +1138,8 @@ describe("native staking", () => {
     popup({ route: "stake", staking: staking(owner(), { screen: "native" }) });
     expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
       "Needs your own Dusk nodeRun a node",
-      "Rewards start in 6 to 12 hoursUnstake any time.",
-      "If your node misses its turnPart of the stake is locked (still yours). If it breaks the rules, part can be burned (lost).",
+      "Rewards start in about 6 to 12 hoursUnstake any time, no waiting period.",
+      "If your node misses its turnPart of the stake is locked: still yours, and unstaking returns it. If it breaks the rules, part can be burned (lost).",
       "Fee up to 0.05 DUSK",
     ]);
 
@@ -1184,11 +1184,11 @@ describe("native staking", () => {
     expect(state.stakeDraft).toMatchObject({ kind: "stake", profileIndex: 0, ownerProfileIndex: 1 });
   });
 
-  it("points under the minimum to liquid staking, whose screen names Sozu a third party", () => {
+  it("points under the minimum to liquid staking, named as a third party", () => {
     const state = { route: "stake", staking: staking(owner(), { screen: "native" }), sozu: sozu() };
     popup(state);
     const link = buttonStarting("Under");
-    expect(link.textContent).toBe("Under 1,000 DUSK? Use liquid staking");
+    expect(link.textContent).toBe("Under 1,000 DUSK? Use liquid staking (Sozu, third party)");
     link.click();
     expect(state.staking.screen).toBe("liquid");
     // Sozu, named a third party, with its site; no more about who holds what.
@@ -1207,7 +1207,7 @@ describe("native staking", () => {
     // The review's rows; the fee's own come after them.
     expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual([
       "FromProfile 1 · Public",
-      "Rewards startIn 6 to 12 hours",
+      "Rewards startIn about 6 to 12 hours",
     ]);
     expect(button("Confirm")).toBeUndefined();
     expect(visibleText(confirm())).toBe("Stake 1,000 DUSK");
@@ -1261,7 +1261,7 @@ describe("staking reviews", () => {
     expect(body.querySelector(".review-visible")).toBeNull();
     expect(body.querySelectorAll(".row > .group > .kv").map(visibleText)).toEqual([
       "Fromalice.dusk · Public",
-      "Rewards startIn 6 to 12 hours",
+      "Rewards startIn about 6 to 12 hours",
     ]);
     expect(visibleText(body.querySelector(".row > .group.info"))).toBe("Needs your own Dusk nodeRun a node");
     expect(visibleText(body)).not.toContain("Profile 1");
@@ -1359,7 +1359,7 @@ describe("staking reviews", () => {
     button("Review stake").click();
     await settle();
     expect(body.querySelector(".review-visible")).toBeNull();
-    expect(body.querySelectorAll(".row > .group .kv").map(visibleText)[0]).toBe("You get about16.2357 stDUSK, worth about 49.875 DUSK");
+    expect(body.querySelectorAll(".row > .group .kv").map(visibleText)[0]).toBe("You get about16.2357 stDUSK, worth about 49.875 DUSK now");
     // The contract it calls, to check before it's sent: under Custom fee, as the network names it, with Copy.
     const pool = "72".repeat(32);
     const contract = body.querySelector("dusk-gas-editor details.gas-custom .sozu-contract");
@@ -1402,9 +1402,8 @@ describe("a stake with Sozu in figures", () => {
     ...over,
   });
   const held = { position: { poolBalanceLux: dusk(120), stDuskBalanceLux: dusk(39) } };
-  // What's held, on Liquid staking's screen; what went in and out and what it brought, under its Details.
+  // What's held, what went in and out and what it brought, on Liquid staking's screen.
   const rows = () => body.querySelectorAll(".sozu-position .kv").map(visibleText);
-  const history = () => body.querySelectorAll(".sozu-details .sozu-history .kv").map(visibleText);
 
   // Lena's, the third round: with the node silent, Home said its balance may be out of date after a while, and the
   // Stake page's figures, Sozu's and the native stake's, said nothing of the kind.
@@ -1438,10 +1437,9 @@ describe("a stake with Sozu in figures", () => {
     popup(state, overview);
     const years = () => body.querySelectorAll(".stake-years .kv").map(visibleText);
     await vi.waitFor(() => expect(years()).toEqual(["2026Native staking, claimed: 3 DUSK", "2025Native staking, claimed: 12.5 DUSK"]));
-    // Folded under its name, a tax-style report out of the way till it's opened.
-    const fold = body.querySelector("details.stake-years-fold");
-    expect([visibleText(fold.querySelector("summary")), fold.open]).toEqual(["Rewards by year", false]);
-    expect(fold.querySelector(".stake-years")).toBeTruthy();
+    // Under its own head, open on the screen, as Stake's choices are.
+    expect(body.querySelectorAll(".section-head").map((head) => screenReaderText(head))).toContain("Rewards by year");
+    expect(body.querySelector("details.stake-years-fold")).toBeNull();
 
     // Hidden with the other balances.
     popup(state, ov({ hideBalances: true }));
@@ -1464,14 +1462,9 @@ describe("a stake with Sozu in figures", () => {
     // Asked for nothing yet: nothing asked of CoinGecko.
     expect(accessibleName(box())).toBe("Add USD value (CoinGecko)");
     expect(coingecko).not.toHaveBeenCalled();
-    // Opened, and the box ticked: drawn again, open as it was left.
-    const fold = () => body.querySelector("details.stake-years-fold");
-    fold().open = true;
-    fold().dispatchEvent({ type: "toggle", bubbles: false, preventDefault() {}, stopPropagation() {} });
     box().checked = true;
     box().dispatchEvent(new Event("change"));
     await vi.waitFor(() => expect(years()).toEqual(["2026Native staking, claimed: 3 DUSK · $0.21"]));
-    expect(fold().open).toBe(true);
     expect(String(coingecko.mock.calls[0][0])).toContain("vs_currency=usd");
     // Hidden with the other balances.
     popup(state, ov({ hideBalances: true }));
@@ -1759,24 +1752,25 @@ describe("a stake with Sozu in figures", () => {
       activity: activityOf(overview, entries(["sozu_stake", dusk(100)], ["sozu_stake", dusk(50)], ["sozu_unstake", dusk(40)])),
     };
     popup(state, overview);
-    // Worth now from the status at once; the rest, under Details, waits for the whole history. Lena's: the card's
-    // rewards and Rewards by year's growth differed by exactly the deposit fees, and neither said so: the card's are
-    // before them.
-    expect(rows()).toEqual(["Worth now120 DUSK", "stDUSK39 stDUSKAdd to Assets"]);
-    expect(history()).toEqual(["Rewards so far, before deposit feesReading your history…"]);
+    // Worth now from the status at once; the rest waits for the whole history. Lena's: the card's rewards and Rewards
+    // by year's growth differed by exactly the deposit fees, and neither said so: the card's are before them.
+    expect(rows()).toEqual(["Worth now120 DUSK", "Rewards so far, before deposit feesReading your history…", "stDUSK39 stDUSKAdd to Assets"]);
     await settle();
     await settle();
     // 0.25% of 150 DUSK, at the fee Sozu has now, as no event was read of what each paid.
-    expect(rows()).toEqual(["Worth now120 DUSK", "stDUSK39 stDUSKAdd to Assets"]);
-    expect(history()).toEqual([
+    expect(rows()).toEqual([
       "Put in150 DUSK",
       "Taken out40 DUSK",
+      "Worth now120 DUSK",
       "Deposit fees, about0.375 DUSK",
       "Rewards so far, before deposit fees10.375 DUSK",
+      "stDUSK39 stDUSKAdd to Assets",
     ]);
+    // All on the screen, with no Details fold for any of it.
+    expect(body.querySelector(".sozu-details")).toBeNull();
     expect(state.activity.history.sync).toHaveBeenCalled();
     // Each to the last lux, for a pointer.
-    expect(body.querySelectorAll(".sozu-history .kv-value > span").map((el) => el.getAttribute("title"))).toContain("10.375");
+    expect(body.querySelectorAll(".sozu-position .kv-value > span").map((el) => el.getAttribute("title"))).toContain("10.375");
   });
 
   it("names what's on its way, and shows a loss as one", async () => {
@@ -1790,7 +1784,7 @@ describe("a stake with Sozu in figures", () => {
     popup(state, overview);
     await settle();
     await settle();
-    expect(history()).toContain("Rewards so far, before deposit fees−79.5 DUSK");
+    expect(rows()).toContain("Rewards so far, before deposit fees−79.5 DUSK");
     expect(visibleText(body.querySelector(".sozu-position"))).toContain("One more on its way isn't counted yet.");
   });
 
@@ -1806,16 +1800,15 @@ describe("a stake with Sozu in figures", () => {
     await settle();
     await settle();
     expect(rows()).toEqual(["Worth now120 DUSK", "stDUSK39 stDUSKAdd to Assets"]);
-    expect(history()).toEqual([]);
 
     const secret = ov({ hideBalances: true });
     const hidden = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu(held), activity: activityOf(secret, entries(["sozu_stake", dusk(100)])) };
     popup(hidden, secret);
     await settle();
     await settle();
-    expect([...rows(), ...history()].every((row) => !/\d/.test(row))).toBe(true);
-    expect([rows()[0], history()[0]]).toEqual(["Worth now•••• DUSK", "Put in•••• DUSK"]);
-    expect(body.querySelectorAll(".sozu-position .kv-value > span, .sozu-history .kv-value > span").map((el) => el.getAttribute("title")).filter(Boolean)).toEqual([]);
+    expect(rows().every((row) => !/\d/.test(row))).toBe(true);
+    expect(rows()[0]).toBe("Put in•••• DUSK");
+    expect(body.querySelectorAll(".sozu-position .kv-value > span").map((el) => el.getAttribute("title")).filter(Boolean)).toEqual([]);
   });
 
   it("shows nothing for a profile that never staked, and past stakes for one that left", async () => {
@@ -1830,12 +1823,10 @@ describe("a stake with Sozu in figures", () => {
     popup(left, overview);
     await settle();
     await settle();
-    expect(rows()).toEqual(["Worth now0 DUSK", "stDUSK0 stDUSKAdd to Assets"]);
-    expect(history()).toEqual(["Put in100 DUSK", "Taken out101 DUSK", "Deposit fees, about0.25 DUSK", "Rewards so far, before deposit fees1.25 DUSK"]);
+    expect(rows()).toEqual(["Put in100 DUSK", "Taken out101 DUSK", "Worth now0 DUSK", "Deposit fees, about0.25 DUSK", "Rewards so far, before deposit fees1.25 DUSK", "stDUSK0 stDUSKAdd to Assets"]);
   });
 
   it("reads the history again with each new status, so what went through counts", async () => {
-    const heldHistory = () => body.querySelectorAll(".sozu-details .sozu-history .kv").map(visibleText);
     const overview = ov();
     const history = entries(["sozu_stake", dusk(100)]);
     const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ ...held, loaded: false }), activity: activityOf(overview, history) };
@@ -1843,14 +1834,14 @@ describe("a stake with Sozu in figures", () => {
     await settle();
     await settle();
     await settle();
-    expect(heldHistory()[0]).toBe("Put in100 DUSK");
+    expect(rows()[0]).toBe("Put in100 DUSK");
     history.push(...entries(["sozu_stake", dusk(10), 7]));
     state.sozu.loaded = false;
     await actions.render();
     await settle();
     await settle();
     await settle();
-    expect(heldHistory()[0]).toBe("Put in110 DUSK");
+    expect(rows()[0]).toBe("Put in110 DUSK");
   });
 
   it("says what the rate is made of, and what an amount brings in a year as it's typed", async () => {
@@ -1860,14 +1851,14 @@ describe("a stake with Sozu in figures", () => {
     await settle();
     await settle();
     const factRows = () => body.querySelectorAll(".group.info .list-row").map(visibleText);
-    expect(factRows()[0]).toBe("About 22% a year, after Sozu's 10%. Not promised.");
-    // What it's made of, under Details. Whether millions read M or m depends on the runtime's language data.
-    expect(visibleText(body.querySelector(".sozu-details .sozu-working")).replace("200m DUSK", "200M DUSK")).toBe(
-      "15.2 DUSK a block to stakers, 200M DUSK staked now: about 24% a year. Less Sozu's 10%: about 22%, and a little over as it restakes rewards every hour."
+    // What it's made of, under it, on the screen. Whether millions read M or m depends on the runtime's language data.
+    expect(factRows()[1].replace("200m DUSK", "200M DUSK")).toBe(
+      "About 22% a year. Not promised.15.2 DUSK a block to stakers, 200M DUSK staked now: about 24% a year. Less Sozu's 10%: about 22%, and a little over as it restakes rewards every hour."
     );
     typeInto(field("Stake amount"), "100");
-    // 99.75 DUSK staked at 21.6%, less the 0.25 DUSK fee: under Details too.
-    expect(visibleText(body.querySelector(".sozu-details .sozu-year"))).toBe("At today's rate that's about 21.296 DUSK in rewards a year, after Sozu's share and the deposit fee.");
+    // 99.75 DUSK staked at 21.6%, less the 0.25 DUSK fee: under what it gets, on the screen too.
+    expect(visibleText(body.querySelector(".stake-estimate .sozu-year"))).toBe("At today's rate that's about 21.296 DUSK in rewards a year, after Sozu's share and the deposit fee.");
+    expect(body.querySelector(".sozu-details")).toBeNull();
     expect(state.sozu.rate.native).toBe(0.24);
   });
 
@@ -1879,16 +1870,15 @@ describe("a stake with Sozu in figures", () => {
     popup(state, ov(), { rewardRate: 0.24, stakingFigures });
     await vi.waitFor(() => expect(state.sozu.rate.native).toBe(0.8761));
     popup(state, ov(), { rewardRate: 0.24, stakingFigures });
-    expect(visibleText(body.querySelector(".group.info .list-row"))).toBe("About 79% a year, after Sozu's 10%. Not promised.");
-    const working = visibleText(body.querySelector(".sozu-details .sozu-working")).replace("207.3m DUSK", "207.3M DUSK");
-    expect(working).toMatch(/^15\.6 DUSK a block to stakers over the last 30 days, 207\.3M DUSK staked now: about 88% a year\./);
+    const working = visibleText(body.querySelectorAll(".group.info .list-row")[1]).replace("207.3m DUSK", "207.3M DUSK");
+    expect(working).toMatch(/^About 79% a year\. Not promised\.15\.6 DUSK a block to stakers over the last 30 days, 207\.3M DUSK staked now: about 88% a year\./);
   });
 
   // Lena's: the rate measured went as the node went silent.
   it("keeps the rate measured last and what it's made of in the next popup, while it can't be read again", async () => {
     vi.stubGlobal("localStorage", memoryStorage());
-    const said = () => [visibleText(body.querySelector(".group.info .list-row")), visibleText(body.querySelector(".sozu-details .sozu-working") ?? body.querySelector(".sozu-details"))];
-    const grew = "stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.";
+    const factRows = () => body.querySelectorAll(".group.info .list-row").map(visibleText);
+    const grew = "About 21% a year. Not promised.stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.";
     // A pool of its own: what the popup keeps of its growth for an hour stays with this test.
     const kept = "7c".repeat(32);
     const done = sozu();
@@ -1896,14 +1886,13 @@ describe("a stake with Sozu in figures", () => {
     const testnet = ov({ chainId: 2 });
     archive.query = sozuArchiveQuery({ pool: kept, now: Date.now(), from: 3_020_000_000_000n, to: 3_071_932_000_000n });
     popup({ route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: withPool }, testnet, { rewardRate: 0.24 });
-    await vi.waitFor(() => expect(said()).toEqual(["About 21% a year, after Sozu's 10%. Not promised.", grew]));
+    await vi.waitFor(() => expect(factRows()[1]).toBe(grew));
 
     // The next popup, the node silent: Sozu's status isn't read again, nor the growth.
     archive.query = () => new Promise(() => {});
     const unread = sozu({ loaded: false, loading: true, status: null });
     popup({ route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: unread }, testnet, { rewardRate: 0.24 });
-    // Sozu's fee unread with its status: after its share, as the growth is.
-    await vi.waitFor(() => expect(said()).toEqual(["About 21% a year, after Sozu's share. Not promised.", grew]));
+    await vi.waitFor(() => expect(factRows()[1]).toBe(grew));
   });
 
   it("says the network's rate alone when the node's figures can't be read, and nothing without any", async () => {
@@ -1911,9 +1900,8 @@ describe("a stake with Sozu in figures", () => {
     popup(state, ov(), { rewardRate: 0.24 });
     await settle();
     await settle();
-    expect(visibleText(body.querySelector(".group.info .list-row"))).toBe("About 22% a year, after Sozu's 10%. Not promised.");
-    expect(visibleText(body.querySelector(".sozu-details .sozu-working"))).toBe(
-      "About 24% a year across the network. Less Sozu's 10%: about 22%, and a little over as it restakes rewards every hour."
+    expect(visibleText(body.querySelectorAll(".group.info .list-row")[1])).toBe(
+      "About 22% a year. Not promised.About 24% a year across the network. Less Sozu's 10%: about 22%, and a little over as it restakes rewards every hour."
     );
     const none = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
     popup(none, ov());
@@ -1932,24 +1920,25 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25%");
     typeInto(field("Stake amount"), "100");
     expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · 0.25 DUSK");
-    // What it gets, once: what stDUSK is waits under Details.
-    expect(body.querySelector(".stake-estimate").children.map(visibleText)).toEqual(["You get about 32.4714 stDUSK, worth about 99.75 DUSK."]);
-    // The network fee on the screen; Sozu's fees as read, and what stDUSK is, under Details; its contract is on Review.
-    const shown = () => body.querySelectorAll(".group.info .list-row").filter((row) => !row.closest(".sozu-details")).map(visibleText);
-    const details = () => body.querySelectorAll(".sozu-details .list-row").map(visibleText);
-    expect(shown()).toEqual(["Fee up to 0.005 DUSK"]);
-    expect(details()).toEqual([
-      "Sozu keeps 10% of rewards0.25% on deposits · No fee to unstake",
-      "stDUSK is Sozu's token for your share of its pool.Its DUSK value follows the pool, its rewards and its fees.Add to Assets",
+    // What it gets and its worth now, then that the worth follows the pool: what stDUSK is, the facts say once.
+    expect(body.querySelector(".stake-estimate").children.map(visibleText)).toEqual([
+      "You get about 32.4714 stDUSK, worth about 99.75 DUSK now.",
+      "stDUSK's DUSK value follows Sozu's pool, its rewards and its fees.",
     ]);
-    expect(visibleText(body.querySelector(".sozu-details > summary"))).toBe("Details");
-    expect(visibleText(body)).not.toMatch(/whole (gas )?limit|Sozu's contract|no node needed/);
+    // What Sozu staking is, Sozu's fees as read and the network fee, all on the screen; its contract is on Review.
+    expect(body.querySelectorAll(".group.info .list-row").map(visibleText)).toEqual([
+      "Any amount, no node neededYou get stDUSK, a token for your share of Sozu's pool.Add to Assets",
+      "Sozu keeps 10% of rewards0.25% on deposits · No fee to unstake",
+      "Fee up to 0.005 DUSK",
+    ]);
+    expect(body.querySelector(".sozu-details")).toBeNull();
+    expect(visibleText(body)).not.toMatch(/whole (gas )?limit|Sozu's contract/);
     expect(body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Add stDUSK to Assets")).toBeTruthy();
 
     // Mainnet's fees, as its substrate gives them.
     state.sozu.status.fees = { deposit: { numerator: "1", denominator: "400" }, reward: { numerator: "15", denominator: "100" } };
     popup(state);
-    expect(details()[0]).toBe("Sozu keeps 15% of rewards0.25% on deposits · No fee to unstake");
+    expect(visibleText(body.querySelectorAll(".group.info .list-row")[1])).toBe("Sozu keeps 15% of rewards0.25% on deposits · No fee to unstake");
   });
 
   it("says what Max keeps of a stake, as native staking does, and on Review that the deposit fee doesn't come back", async () => {
@@ -1984,7 +1973,7 @@ describe("liquid staking", () => {
     }
     typeInto(field("Stake amount"), "0.000000005");
     expect(body.querySelector(".amount-field__error").hidden).toBe(true);
-    expect(visibleText(body.querySelector(".stake-estimate__main"))).toBe("You get about 0.000000001 stDUSK, worth about 0.000000004 DUSK.");
+    expect(visibleText(body.querySelector(".stake-estimate__main"))).toBe("You get about 0.000000001 stDUSK, worth about 0.000000004 DUSK now.");
     expect(button("Review stake").disabled).toBe(false);
   });
 
@@ -1993,7 +1982,7 @@ describe("liquid staking", () => {
     const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ status }) };
     popup(state);
     expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee not read yet");
-    expect(visibleText(body.querySelector(".sozu-details .list-row"))).toBe("Sozu's feesThey couldn't be read just now.");
+    expect(visibleText(body.querySelectorAll(".group.info .list-row")[1])).toBe("Sozu's feesThey couldn't be read just now.");
     typeInto(field("Stake amount"), "5");
     expect(body.querySelector(".amount-field__error").textContent).toBe("Sozu's rate and fees couldn't be read. Try again later.");
     expect(button("Review stake").disabled).toBe(true);
@@ -2086,7 +2075,7 @@ describe("liquid staking", () => {
     typeInto(field("Stake amount"), "100");
     button("Review stake").click();
     await settle();
-    expect(rows()).toEqual(["You get about32.4714 stDUSK, worth about 99.75 DUSK", "Deposit fee0.25 DUSK (0.25%), not refunded"]);
+    expect(rows()).toEqual(["You get about32.4714 stDUSK, worth about 99.75 DUSK now", "Deposit fee0.25 DUSK (0.25%), not refunded"]);
     expect(visibleText(confirm())).toBe("Stake 100 DUSK");
 
     // Sozu's manager raises the deposit fee to 5% meanwhile: nothing is sent, and the new figures show.
@@ -2095,7 +2084,7 @@ describe("liquid staking", () => {
     await settle();
     expect(sent()).toEqual([]);
     expect(visibleText(body.querySelector(".sozu-changed"))).toBe("Sozu's terms changedThese are the figures now. Check them, then stake again.");
-    expect(rows()).toEqual(["You get about30.9251 stDUSK, worth about 95 DUSK", "Deposit fee5 DUSK (5%), not refunded"]);
+    expect(rows()).toEqual(["You get about30.9251 stDUSK, worth about 95 DUSK now", "Deposit fee5 DUSK (5%), not refunded"]);
 
     // A Confirm pressed at once isn't for the new figures: it does nothing.
     confirm().click();
@@ -2440,7 +2429,7 @@ describe("liquid staking", () => {
     expect(visibleText(body.querySelector(".review-head"))).toBe("Liquid staking100 DUSKWith Sozu, a third party");
     // Nothing on what a failed call costs, only that the deposit fee stays with Sozu, in its row; Sozu is named a third party above.
     expect(body.querySelectorAll(".row > .group .kv").map(visibleText)).toEqual([
-      "You get about32.4714 stDUSK, worth about 99.75 DUSK",
+      "You get about32.4714 stDUSK, worth about 99.75 DUSK now",
       "Deposit fee0.25 DUSK (0.25%), not refunded",
       "FromProfile 1 · Public",
     ]);
@@ -2496,9 +2485,9 @@ describe("liquid staking", () => {
       "Worth now•••• DUSK",
       "stDUSK•••• stDUSKAdd to Assets",
     ]);
-    expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available •••• DUSK");
+    expect(visibleText(body.querySelector(".amount-avail span"))).toBe("Available •••• DUSK from your public balance");
     typeInto(field("Stake amount"), "100");
-    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.4714 stDUSK, worth about 99.75 DUSK.");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about 32.4714 stDUSK, worth about 99.75 DUSK now.");
     expect(visibleText(body.querySelector(".sozu-terms"))).toBe("Deposit fee 0.25% · •••• DUSK");
     expect(visibleText(body.querySelector(".group.info"))).toContain("Fee up to 0.005 DUSK");
   });
@@ -2513,12 +2502,12 @@ describe("what Max fills in, with Hide balances", () => {
     button("Max").click();
     expect(shownField().value).toBe("••••");
     expect(accessibleName(shownField())).toBe("Stake amount, hidden");
-    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about •••• stDUSK, worth about •••• DUSK.");
+    expect(visibleText(body.querySelector(".stake-estimate"))).toContain("You get about •••• stDUSK, worth about •••• DUSK now.");
 
     button("Review stake").click();
     await settle();
     expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
-    expect([...body.querySelectorAll(".kv")].map(visibleText).find((row) => row.startsWith("You get about"))).toBe("You get about•••• stDUSK, worth about •••• DUSK");
+    expect([...body.querySelectorAll(".kv")].map(visibleText).find((row) => row.startsWith("You get about"))).toBe("You get about•••• stDUSK, worth about •••• DUSK now");
     // Its button as its head: the amount hidden.
     expect(visibleText(confirm())).toBe("Stake •••• DUSK");
     expect(visibleText(body.querySelector(".gas-total-value"))).toBe("up to •••• DUSK");

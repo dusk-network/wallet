@@ -349,11 +349,11 @@ function waitingSection(ov, { state, actions } = {}) {
   };
   // "0.01 DUSK to Lucas", its amount hidden with the balances.
   const what = (send) => [balance(hidden, formatDuskExact(send.lux)), ` DUSK to ${toText(send)}`];
-  // Its memo and when it was made: "“Hors ligne un” · 02:34", or "· yesterday at 02:34".
+  // Its memo and when it was made: "“Hors ligne un” · made at 02:34".
   const madeLine = (send) =>
     h("div", { class: "muted home-waiting__made" }, [
       ...(String(send.memo ?? "").trim() ? ["“", safeTextEl(send.memo), "” · "] : []),
-      whenAtText(Number(send.at) || Date.now()).replace(/^at /, ""),
+      `made ${whenAtText(Number(send.at) || Date.now())}`,
     ]);
   const refresh = () => {
     state.needsRefresh = true;

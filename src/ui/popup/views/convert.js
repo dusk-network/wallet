@@ -118,9 +118,12 @@ export function convertFormView(ov, { state, actions } = {}) {
       field.input.focus();
     },
   });
-  // What Max fills in, the fee on the line under it left out already, as Send says it.
   const available = h("div", { class: "amount-avail", hidden: !known }, [
-    h("span", { class: "amount-avail__text" }, ["Available ", balance(hidden, formatDusk(avail)), " DUSK"]),
+    h("span", { class: "amount-avail__text" }, [
+      feeLux > 0n ? "Available after fees " : "Available ",
+      balance(hidden, formatDusk(avail)),
+      " DUSK",
+    ]),
     maxBtn,
   ]);
   const feeNote = feeLux > 0n ? h("div", { class: "amount-fee-note", text: `Fee up to ${formatFee(feeLux, { max: true })} DUSK` }) : null;

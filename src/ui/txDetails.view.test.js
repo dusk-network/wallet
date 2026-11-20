@@ -86,12 +86,13 @@ describe("transaction details", () => {
 
     view = details({ ...shield, status: "unknown" });
     expect([view.status, view.note]).toEqual(["Not confirmed", "The wallet stopped waiting for a result. That doesn't mean it failed."]);
-    // Dropped before it ran: Failed, as Sent says it.
+    // Dropped before it ran: Failed, as Sent says it; that no fee was charged, its Fee row says.
     view = details({ ...shield, status: "removed", privacy: "shielded" });
     expect([view.status, view.note]).toEqual([
       "Failed",
-      "The network dropped it before it ran. No fee charged. The 1 DUSK stayed in your wallet. Shielded funds may still be reserved locally.",
+      "The network dropped it before it ran. The 1 DUSK stayed in your wallet. Shielded funds may still be reserved locally.",
     ]);
+    expect(view.rows).toContain("FeeNone charged");
     view = details({ ...shield, status: "submitted" });
     expect([view.status, view.note]).toEqual(["Sending", "Waiting for a block, about 10 s"]);
     // Lena's, offline: no "about 10 s" while nothing can come.
@@ -117,9 +118,8 @@ describe("transaction details", () => {
     };
     let view = show({ ...stake, status: "unsent", signedTx: "ab12" });
     expect([view.status, view.note, view.buttons.map((b) => b.textContent)]).toEqual(["Held", "It didn't reach the network. Nothing left your wallet.", ["Send it now", "Don't send"]]);
-    // Its note says nothing was charged: no fee row says it again.
-    expect(view.body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText).filter((r) => r.startsWith("Fee"))).toEqual([]);
-    expect(visibleText(view.body)).not.toContain("None charged");
+    // Its Fee row, as for every transaction: none charged.
+    expect(view.body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText).filter((r) => r.startsWith("Fee"))).toEqual(["FeeNone charged"]);
     expect(visibleText(view.body)).not.toContain("Sending");
     view.buttons[0].click();
     await settle();
@@ -152,6 +152,7 @@ describe("transaction details", () => {
     state.txDetailHash = HASH;
     view = show({ ...stake, status: "not_sent" });
     expect([view.status, view.note, view.buttons]).toEqual(["Not sent", "Another transaction from this account took its place, so nothing was sent.", []]);
+    expect(visibleText(view.body)).toContain("FeeNone charged");
   });
 
   // Lena's: she said Don't send, it went out anyway, and its screen turned into a plain green "Sent at …": she
@@ -464,10 +465,11 @@ describe("transaction details", () => {
     dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
     const body = dom.document.body;
     const rows = body.querySelectorAll(".tx-detail > .group > .kv").map(visibleText);
-    expect(visibleText(body.querySelector(".tx-hero-note"))).toBe("The network dropped it before it ran. No fee charged. The 3 DUSK stayed in your wallet.");
+    expect(visibleText(body.querySelector(".tx-hero-note"))).toBe("The network dropped it before it ran. The 3 DUSK stayed in your wallet.");
     expect(rows.filter((r) => /^(Sent|Bridge fee|You receive|Received)/.test(r))).toEqual([]);
-    // That no fee was charged, said once, in the note.
-    expect(rows.filter((r) => r.startsWith("Fee"))).toEqual([]);
+    // That no fee was charged, said once, in its Fee row.
+    expect(rows.filter((r) => r.startsWith("Fee"))).toEqual(["FeeNone charged"]);
+    expect(visibleText(body)).not.toContain("No fee charged");
   });
 
   it("follows DUSK bridged to BNB Smart Chain to its end: on its way, late, then what arrived and where", async () => {

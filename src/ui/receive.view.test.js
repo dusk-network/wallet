@@ -45,9 +45,9 @@ const overview = {
   selectedAccountIndex: 0,
 };
 
-const SHIELDED_NOTE = "Anyone can see this address belongs to alice.dusk.";
-// An account or address as every screen shortens it: its first and last six.
-const short = (address) => `${address.slice(0, 6)}…${address.slice(-6)}`;
+const PUBLIC_NOTE = "People who send to alice.dusk reach this public account.";
+const SHIELDED_NOTE =
+  "People who pay alice.dusk choose public or shielded. Anyone can see this address belongs to alice.dusk.";
 
 // DUSK's price now as CoinGecko gives it, the one place a mainnet screen reads it from (app-core's /prices):
 // nothing in these tests leaves the machine.
@@ -125,7 +125,7 @@ describe("receive", () => {
     expect(shielded.address.title).toBe(ADDRESS);
   });
 
-  it("shows the name and the account short under the QR, the whole of it to screen readers, and copies it with a button that says Copied", async () => {
+  it("shows the name and the whole account under the QR, and copies the account with a button that says Copied", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");
     const row = dom.document.body.querySelector(".row").children;
@@ -134,8 +134,9 @@ describe("receive", () => {
 
     expect(view.name()).toBe("alice.dusk");
     expect(view.nameField.querySelector(".receive-field__name").title).toBe("alice.dusk");
-    // Short, as every screen shows an account; whole in its tooltip, to screen readers, in the QR and on Copy.
-    expect([visibleText(view.address), screenReaderText(view.address), view.address.title]).toEqual([short(ACCOUNT), ACCOUNT, ACCOUNT]);
+    // All of it, to read and compare, its ends set off: for the eyes and for screen readers alike.
+    expect([visibleText(view.address), screenReaderText(view.address), view.address.title]).toEqual([ACCOUNT, ACCOUNT, ACCOUNT]);
+    expect(view.address.querySelectorAll("b").map((b) => b.textContent)).toEqual([ACCOUNT.slice(0, 6), ACCOUNT.slice(-6)]);
     expect(dom.document.body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(ACCOUNT));
 
     // The name's icon and the address's words each say Copied on themselves, with no toast.
@@ -163,18 +164,20 @@ describe("receive", () => {
     expect(css).toMatch(/button\.acct-menu-copy,\s*button\.receive-copy \{\s*display: inline-grid;\s*place-items: center;\s*\}/);
   });
 
-  it("says nothing under the public account's name, and on the shielded address that anyone can see it's the name's, with no ⓘ to press", async () => {
+  it("says what the name reaches right under it, with no ⓘ to press", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");
-    expect([view.name(), view.shownNote()]).toEqual(["alice.dusk", ""]);
-    expect(visibleText(dom.document.body)).not.toContain("reach this public account");
+    expect(view.shownNote()).toBe(PUBLIC_NOTE);
     expect(dom.document.body.querySelector(".receive-info")).toBeNull();
-    // The shielded address paid through the name: that it's public, right under the fields it speaks of.
+    // It follows the fields it speaks of.
+    const row = dom.document.body.querySelector(".row").children;
+    expect(row.indexOf(view.note)).toBe(row.indexOf(view.addressField.parentNode) + 1);
+    // On the shielded tab: that the payer chooses, and that the address is the name's for anyone to see.
     lookupShieldedName.mockResolvedValue("alice.dusk");
     const shielded = await receive("shielded");
     expect(shielded.shownNote()).toBe(SHIELDED_NOTE);
-    const row = dom.document.body.querySelector(".row").children;
-    expect(row.indexOf(shielded.note)).toBe(row.indexOf(shielded.addressField.parentNode) + 1);
+    const shieldedRow = dom.document.body.querySelector(".row").children;
+    expect(shieldedRow.indexOf(shielded.note)).toBe(shieldedRow.indexOf(shielded.addressField.parentNode) + 1);
   });
 
   it("names the shielded address only when the name's record is that address", async () => {
@@ -183,7 +186,7 @@ describe("receive", () => {
     let view = await receive("shielded", { state: { receive: { tab: "shielded" } } });
     expect(lookupShieldedName).toHaveBeenCalledWith(ACCOUNT, ADDRESS, { nodeUrl: overview.nodeUrl });
     expect([view.name(), view.shownNote()]).toEqual(["", ""]);
-    expect([visibleText(view.address), view.address.title]).toEqual([short(ADDRESS), ADDRESS]);
+    expect([visibleText(view.address), view.address.title]).toEqual([ADDRESS, ADDRESS]);
     expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied", undefined]);
 
     lookupShieldedName.mockResolvedValue("alice.dusk");
@@ -244,8 +247,8 @@ describe("receive", () => {
     expect(copied).toBe(`You're asked to pay 1.5 DUSK\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.5&network=testnet`);
     // The QR holds the same request, for a wallet to read.
     expect(dom.document.body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(`dusk:public-${ACCOUNT}@dusk:2?amount=1.5`));
-    // No note narrates what the QR and the link do.
-    expect(visibleText(dom.document.body.querySelector(".receive-request"))).not.toMatch(/The QR holds|web wallet/);
+    // What the QR holds, and where the link opens: said in the form.
+    expect(visibleText(dom.document.body.querySelector(".receive-request"))).toContain("The QR holds the request. The link opens the web wallet's Send, filled in.");
   });
 
   it("copies a shielded request with its memo, and the dusk: link where the network has no web wallet", async () => {
@@ -263,6 +266,8 @@ describe("receive", () => {
     view.button("Copy request").click();
     await settle();
     expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`You're asked for a payment in DUSK · Factura 33\nPay here: dusk:public-${ACCOUNT}@dusk:42?memo=Factura+33`);
+    // What the QR holds is still said; no web wallet's Send is.
+    expect(visibleText(dom.document.body.querySelector(".receive-request"))).toContain("The QR holds the request.");
     expect(visibleText(dom.document.body.querySelector(".receive-request"))).not.toContain("web wallet");
   });
 

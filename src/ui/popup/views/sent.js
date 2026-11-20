@@ -52,13 +52,13 @@ const offline = () => globalThis.navigator?.onLine === false;
 // A payment from Send waiting for the network it couldn't reach, before it
 // went out, as the web wallet says it: it goes out once the network answers.
 const waitingText = () =>
-  offline() ? "Offline. Nothing sent yet; it goes out once you're back online." : "Network not answering. Nothing sent yet; it goes out once it answers.";
+  offline() ? "Offline. Nothing sent yet; it goes out once the network answers." : "Network not answering. Nothing sent yet; it goes out once it answers.";
 
 /** What's said of a payment from Send handed to the network without a clear answer: it's looked up, and sent once if it didn't go. */
 export const UNCLEAR_TEXT = "It may have gone out already; if not, it goes out once the network answers.";
 
-// The same, offline: it's looked up once the connection is back.
-const UNCLEAR_OFFLINE_TEXT = "Offline. It may have gone out already; if not, it goes out once you're back online.";
+// The same, offline.
+const UNCLEAR_OFFLINE_TEXT = `Offline. ${UNCLEAR_TEXT}`;
 
 /** What's said of a payment the person chose not to send, in no colour: nothing left (Chen's: a red Send failed). */
 export const NOT_SENT_CHOSEN_TEXT = "Not sent. Nothing left your wallet.";
@@ -68,9 +68,6 @@ export const CANCEL_FAILED_TEXT = "Couldn't stop it. Try again.";
 
 /** What Don't send says of a payment that went out meanwhile. */
 export const WENT_ALREADY_TEXT = "It went out already.";
-
-// The Sent screens whose Details are open, kept as the screen redraws.
-const detailsOpen = new WeakSet();
 
 // A payment held for Send it too, as the overview keeps it, with what its
 // account sent meanwhile; and that said, the recipient named as the Sent
@@ -174,6 +171,7 @@ export function sentStatus(sent, ov) {
  */
 export function sentSteps(sent, ov) {
   const { phase, status, error, blockHeight } = sentStatus(sent, ov);
+  const sentLine = [clock(sent?.sentAt || sent?.startedAt), sent?.from].filter(Boolean).join(" · ");
 
   if (phase === "not_sent") {
     // Called off by the person: said plainly, in no colour.
@@ -232,8 +230,7 @@ export function sentSteps(sent, ov) {
     ];
   }
 
-  // When it was sent, and from which balance, are under Details (sentView).
-  const sending = { label: "Sending", state: "done", sub: "" };
+  const sending = { label: "Sending", state: "done", sub: sentLine };
   if (status === "executed") {
     const height = safeBigInt(blockHeight ?? 0, 0n);
     return [
@@ -714,30 +711,14 @@ export function sentView(ov, { state, actions, sozu } = {}) {
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
-  // What it got or gave back, and the fee.
-  const rows = h("div", { class: "group" }, [
+  const details = h("div", { class: "group" }, [
     ...(sent.sozu && status === "executed" ? sozuLines(sent, sozu, hidden) : []).map(({ label, value }) => kv(label, value)),
-    feeRow ? kv(feeRow[0], feeRow[1]) : null,
-  ].filter(Boolean));
-
-  // What decides nothing once it's confirmed, under Details: its transaction
-  // ID, its memo, and when it was sent, from which balance.
-  const sentAt = phase === "sent" ? [clock(sent.sentAt || sent.startedAt), sent.from].filter(Boolean).join(" · ") : "";
-  const detailRows = [
     sent.hash
       ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: shortAddress(sent.hash) }), copyBtn])
       : null,
     sent.memo ? kv("Memo", safeTextEl(sent.memo)) : null,
-    sentAt ? kv("Sent at", sentAt) : null,
-  ].filter(Boolean);
-  // Open or closed as it was left: the screen redraws as the steps move on.
-  const details = detailRows.length
-    ? h("details", { class: "advanced", open: detailsOpen.has(sent) }, [
-        h("summary", { text: "Details" }),
-        h("div", { class: "advanced-body" }, [h("div", { class: "group group--inset" }, detailRows)]),
-      ])
-    : null;
-  details?.addEventListener("toggle", () => (details.open ? detailsOpen.add(sent) : detailsOpen.delete(sent)));
+    feeRow ? kv(feeRow[0], feeRow[1]) : null,
+  ].filter(Boolean));
 
   // Nothing sent: Back to review leads, to fix it and try again. Not
   // confirmed: Done leads, and Back is there once Activity says it didn't go.
@@ -848,22 +829,19 @@ export function sentView(ov, { state, actions, sozu } = {}) {
     : null;
 
   // That it goes on: in Firefox on a phone with what's said of its notice
-  // (noticeOffer). A payment waiting for the network, or handed over without
-  // a clear answer, says in its step that it goes out by itself; in the app
-  // on a phone, one waiting goes out only while the app's open, which it says.
+  // (noticeOffer). In the app on a phone, one waiting for the network goes
+  // out only while the app's open, which it says.
   const waitsHere = phase === "sending" && (sent.waits || offline()) && !sent.handedOver;
-  const goesOutLater = phase === "sending" && Boolean(sent.sendId) && (sent.waits || offline());
-  const noteText =
-    final || held || (isPhone() && !isTauriRuntime())
-      ? ""
-      : !isExtensionRuntime() && isPhone() && waitsHere
-        ? appLeaveText(ov)
-        : goesOutLater
-          ? ""
-          : isExtensionRuntime()
-            ? CLOSE_WALLET_TEXT
-            : LEAVE_SCREEN_TEXT;
-  const note = noteText ? h("p", { class: "sent-note", text: noteText }) : null;
+  const note = final || held || (isPhone() && !isTauriRuntime())
+    ? null
+    : h("p", {
+        class: "sent-note",
+        text: isExtensionRuntime()
+          ? CLOSE_WALLET_TEXT
+          : isPhone() && waitsHere
+            ? appLeaveText(ov)
+            : LEAVE_SCREEN_TEXT,
+      });
 
   return [
     h("div", { class: "sent", "data-phase": phase, "data-status": status }, [
@@ -871,8 +849,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
       note,
       final || held ? null : noticeOffer({ state, actions }),
       stepper,
-      rows.children.length ? rows : null,
-      details,
+      details.children.length ? details : null,
       h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : held ? [...heldActions, done] : cancel ? [cancel, done] : [done, explorer]).filter(Boolean)),
     ].filter(Boolean)),
   ];

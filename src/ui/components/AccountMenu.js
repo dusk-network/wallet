@@ -182,7 +182,10 @@ export function createAccountMenuController({
               }
             },
           }, [
-            h("div", { class: "net-menu-item-left" }, [h("div", { class: "net-menu-item-label", text: "Profile names" })]),
+            h("div", { class: "net-menu-item-left" }, [
+              h("div", { class: "net-menu-item-label", text: "Profile names" }),
+              h("div", { class: "net-menu-item-hint", text: "Settings" }),
+            ]),
             h("span", { class: "net-menu-check", "aria-hidden": "true", html: iconSvg("chev-r") }),
           ]);
 

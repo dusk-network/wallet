@@ -52,7 +52,7 @@ describe("shield and unshield", () => {
     ];
     expect(read()).toEqual([
       "From your public balance to your shielded balance.",
-      "Available 1,482.8883 DUSK",
+      "Available after fees 1,482.8883 DUSK",
       "Fee up to 0.05 DUSK",
     ]);
     // The switch says which is picked, and the arrow keys move it.
@@ -66,7 +66,7 @@ describe("shield and unshield", () => {
     expect(state.draft.kind).toBe(TX_KIND.UNSHIELD);
     expect(read()).toEqual([
       "From your shielded balance to your public balance.",
-      "Available 24.95 DUSK",
+      "Available after fees 24.95 DUSK",
       "Fee up to 0.05 DUSK",
     ]);
   });
@@ -110,7 +110,7 @@ describe("shield and unshield", () => {
         })
       );
     show();
-    expect(visibleText(body().querySelector(".amount-avail__text"))).toBe("Available 1,482.7883 DUSK");
+    expect(visibleText(body().querySelector(".amount-avail__text"))).toBe("Available after fees 1,482.7883 DUSK");
     expect(visibleText(body().querySelector(".amount-fee-note"))).toBe("Fee up to 0.15 DUSK");
     button("Max").click();
     expect(body().querySelector("input.amount-field__input").value).toBe("1482.7883");

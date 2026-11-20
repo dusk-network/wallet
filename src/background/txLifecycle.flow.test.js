@@ -1530,7 +1530,7 @@ describe("background Phoenix tx lifecycle flow", () => {
         await vi.waitFor(() => expect(mocks.sentMessages).toContainEqual({ type: "DUSK_UI_SEND_WAITING", sendId: "send-gone-1", waits: true }));
         expect(mocks.engineClosed).toBeTypeOf("function");
         mocks.engineClosed();
-        await expect(response).resolves.toMatchObject({ error: { message: "The wallet closed first. Nothing left your wallet.", data: { sent: false } } });
+        await expect(response).resolves.toMatchObject({ error: { message: "The wallet closed before the network answered. Nothing left your wallet.", data: { sent: false } } });
 
         // Unlocked again, the network back: it never goes out by itself, and Home says it wasn't sent.
         mocks.nodeAnswers = true;

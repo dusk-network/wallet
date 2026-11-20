@@ -330,8 +330,8 @@ describe("Sozu's rate, as its stDUSK grew", () => {
     draw();
     await flush();
     const rate = app.querySelectorAll(".group.info .list-row").map((row) => visibleText(row)).find((text) => text.startsWith("About"));
-    expect(rate).toBe("About 21% a year, after Sozu's 10%. Not promised.");
-    // Its line, under Details.
-    expect(visibleText(app.querySelector("details.sozu-details .sozu-working"))).toBe("stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.");
+    // Its line under it, on the screen.
+    expect(rate).toBe("About 21% a year. Not promised.stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.");
+    expect(app.querySelector("details.sozu-details")).toBeNull();
   });
 });

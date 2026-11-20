@@ -735,7 +735,7 @@ describe("a transaction's details", () => {
     return view;
   };
 
-  it("leads with who, how much and its status, then its date, memo, fee and profile, its ID under Details", async () => {
+  it("leads with who, how much and its status, then its date, memo, fee, profile and ID", async () => {
     const { state } = open({ local: [sent] }, sent.hash);
     await settle();
     expect(visibleText(body().querySelector(".tx-hero"))).toBe("Sent tofaucet.dusk" + `${short(FAUCET)}−25 DUSKCompleted`);
@@ -744,18 +744,7 @@ describe("a transaction's details", () => {
       "MemoOrder 1042",
       "Fee0.0037 DUSK",
       "Fromalice.dusk · Public",
-    ]);
-    // The ID, block, gas and finality wait under Details.
-    const tech = body().querySelector("details.tx-tech");
-    expect(tech.open).toBe(false);
-    expect(visibleText(tech.querySelector("summary"))).toBe("Details");
-    expect(tech.querySelectorAll(".kv").map(visibleText)).toEqual([
       "Transaction ID3e6a0e…ae84baCopy",
-      "NetworkTestnet",
-      "Block4,658,100",
-      "Gas used3,700,000 of 10,000,000",
-      "Gas price1 LUX",
-      "SubmittedThu 22 Oct 2026, 14:32 UTC",
     ]);
     // The ID opens Dusk's explorer; Copy and the address's copy say what they copy.
     const explorerUrl = `https://explorer.testnet.dusk.network/transactions/transaction/?id=${sent.hash}`;
@@ -768,6 +757,17 @@ describe("a transaction's details", () => {
     button("Copy address").click();
     await settle();
     expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(FAUCET);
+    // Block, gas and finality wait under Details.
+    const tech = body().querySelector("details.tx-tech");
+    expect(tech.open).toBe(false);
+    expect(visibleText(tech.querySelector("summary"))).toBe("Details");
+    expect(tech.querySelectorAll(".kv").map(visibleText)).toEqual([
+      "NetworkTestnet",
+      "Block4,658,100",
+      "Gas used3,700,000 of 10,000,000",
+      "Gas price1 LUX",
+      "SubmittedThu 22 Oct 2026, 14:32 UTC",
+    ]);
     button("View in explorer").click();
     await settle();
     expect(openUrl).toHaveBeenLastCalledWith(explorerUrl);
@@ -844,15 +844,13 @@ describe("a transaction's details", () => {
     expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Still waiting to go through. Don't retry yet.");
     expect(visibleText(body())).toContain("FeeUp to 0.01 DUSK");
 
-    // Dropped before it ran: Failed, as Sent says it; that no fee was charged is said once, in its note.
+    // Dropped before it ran: Failed, as Sent says it; that no fee was charged is said once, in its Fee row.
     const dropped = { ...pending, status: "removed" };
     open({ local: [dropped] }, dropped.hash);
     expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Failed");
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe(
-      "The network dropped it before it ran. No fee charged. The 25 DUSK stayed in your wallet."
-    );
-    expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText).filter((t) => t.startsWith("Fee"))).toEqual([]);
-    expect(visibleText(body())).not.toContain("None charged");
+    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("The network dropped it before it ran. The 25 DUSK stayed in your wallet.");
+    expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText).filter((t) => t.startsWith("Fee"))).toEqual(["FeeNone charged"]);
+    expect(visibleText(body())).not.toContain("No fee charged");
   });
 });
 

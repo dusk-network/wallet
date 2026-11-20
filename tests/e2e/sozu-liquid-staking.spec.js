@@ -240,7 +240,7 @@ test.describe("Sozu liquid staking", () => {
 
     await page.getByLabel("Stake amount").fill("5");
     await expect(page.locator(".sozu-terms")).toHaveText("Deposit fee 0.25% · 0.0125 DUSK");
-    await expect(page.locator(".stake-estimate__main")).toHaveText(/^You get about [\d.,]+ stDUSK, worth about 4\.9875 DUSK\.$/);
+    await expect(page.locator(".stake-estimate__main")).toHaveText(/^You get about [\d.,]+ stDUSK, worth about 4\.9875 DUSK now\.$/);
     await page.getByRole("button", { name: "Review stake" }).click();
     let st = await state(page);
     expect(st.sozuDraft).toMatchObject({
