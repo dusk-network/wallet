@@ -213,7 +213,8 @@ test("a DRC20 standard transfer shows its exact amount and its recipient without
   await expect(page.locator(".ap-amount")).toHaveText("9,007,199.254740993 TKN");
   await expect(page.locator(".ap-recipient__lead")).toHaveText("wallet-both.dusk");
   await expect(page.locator(".ap-recipient__tag")).toHaveText("WB shop · contact");
-  await expect(page.getByText("9007199254740993", { exact: true })).toBeVisible();
+  // The raw units sit under Details.
+  await expect(page.getByText("9007199254740993", { exact: true })).toBeHidden();
   for (const locator of [page.locator(".ap-amount"), page.locator(".ap-recipient__lead"), page.getByRole("button", { name: "Send 9,007,199.254740993 TKN", exact: true })]) {
     expect(await inView(page, locator)).toBe(true);
   }

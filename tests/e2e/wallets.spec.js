@@ -50,7 +50,6 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
   await page.locator("#header-actions .account-chip").click();
   await expect(page.locator(".acct-menu-wallet-title")).toHaveText(["Wallet 1"]);
   await page.getByRole("menuitem", { name: "Add wallet" }).click();
-  await expect(page.getByText("Your password unlocks every wallet here.")).toBeVisible();
   await expect(page.getByText("With a recovery phrase you have")).toBeVisible();
   await page.getByRole("button", { name: /Import wallet/ }).click();
   await expect(page.getByText("This becomes Wallet 2.")).toBeVisible();
@@ -104,7 +103,8 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
   await page.getByTitle("Settings").click();
   await page.getByRole("button", { name: "Remove Wallet 1" }).click();
   await expect(page.getByText("This removes Wallet 1 from this device")).toBeVisible();
-  await expect(page.getByText("One password unlocks every wallet here.")).toBeVisible();
+  // Said only where a wallet is added, not here.
+  await expect(page.getByText("One password unlocks every wallet here.")).toHaveCount(0);
   await shared(page).fill(twelve.password);
   await page.getByRole("button", { name: "Remove wallet" }).click();
   await expect(page.getByText("Wallet 1 removed.")).toBeVisible({ timeout: 60_000 });
@@ -122,7 +122,7 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
 test("moves nothing with a wrong password, then moves on the right one", async ({ page }) => {
   await page.goto("/");
   await unlock(page, `${twelve.password}!`);
-  await expect(page.locator("#unlock-error")).toHaveText("Wrong password. Check Caps Lock, or restore with your recovery phrase below.");
+  await expect(page.locator("#unlock-error")).toHaveText("Wrong password. Check Caps Lock.");
   expect(await stored(page, "dusk_vault_v1")).toEqual(twelve.vault);
   expect(await stored(page, "dusk_vault_v2")).toBeNull();
 

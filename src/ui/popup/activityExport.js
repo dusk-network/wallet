@@ -400,25 +400,19 @@ export function activityExportPanel(ov, { state, actions }) {
     checkbox("activity-export-contacts", "Add contact names", ex.withContacts, (on) => {
       ex.withContacts = on;
     }),
-    // A value only where DUSK has a price: off mainnet, said where the choice would be.
+    // A value only where DUSK has a price: off mainnet, said where the choice
+    // would be; on a test network, the strip at the top says test DUSK has none.
     priced(ov)
       ? checkbox("activity-export-value", `Add ${defaultCurrency()} value (CoinGecko)`, ex.fiat, (on) => {
           ex.fiat = on;
         })
-      : h("p", {
-          class: "activity-export-note activity-export-novalue",
-          text: isTestNetwork(String(ov?.nodeUrl ?? ""), ov?.chainId ?? null)
-            ? "Test DUSK has no value, so the file gives none."
-            : "DUSK has no price on this network, so the file gives no value.",
-        }),
+      : isTestNetwork(String(ov?.nodeUrl ?? ""), ov?.chainId ?? null)
+        ? null
+        : h("p", { class: "activity-export-note activity-export-novalue", text: "DUSK has no price on this network, so the file gives no value." }),
     checkbox("activity-export-excel", "Keep accents for Excel", ex.excel, (on) => {
       ex.excel = on;
     }),
-    h("p", {
-      class: "activity-export-note",
-      text: "For tax tools such as Koinly: one profile, exact amounts, times in UTC, transfers between your profiles marked.",
-    }),
-    inPopup() ? h("p", { class: "activity-export-note", text: "The file is saved from a new tab." }) : null,
+    h("p", { class: "activity-export-note", text: "One profile, exact amounts, times in UTC, transfers between your profiles marked." }),
     error,
     save,
   ].filter(Boolean));

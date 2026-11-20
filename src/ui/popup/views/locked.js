@@ -8,10 +8,11 @@ import { focusOnOpen } from "../../lib/focusOnOpen.js";
 /** What the unlock screen says once the phone's fingerprints changed. */
 export const FINGERPRINTS_CHANGED_TEXT = "Your fingerprints changed, so fingerprint unlock is off. Unlock with your password.";
 
-// A wrong password says what to try: the password as typed, then the recovery phrase.
-export const WRONG_PASSWORD_TEXT = "Wrong password. Check Caps Lock, or restore with your recovery phrase below.";
+// A wrong password says what to check; Forgot password? under it is the way
+// back with the recovery phrase.
+export const WRONG_PASSWORD_TEXT = "Wrong password. Check Caps Lock.";
 // A phone's keyboard has no Caps Lock.
-const wrongPasswordText = () => (isPhone() ? "Wrong password. Try again, or restore with your recovery phrase below." : WRONG_PASSWORD_TEXT);
+const wrongPasswordText = () => (isPhone() ? "Wrong password." : WRONG_PASSWORD_TEXT);
 const unlockError = (message) => (/^Incorrect password$/.test(String(message ?? "")) ? wrongPasswordText() : message);
 
 // The password field and Unlock, with no title or label over them: next to

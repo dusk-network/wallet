@@ -938,7 +938,8 @@ export async function renderNotification() {
     // The site keeps a shielded address it has for the profile picked.
     const sharesShielded = () =>
       requestedShielded || (currentAccountIndex !== null && selected === currentAccountIndex && currentShieldedGrant);
-    // What the site gets, for the profile picked above, and what it can't do.
+    // What the site gets, for the profile picked above, and what it can't do;
+    // a share alone, to a site connected with that profile, moves nothing.
     const factsHost = h("div", { class: "ap-facts-host" });
     const drawFacts = () => {
       const connected = currentAccountIndex !== null && currentAccountIndex === selected;
@@ -948,7 +949,7 @@ export async function renderNotification() {
           [
             shareOnly ? null : { icon: "eye", title: "Sees your public account, .dusk name and balance", sub: `${lastsText[0].toUpperCase()}${lastsText.slice(1)}` },
             sharesShielded() ? { icon: "shield", title: "Gets your shielded address", sub: "It can send you shielded payments, not see your shielded balance." } : null,
-            { icon: "lock", title: "Can't move funds or get a signature without your approval" },
+            shareOnly ? null : { icon: "lock", title: "Can't move funds or get a signature without your approval" },
           ],
           { label: "What the site gets" }
         ),
@@ -1047,7 +1048,7 @@ export async function renderNotification() {
         sectionTitle(preview.truncated ? "Message, shortened" : "Message", "ap-message-title"),
         box,
         goesOnNote(box, "message"),
-        preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash below covers all of it." }) : null,
+        preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash under Details covers all of it." }) : null,
         preview.needsReview ? warning(TEXT_REVIEW_TITLE, reviewWords(preview.checks ?? { hidden: true }, "message", "sign it")) : null,
       ]);
     } else {
@@ -1074,9 +1075,18 @@ export async function renderNotification() {
         site,
         requestHead({ title: "Sign this message?" }),
         message,
-        group([kv("Account", profileValue()), kv("Message hash", mono(hashLine), { stack: true })]),
+        group([kv("Account", profileValue())]),
         note("Signing sends no transaction and moves no funds.", "info"),
-        details("Details", [group([kv("Network", nodeUrl ? networkTextOf(nodeUrl) : chainName(chainId) || "Custom"), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
+        details("Details", [
+          group(
+            [
+              kv("Message hash", mono(hashLine), { stack: true }),
+              kv("Network", nodeUrl ? networkTextOf(nodeUrl) : chainName(chainId) || "Custom"),
+              kv("Chain ID", mono(chainId || "—")),
+            ],
+            { className: "group--inset" }
+          ),
+        ]),
       ],
       decisionBar({ approveText: "Sign" }).nodes
     );
@@ -1104,13 +1114,11 @@ export async function renderNotification() {
               statement.flagged ? warning(TEXT_REVIEW_TITLE, reviewWords(statement.checks, "statement", "sign in")) : null,
             ])
           : null,
-        group([
-          kv("Account", profileValue()),
-          kv("Nonce", mono(nonceShown || "—"), { stack: nonceShown.length > 24 }),
-          expiresAt ? kv("Expires", dateText(expiresAt)) : null,
-        ]),
+        group([kv("Account", profileValue()), expiresAt ? kv("Expires", dateText(expiresAt)) : null]),
         note("Sign in only to sites you trust. It moves no funds.", "info"),
-        details("Details", [group([kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
+        details("Details", [
+          group([kv("Nonce", mono(nonceShown || "—"), { stack: nonceShown.length > 24 }), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" }),
+        ]),
       ],
       decisionBar({ approveText: "Sign in" }).nodes
     );
@@ -1187,7 +1195,7 @@ export async function renderNotification() {
           kv("Primary type", h("code", { text: primaryType }), { stack: true }),
         ]),
         h("details", { class: "advanced ap-details" }, [
-          h("summary", { text: "Full signing request (escaped JSON)" }),
+          h("summary", { text: "Full signing request" }),
           h("div", { class: "ap-details__body" }, [
             h("p", {
               class: "ap-sub",
@@ -1200,7 +1208,7 @@ export async function renderNotification() {
               wrap: "off",
               spellcheck: false,
               dir: "ltr",
-              "aria-label": "Full signing request (escaped JSON)",
+              "aria-label": "Full signing request",
               text: disclosure.json,
             }),
           ]),
@@ -1220,8 +1228,11 @@ export async function renderNotification() {
             })
           : null,
         h("details", { class: "advanced ap-details" }, [
-          h("summary", { text: "Digest (check it against the site's)" }),
-          h("div", { class: "ap-details__body" }, [h("code", { class: "ap-digest", text: digestHex || "—" })]),
+          h("summary", { text: "Digest" }),
+          h("div", { class: "ap-details__body" }, [
+            h("p", { class: "ap-sub", text: "Check it against the digest the site shows." }),
+            h("code", { class: "ap-digest", text: digestHex || "—" }),
+          ]),
         ]),
         hasTextSafetyWarning
           ? warning(
@@ -1442,8 +1453,13 @@ export async function renderNotification() {
       // applies, and under which name. A shielded one gets no line.
       const visible = `Public: anyone can see the amount, ${memo && !service ? "memo, " : ""}${me} and the recipient.`;
       const amount = { value: formatDuskExact(amountLux), unit: "DUSK" };
-      // To a bridge, its payout's recipient leads, in full in its row: the
+      // The recipient in full on the main view unless it's a contact or one
+      // of your profiles, which the head names: then under Details. To a
+      // bridge, its payout's recipient shows in full in its row, and the
+      // bridge's own account, which the tag vouches for, under Details; the
       // head says what arrives once the bridge takes its fee.
+      const toRow = () => kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" });
+      const named = !service && Boolean(knownAs(to));
       const head = service
         ? requestHead({
             title: `Bridge to ${service.chain}`,
@@ -1468,19 +1484,26 @@ export async function renderNotification() {
           gasEditor,
           group([
             kv("From", shielded ? inWallet(h("span", { text: "Your shielded balance" })) : payerLine(rail)),
-            service
-              ? kv("To", [h("span", { class: "ap-kv-note", text: `The bridge's account for ${service.chain}` }), h("code", { class: "ap-address", text: to })], {
-                  stack: true,
-                  className: "ap-to-row",
-                })
-              : kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
+            service || named ? null : toRow(),
             service
               ? kv(`Recipient on ${service.chain}`, h("code", { class: "ap-address", text: safeText(memo).text || "(none)" }), { stack: true })
               : memo
                 ? kv("Memo", safeTextEl(memo), { stack: memo.length > 24 })
                 : null,
           ]),
-          details("Details", [group(networkRows(), { className: "group--inset" })]),
+          details("Details", [
+            group(
+              [
+                service
+                  ? kv("To", [h("span", { class: "ap-kv-note", text: `The bridge's account for ${service.chain}` }), h("code", { class: "ap-address", text: to })], { stack: true, className: "ap-to-row" })
+                  : named
+                    ? toRow()
+                    : null,
+                ...networkRows(),
+              ],
+              { className: "group--inset" }
+            ),
+          ]),
         ],
         bar.nodes
       );
@@ -1729,34 +1752,40 @@ export async function renderNotification() {
       // its name, symbol and decimals (tokenDetails).
       const drawToken = (token) => {
         const reading = token === undefined;
-        // Exact, as an approval shows DUSK: every decimal the token has.
+        // Exact, as an approval shows DUSK: every decimal the token has. The
+        // most there is says what it is, its figure under Details.
         const exact = token ? groupThousands(formatTokenUnits(units, token.decimals, { maxFrac: token.decimals })) : "";
-        const amount = token ? { value: exact, unit: token.symbol } : reading ? null : { value: String(units), unit: "units" };
-        const tokenName = token ? token.name || token.symbol : contractIdText(contractShown, { short: true });
+        const amount = token ? { value: isMax ? "Unlimited" : exact, unit: token.symbol } : reading ? null : { value: String(units), unit: "units" };
         const { bar, ackInput } = maxGatedBar(isMax, approveText(token, exact), { reading });
         const named = drc20.spender && spenderLabel(drc20.spender);
+        // A recipient that's a contact or one of your profiles: named in the head, in full under Details.
+        const toNamed = Boolean(drc20.to && knownAs(drc20.to.value));
         show(
           [
             site,
-            requestHead({ title, amount, to: toEl, sub: reading ? "Reading the token…" : `${tokenName} · DRC20` }),
+            requestHead({ title, amount, to: toEl, sub: reading ? "Reading the token…" : null }),
             token === null ? note("Couldn't read this token, so the amount is in its raw units.", "alert", { className: "ap-token-unread" }) : null,
             // A transfer names whom it pays; an allowance moves nothing yet.
             drc20.to ? sendVisible("this transfer") : null,
             group([
               kv("From", payerLine(rail)),
-              drc20.to ? kv("To", partyValue(drc20.to), { stack: true }) : null,
+              drc20.to && !toNamed ? kv("To", partyValue(drc20.to), { stack: true }) : null,
               drc20.spender ? kv("Spender", spenderValue(drc20.spender), { stack: !named }) : null,
               drc20.owner ? kv("Owner", partyValue(drc20.owner), { stack: true }) : null,
               kv("Token", token ? contractValueEl(token.name ? `${token.name} (${token.symbol})` : token.symbol, shortMono(contractShown)) : shortMono(contractShown)),
-              kv("Units", mono(units)),
             ]),
             isMax && !reading
               ? warning("Unlimited allowance", `The spender can move all your ${token?.symbol ?? "tokens of this contract"}, now and later. Only continue if you trust it.`, [ackInput])
               : null,
-            callRows(),
+            callRows({ contract: false }),
             siteFee,
             gasEditor,
-            detailsBlock(named ? [kv("Spender ID", mono(contractIdText(drc20.spender.value)), { stack: true })] : []),
+            detailsBlock([
+              drc20.to && toNamed ? kv("To", partyValue(drc20.to), { stack: true }) : null,
+              named ? kv("Spender ID", mono(contractIdText(drc20.spender.value)), { stack: true }) : null,
+              kv("Units", mono(units)),
+              isMax && token ? kv("Amount", `${exact} ${token.symbol}`) : null,
+            ]),
           ],
           bar.nodes
         );

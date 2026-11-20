@@ -501,8 +501,8 @@ const anyOf = (sum) => typeof sum?.lux === "bigint" && sum.lux !== 0n;
 // what unstaking took out that year (rewardYearsOf), from the profile's whole
 // public history and Sozu's `status`, in the web wallet's words. What each
 // was worth in the region's currency, at its time, only when asked, as
-// Activity's export asks: CoinGecko's prices.
-function rewardYears(ov, { state, actions, hidden, status }) {
+// Activity's export asks: CoinGecko's prices. Folded, as the user left it.
+function rewardYears(ov, { state, actions, hidden, status, st }) {
   const history = stakingHistory(ov, { state, actions });
   if (history.reading || !history.rows.length) return null;
   const currency = defaultCurrency();
@@ -556,29 +556,36 @@ function rewardYears(ov, { state, actions, hidden, status }) {
   // Sozu's two lines, how they're counted, in both wallets' words (app-core).
   const sozuShown = years.some(({ sozu, sozuGrown, reading }) => reading > 0 || sozu === null || sozuGrown === null || anyOf(sozu) || anyOf(sozuGrown));
   return [
-    h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
-    h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown, reading }) =>
-      kvRow(
-        String(year),
-        // What grew moves with each stake and unstake; what was taken out, where some was, with an unstake.
-        [line(REWARD_WORDS.claimed, claimed), line(REWARD_WORDS.sozuGrown, sozuGrown, reading > 0), line(REWARD_WORDS.sozu, sozu, reading > 0 && anyOf(sozu))]
-          .filter(Boolean)
-          .map((parts) => h("span", { class: "stake-year-part" }, parts))
-      )
-    )),
-    sozuShown ? h("p", { class: "settings-note stake-years-counted", text: REWARDS_COUNTED }) : null,
-    value,
-  ].filter(Boolean);
+    advancedPanel(
+      st,
+      "years",
+      [
+        h("div", { class: "group group--inset stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown, reading }) =>
+          kvRow(
+            String(year),
+            // What grew moves with each stake and unstake; what was taken out, where some was, with an unstake.
+            [line(REWARD_WORDS.claimed, claimed), line(REWARD_WORDS.sozuGrown, sozuGrown, reading > 0), line(REWARD_WORDS.sozu, sozu, reading > 0 && anyOf(sozu))]
+              .filter(Boolean)
+              .map((parts) => h("span", { class: "stake-year-part" }, parts))
+          )
+        )),
+        sozuShown ? h("p", { class: "settings-note stake-years-counted", text: REWARDS_COUNTED }) : null,
+        value,
+      ].filter(Boolean),
+      { summary: "Rewards by year", className: "stake-years-fold" }
+    ),
+  ];
 }
 
 function kvRow(label, value) {
   return h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 }
 
-// An Advanced disclosure that stays as the user left it when the screen redraws.
-function advancedPanel(st, key, children) {
+// An Advanced disclosure, or another fold (`summary`), that stays as the user
+// left it when the screen redraws.
+function advancedPanel(st, key, children, { summary = "Advanced", className = "" } = {}) {
   const open = Boolean(st.advancedOpen?.[key]);
-  const details = h("details", { class: "advanced", open }, [h("summary", { text: "Advanced" }), h("div", { class: "advanced-body" }, children)]);
+  const details = h("details", { class: ["advanced", className].filter(Boolean).join(" "), open }, [h("summary", { text: summary }), h("div", { class: "advanced-body" }, children)]);
   details.addEventListener("toggle", () => {
     st.advancedOpen = { ...(st.advancedOpen ?? {}), [key]: details.open };
   });
@@ -843,7 +850,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
     listRow({
       icon: "drop",
       title: ["Liquid staking", h("span", { class: "tag", text: "Sozu, third party" })],
-      subs: ["Any amount · no node needed", "You get stDUSK for your share", rates.sozu],
+      subs: ["Any amount · no node needed", rates.sozu],
       onClick: () => stakeWithSozu(state, st, actions),
     }),
   ]);
@@ -909,7 +916,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
     subnav({ title: "Staking", onBack }),
     statusLine(st),
     summary,
-    ...(rewardYears(ov, { state, actions, hidden, status: holding.status }) ?? []),
+    ...(rewardYears(ov, { state, actions, hidden, status: holding.status, st }) ?? []),
     h("div", { class: "section-head" }, [bracketTitle({ text: "Stake" })]),
     choices,
     ratesNote,
@@ -1053,7 +1060,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   // The facts from Dusk's staking docs, in a few lines.
   const facts = h("div", { class: "group info" }, [
     nodeRow(actions),
-    infoRow("clock", "Rewards start in about 6 to 12 hours", "Unstake any time, no waiting period."),
+    infoRow("clock", "Rewards start in about 6 to 12 hours", "Unstake any time."),
     isNew
       ? null
       : infoRow(
@@ -1061,7 +1068,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
           "10% of what you add is locked",
           "When your stake is already active. It's still yours, and unstaking returns it."
         ),
-    infoRow("alert", "If your node misses its turn", "Part of the stake is locked: still yours, and unstaking returns it. If it breaks the rules, part can be burned (lost)."),
+    infoRow("alert", "If your node misses its turn", "Part of the stake is locked (still yours). If it breaks the rules, part can be burned (lost)."),
     infoRow("fee", `Fee up to ${formatFee(feeLux, { max: true })} DUSK`, null),
   ].filter(Boolean));
 

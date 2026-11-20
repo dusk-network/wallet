@@ -563,12 +563,9 @@ describe("settings", () => {
     const local = (await settings({ permissions: [{ origin: "http://127.0.0.1:5354", accountIndex: 0 }] })).section("Connected sites");
     expect(local.querySelectorAll(".settings-site__host").map(visibleText)).toEqual(["http://127.0.0.1:5354"]);
     expect(view.shownButtons(view.section("Reset"))).toEqual(["Reset wallet"]);
-    // One line over the button on what it removes, and that the funds stay on Dusk.
-    const resetNote = view.section("Reset").querySelector(".settings-note");
-    expect([isShown(resetNote), visibleText(resetNote)]).toEqual([
-      true,
-      "Removes every wallet, with its contacts, names, activity and connected sites, from this browser, and goes back to Mainnet. Funds stay on Dusk; you need each recovery phrase to use them again.",
-    ]);
+    // What it removes is said once, on Reset's own page, where it's done: not here too.
+    expect(view.section("Reset").querySelector(".settings-note")).toBeNull();
+    expect(visibleText(view.section("Reset"))).toBe("[Reset]Reset wallet");
   });
 
   // Chen's and Lena's: two taps, and every wallet was gone, with no password or fingerprint.
@@ -591,8 +588,8 @@ describe("settings", () => {
     expect(visibleText(body.querySelector(".auth-lead"))).toBe(
       "Removes every wallet here, with its contacts, names, activity and connected sites. Funds stay on Dusk; you need each wallet's recovery phrase to get them back."
     );
-    // The password the wallets share, said so under it.
-    expect(body.querySelectorAll("p.field-hint").filter(isShown).map(visibleText)).toEqual(["One password unlocks every wallet here."]);
+    // The password the wallets share, with no line under it: that's said only where a wallet is added.
+    expect(body.querySelectorAll("p.field-hint").filter(isShown).map(visibleText)).toEqual([]);
     // Nothing typed: said, and nothing asked of the wallet.
     press("Reset wallet");
     await settle();
@@ -934,10 +931,8 @@ describe("about", () => {
     dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     const app = await settings({}, { app: true });
-    // Said in Settings over the button, and again on Reset's own page.
-    expect(visibleText(app.section("Reset").querySelector(".settings-note"))).toBe(
-      "Removes every wallet, with its contacts, names and activity, from this phone, and goes back to Mainnet. Funds stay on Dusk; you need each recovery phrase to use them again."
-    );
+    // Said on Reset's own page, not in Settings too.
+    expect(app.section("Reset").querySelector(".settings-note")).toBeNull();
     const { resetWalletView } = await import("./popup/views/wallets.js");
     dom.document.body.replaceChildren(...resetWalletView(app.ov, { state: app.state, actions: app.actions }));
     expect(visibleText(dom.document.body.querySelector(".auth-lead"))).toBe(
@@ -1039,26 +1034,26 @@ describe("wallets", () => {
     expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_RENAME_WALLET", walletKey: "k2", name: "Rainy day fund" });
   });
 
-  it("says Lock wallet for one wallet and Lock for more, what Auto-lock does, and that a new password is every wallet's", async () => {
+  it("says Lock wallet for one wallet and Lock for more, and under Auto-lock that it's every wallet's", async () => {
     const one = await drawn({ wallets: fresh().slice(0, 1) });
     expect(one.shownButtons(one.section("Wallets"))).toEqual(["Rename", expect.stringContaining("Add wallet")]);
     const security = one.section("Security");
     const notes = (section) => section.querySelectorAll("p.settings-note").filter(isShown).map(visibleText);
-    // One wallet: under the choice, that it counts time without use; under Change password, whose it is.
-    expect(notes(security)).toEqual(["Locks after this long without use.", "Changes the password for every wallet here."]);
+    // One wallet: nothing under the choice, which says it, nor under Change password, whose page says the rest.
+    expect(notes(security)).toEqual([]);
     expect(dom.document.body.querySelectorAll("button").map((b) => b.textContent)).toContain("Lock wallet");
     security.querySelectorAll("button").find((b) => b.textContent === "Change password").click();
     await settle();
     expect(one.state.route).toBe("change_password");
 
     const two = await drawn({ wallets: fresh() });
-    expect(notes(two.section("Security"))).toEqual(["Locks every wallet after this long without use.", "Changes the password for every wallet here."]);
+    expect(notes(two.section("Security"))).toEqual(["For every wallet here."]);
     const buttons = dom.document.body.querySelectorAll("button").map((b) => b.textContent);
     expect([buttons.includes("Lock"), buttons.includes("Lock wallet")]).toEqual([true, false]);
 
     // One wallet open, and another in the vault that another password opens.
     const sealed = await drawn({ wallets: fresh().slice(0, 1), walletsHere: 2 });
-    expect(notes(sealed.section("Security"))).toEqual(["Locks every wallet after this long without use.", "Changes the password for every wallet here."]);
+    expect(notes(sealed.section("Security"))).toEqual(["For every wallet here."]);
     expect(dom.document.body.querySelectorAll("button").map((b) => b.textContent)).toContain("Lock");
   });
 
@@ -1261,9 +1256,9 @@ describe("security in the app on a phone", () => {
     const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password");
     const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
     expect(body.querySelector(".srp-grid")).toBeNull();
-    // The password, with nothing said over it, as on Check your recovery phrase, and the line under it.
+    // The password, with nothing said over it, as on Check your recovery phrase, nor under it.
     expect(body.querySelector(".auth-lead")).toBeNull();
-    expect(body.querySelectorAll("p.field-hint").filter(isShown).map(visibleText)).toEqual(["One password unlocks every wallet here."]);
+    expect(body.querySelectorAll("p.field-hint").filter(isShown).map(visibleText)).toEqual([]);
     typeInto(password(), "not it");
     press("Show recovery phrase");
     await settle();
@@ -1355,8 +1350,8 @@ describe("security in the app on a phone", () => {
     const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password");
     const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
     const boxes = () => body.querySelectorAll("input").filter((i) => /^Word \d+$/.test(accessibleName(i)));
-    // The title and the password, with the line under it that every password field the wallets share has.
-    expect(visibleText(body)).toBe("← BackCheck your recovery phrasePasswordOne password unlocks every wallet here.Start check");
+    // The title and the password: nothing over the field, nor under it.
+    expect(visibleText(body)).toBe("← BackCheck your recovery phrasePasswordStart check");
     typeInto(password(), "not it");
     press("Start check");
     await settle();

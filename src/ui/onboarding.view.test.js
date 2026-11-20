@@ -47,13 +47,14 @@ const describedBy = (el) =>
   (el.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean).map((id) => dom.document.getElementById(id)).filter((n) => n && isShown(n));
 // What the field's error says.
 const errorOf = (el) => describedBy(el).find((n) => n.classList.contains("field-error"))?.textContent ?? "";
-// The password field beside other wallets: "Password", no placeholder, and a line under it, wherever it's asked.
+// The password field beside other wallets: "Password", no placeholder; in Add wallet, a line under it that says
+// it's the one they share, not a new one (`hint`).
 const SHARED_PASSWORD = "Password";
 const ONE_PASSWORD = "One password unlocks every wallet here.";
-const expectSharedPassword = (pwd) => {
+const expectSharedPassword = (pwd, { hint = true } = {}) => {
   expect(pwd.getAttribute("placeholder")).toBeNull();
-  expect(describedBy(pwd).map((n) => n.textContent)).toEqual([ONE_PASSWORD]);
-  expect(pwd.parentNode.querySelectorAll("p.field-hint").filter(isShown).map((p) => p.textContent)).toEqual([ONE_PASSWORD]);
+  expect(describedBy(pwd).map((n) => n.textContent)).toEqual(hint ? [ONE_PASSWORD] : []);
+  expect(pwd.parentNode.querySelectorAll("p.field-hint").filter(isShown).map((p) => p.textContent)).toEqual(hint ? [ONE_PASSWORD] : []);
 };
 // Two wallets here, by number, and wallets 1 and 3 (2 was removed).
 const TWO = { wallets: [{ key: "k1", n: 1, active: true }, { key: "k2", n: 2 }] };
@@ -63,18 +64,14 @@ describe("setting up and unlocking", () => {
   const onboard = () => ({ mode: null, mnemonic: MNEMONIC, password: "x".repeat(8), reveal: false });
   const actions = () => ({ send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn() });
 
-  it("welcomes with a heading, one line, and create or import as rows", () => {
+  it("welcomes with a heading and create or import as rows, the recovery phrase's warning left to its own screen", () => {
     const state = { route: "onboard_welcome", onboard: onboard() };
     const body = show(onboardingWelcomeView({ state, actions: actions() }));
     expect(body.querySelector("h1").textContent).toBe("Set up Dusk Wallet");
-    // What the recovery phrase is for, said before either choice.
-    expect(isShown(body.querySelector(".auth-lead"))).toBe(true);
-    expect(body.querySelector(".auth-lead").textContent).toBe("Only your recovery phrase can restore your wallet. Keep it safe.");
-    // Each row says which recovery phrase it takes.
-    expect(body.querySelectorAll(".onboard-choice").map(visibleText)).toEqual([
-      "Create walletWith a new recovery phrase",
-      "Import walletWith a recovery phrase you have",
-    ]);
+    expect(body.querySelector(".auth-lead")).toBeNull();
+    expect(visibleText(body)).not.toContain("Only your recovery phrase can restore");
+    // Import says it needs a recovery phrase; Create, nothing more than its name.
+    expect(body.querySelectorAll(".onboard-choice").map(visibleText)).toEqual(["Create wallet", "Import walletWith a recovery phrase you have"]);
     body.querySelectorAll(".onboard-choice")[1].click();
     expect([state.route, state.onboard.mode]).toEqual(["onboard_import", "import"]);
   });
@@ -84,8 +81,8 @@ describe("setting up and unlocking", () => {
     const acts = actions();
     const body = show(onboardingCreatePasswordView({ state, actions: acts }));
     expect(body.querySelector("h1").textContent).toBe("Create wallet");
-    // Over the fields, where the password works.
-    expect(body.querySelector(".auth-lead").textContent).toBe("The password unlocks your wallet on this device.");
+    // No line over the fields: the box under them says what restores the wallet.
+    expect(body.querySelector(".auth-lead")).toBeNull();
     const pwd = field(body, "Password");
     const pwd2 = field(body, "Confirm password");
     expect([pwd.getAttribute("placeholder"), pwd2.getAttribute("placeholder")]).toEqual(["At least 8 characters", "Same password again"]);
@@ -433,10 +430,8 @@ describe("setting up and unlocking", () => {
     const acts = actions();
     const body = show(restoreWalletView({ state, actions: acts }));
     expect(body.querySelector("h1").textContent).toBe("Restore wallet");
-    // Irreversible, so said first: every other wallet here goes, and what this one keeps.
-    expect(body.querySelector(".auth-lead").textContent).toBe(
-      "This removes every wallet on this device and restores only this one. If it was here before, its contacts and profile names stay."
-    );
+    // Irreversible, so said first, in one line: every other wallet here goes.
+    expect(body.querySelector(".auth-lead").textContent).toBe("This removes every wallet on this device and restores only this one.");
     const group = body.querySelector("[role=group]");
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
     button(body, "Restore wallet").click();
@@ -681,12 +676,9 @@ describe("adding a wallet beside the ones here", () => {
     const acts = actions();
     const body = show(onboardingWelcomeView({ state, actions: acts, adding: true }));
     expect(body.querySelector("h1").textContent).toBe("Add wallet");
-    // Before either choice: the new wallet takes the password the others have.
-    expect(body.querySelector(".auth-lead").textContent).toBe("Your password unlocks every wallet here.");
-    expect(body.querySelectorAll(".onboard-choice").map(visibleText)).toEqual([
-      "Create walletWith a new recovery phrase",
-      "Import walletWith a recovery phrase you have",
-    ]);
+    // The shared password is said where it's typed, not here too.
+    expect(body.querySelector(".auth-lead")).toBeNull();
+    expect(body.querySelectorAll(".onboard-choice").map(visibleText)).toEqual(["Create wallet", "Import walletWith a recovery phrase you have"]);
     body.querySelectorAll(".onboard-choice")[0].click();
     expect(state.route).toBe("wallet_add_phrase");
     expect(state.onboard.mnemonic.split(" ")).toHaveLength(12);
@@ -783,7 +775,7 @@ describe("removing a wallet, and a new password", () => {
       "This removes Savings from this device: its recovery phrase, contacts, activity and connected sites. Your other wallets stay as they are."
     );
     const pwd = field(body, SHARED_PASSWORD);
-    expectSharedPassword(pwd);
+    expectSharedPassword(pwd, { hint: false });
     button(body, "Remove wallet").click();
     await settle();
     expect(errorOf(pwd)).toBe("Enter your password.");
@@ -807,16 +799,13 @@ describe("removing a wallet, and a new password", () => {
   });
 
   it("changes the password of every phrase, with the current one, and the new one twice", async () => {
-    // Over the fields, with one wallet here or more, here or in the vault: what the new password does.
-    const LEAD = "Every recovery phrase here is encrypted again with the new password.";
-    for (const shown of [{ ...ov, wallets: ov.wallets.slice(0, 1) }, { isUnlocked: true, walletsHere: 2 }]) {
-      const lead = show(changePasswordView(shown, { state: {}, actions: actions([]) })).querySelector(".auth-lead");
-      expect([isShown(lead), lead?.textContent]).toEqual([true, LEAD]);
-    }
+    // One wallet: nothing over the fields. More than one, here or in the vault: that it's every one's.
+    expect(show(changePasswordView({ ...ov, wallets: ov.wallets.slice(0, 1) }, { state: {}, actions: actions([]) })).querySelector(".auth-lead")).toBeNull();
+    expect(show(changePasswordView({ isUnlocked: true, walletsHere: 2 }, { state: {}, actions: actions([]) })).querySelector(".auth-lead").textContent).toBe("For every wallet here.");
     const state = { route: "change_password" };
     const acts = actions([{ error: { message: "Incorrect password" } }, { ok: true }]);
     const body = show(changePasswordView(ov, { state, actions: acts }));
-    expect(body.querySelector(".auth-lead").textContent).toBe(LEAD);
+    expect(body.querySelector(".auth-lead").textContent).toBe("For every wallet here.");
     const [current, next, again] = ["Current password", "New password", "Confirm password"].map((name) => field(body, name));
     expect([current, next, again].map((f) => f.getAttribute("placeholder"))).toEqual([null, "At least 8 characters", "Same password again"]);
     typeInto(current, "password123");

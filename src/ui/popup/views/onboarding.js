@@ -95,9 +95,9 @@ function newPasswordFields({ onDone, label = "Password" }) {
 }
 
 // The password that unlocks the wallets here, for adding another: one field,
-// a line under it, and its error under that.
+// a line under it that says it's that one, not a new one, and its error under that.
 function currentPasswordField({ onDone }) {
-  const { input: pwd, error, els } = unlockPasswordField({ onEnter: () => onDone?.() });
+  const { input: pwd, error, els } = unlockPasswordField({ onEnter: () => onDone?.(), hint: "One password unlocks every wallet here." });
   return {
     pwd,
     els,
@@ -211,9 +211,9 @@ function formError() {
 
 /**
  * Set up a wallet, or with `adding`, add another to the ones here: create or
- * import, as the same rows, each saying which recovery phrase it takes.
- * Creating one beside others skips the password, the one they share, and
- * says so; the first says what the recovery phrase is for.
+ * import, as the same rows. Creating one beside others skips the password,
+ * the one they share. Import says it needs a recovery phrase; Create, nothing
+ * more than its name.
  */
 export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
   const choice = (icon, title, sub, route, mode) =>
@@ -238,7 +238,7 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
         h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg(icon) }),
         h("span", { class: "row-main" }, [
           h("span", { class: "row-title", text: title }),
-          h("span", { class: "row-sub", text: sub }),
+          sub ? h("span", { class: "row-sub", text: sub }) : null,
         ]),
         h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
       ]
@@ -257,9 +257,8 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
         },
       }),
       h("div", { class: "row onboard-form" }, [
-        h("p", { class: "auth-lead", text: "Your password unlocks every wallet here." }),
         h("div", { class: "group onboard-choices" }, [
-          choice("create", "Create wallet", "With a new recovery phrase", "wallet_add_phrase", "create"),
+          choice("create", "Create wallet", "", "wallet_add_phrase", "create"),
           choice("import", "Import wallet", "With a recovery phrase you have", "wallet_add_import", "import"),
         ]),
       ]),
@@ -270,9 +269,8 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
     h("div", { class: "auth-page" }, [
       h("h1", { class: "auth-title", text: "Set up Dusk Wallet" }),
       linkWaiting(state, actions),
-      h("p", { class: "auth-lead", text: "Only your recovery phrase can restore your wallet. Keep it safe." }),
       h("div", { class: "group onboard-choices" }, [
-        choice("create", "Create wallet", "With a new recovery phrase", "onboard_create_password", "create"),
+        choice("create", "Create wallet", "", "onboard_create_password", "create"),
         choice("import", "Import wallet", "With a recovery phrase you have", "onboard_import", "import"),
       ]),
     ]),
@@ -349,7 +347,6 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
       },
     }),
     h("div", { class: "row onboard-form" }, [
-      h("p", { class: "auth-lead", text: "The password unlocks your wallet on this device." }),
       ...fields.els,
       // The one consent before the words show: the phrase, not the password, restores it.
       h("label", { class: "checkline" }, [
@@ -851,15 +848,15 @@ export function onboardingImportView({ state, actions, adding = false, ov } = {}
 
 /**
  * A forgotten password: the wallet restored from its recovery phrase in
- * place of every one here, with a new password. It says first what that
- * does, and what it keeps; Back returns to the unlock form.
+ * place of every one here, with a new password. It says first that every
+ * other wallet goes; Back returns to the unlock form.
  */
 export function restoreWalletView({ state, actions } = {}) {
   return phraseForm({
     state,
     actions,
     title: "Restore wallet",
-    lead: "This removes every wallet on this device and restores only this one. If it was here before, its contacts and profile names stay.",
+    lead: "This removes every wallet on this device and restores only this one.",
     passwordLabel: "New password",
     verb: "Restore wallet",
     busyVerb: "Restoring…",

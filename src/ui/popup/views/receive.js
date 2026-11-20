@@ -122,7 +122,7 @@ export function receiveView(ov, { state, actions } = {}) {
       : lookupShieldedName(account, address, { nodeUrl: ov?.nodeUrl });
   let shownName = "";
 
-  // What people reach through that name, said under it.
+  // On the shielded tab, that anyone can see the name's address is this one: said under it.
   const nameNote = h("p", {
     class: "receive-name-note",
     id: `receive-name-note-${++nameNotes}`,
@@ -136,11 +136,9 @@ export function receiveView(ov, { state, actions } = {}) {
   nameLookup.then((name) => {
     if (!name) return;
     shownName = name;
-    nameNote.textContent =
-      tab === "public"
-        ? `People who send to ${name} reach this public account.`
-        : `People who pay ${name} choose public or shielded. Anyone can see this address belongs to ${name}.`;
     nameField.hidden = false;
+    if (tab !== "shielded") return;
+    nameNote.textContent = `Anyone can see this address belongs to ${name}.`;
     nameNote.hidden = false;
   });
 
@@ -182,7 +180,6 @@ export function receiveView(ov, { state, actions } = {}) {
   // look: as the payer will see it, its codes and what to check, under the field.
   const memoShown = h("div", { class: "receive-memo-shown", role: "status", hidden: true });
   const linkErr = h("div", { class: "field-error", role: "alert", hidden: true });
-  const linkNote = h("div", { class: "muted" });
 
   // The requests made here, drawn again on their own as one is kept, so what's pressed stays as it is.
   const requestsHost = h("div", { class: "receive-requests-host" });
@@ -286,7 +283,6 @@ export function receiveView(ov, { state, actions } = {}) {
         memoErr,
         memoShown,
         linkErr,
-        linkNote,
         requestActions,
         formAsk.el,
       ]),
@@ -558,8 +554,6 @@ export function receiveView(ov, { state, actions } = {}) {
     curUri = made.dusk;
     // Where the network has no web wallet, the one link there is.
     curLink = made.https ?? made.dusk;
-    linkNote.textContent = made.https ? "The QR holds the request. The link opens the web wallet's Send, filled in." : "The QR holds the request.";
-    linkNote.hidden = !made.ok;
     // Copied was about the link before.
     if (curLink !== asked) resetCopied(copyRequestBtn);
 

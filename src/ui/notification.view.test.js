@@ -356,7 +356,8 @@ describe("connect approval", () => {
     await render("connect", { requestedProfiles: true, shieldedReceiveAddress: true, currentAccountIndex: 0, currentGrants: {} });
     expect(head().querySelector("h1").textContent).toBe("Share your shielded address?");
     const facts = () => app.querySelectorAll(".ap-facts .row-title").map((t) => t.textContent);
-    expect(facts()).toEqual(["Gets your shielded address", "Can't move funds or get a signature without your approval"]);
+    // A share alone, to a site connected with that profile, moves nothing.
+    expect(facts()).toEqual(["Gets your shielded address"]);
     expect(buttons()).toEqual(["Reject", "Share"]);
     pastClickGuard();
     approve().click();
@@ -825,11 +826,15 @@ describe("a site's request to pay", () => {
     }
   });
 
-  it("shows the recipient in full on the main view, a contact's and a profile's too", async () => {
-    for (const to of [CAROL, BOB, SAVINGS]) {
+  it("shows a recipient that's no contact in full on the main view, and a contact's or a profile's under Details", async () => {
+    for (const [to, onMain] of [
+      [CAROL, true],
+      [BOB, false],
+      [SAVINGS, false],
+    ]) {
       await render("send_tx", transfer(to));
       expect(row("To").textContent).toBe(to);
-      expect(row("To").closest("details"), to).toBeNull();
+      expect(Boolean(row("To").closest("details")), to).toBe(!onMain);
     }
   });
 
@@ -888,12 +893,12 @@ describe("a site's request to pay the bridge's account", () => {
     expect(head().querySelector("h1").textContent).toBe("Bridge to Sepolia");
     expect(visibleText(head().querySelector(".ap-amount"))).toBe("2 DUSK");
     expect(tag()).toBe("Known bridge account");
-    // Whom it pays out to, in full in its row, and the bridge's own account, both on the main view.
+    // Whom it pays out to, in full in its row on the main view; the bridge's own account, which the tag vouches for, under Details.
     expect(head().querySelector(".ap-recipient")).toBeNull();
     expect(visibleText(row("Recipient on Sepolia"))).toBe(EVM);
     expect(row("Recipient on Sepolia").closest("details")).toBeNull();
     expect(visibleText(row("To"))).toBe(`The bridge's account for Sepolia${testnet.account}`);
-    expect(row("To").closest("details")).toBeNull();
+    expect(row("To").closest("details")).not.toBeNull();
     expect(row("Memo")).toBeUndefined();
     expect(app.querySelector(".ap-visible").textContent).toBe("Public: anyone can see the amount, your name alice.dusk and the recipient.");
     expect(buttons()).toEqual(["Reject", "Bridge 2 DUSK"]);
@@ -1331,13 +1336,16 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     expect([row("To").textContent, row("Units").textContent]).toEqual([SHOP, "9007199254740993"]);
   });
 
-  it("shows a standard approval of the most there is exactly, its spender in full, with Approve waiting for MAX", async () => {
+  it("shows a standard approval of the most there is as unlimited, its spender in full, with Approve waiting for MAX", async () => {
     await render("send_tx", tokenCall("drc20_standard", "approve", `{"spender":{"Contract":"${ROUTER}"},"amount":18446744073709551615}`));
-    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "18,446,744,073.709551615 TKN"]);
-    // A contract the network doesn't name, in full, its first and last six in bold; the units, on the main view.
-    expect([visibleText(row("Spender")), row("Units").textContent]).toEqual([`A contract${ROUTER}`, "18446744073709551615"]);
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "Unlimited TKN"]);
+    // A contract the network doesn't name, in full on the main view, its first and last six in bold.
+    expect(visibleText(row("Spender"))).toBe(`A contract${ROUTER}`);
     expect(row("Spender").querySelectorAll("b").map((b) => b.textContent)).toEqual([ROUTER.slice(0, 6), ROUTER.slice(-6)]);
-    expect([row("Spender").closest("details"), row("Units").closest("details")]).toEqual([null, null]);
+    expect(row("Spender").closest("details")).toBeNull();
+    // The exact figure and the units, under Details.
+    expect([row("Amount").textContent, row("Units").textContent]).toEqual(["18,446,744,073.709551615 TKN", "18446744073709551615"]);
+    expect([row("Amount").closest("details"), row("Units").closest("details")].every(Boolean)).toBe(true);
     expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Unlimited allowance");
     expect(visibleText(app.querySelector(".callout.warn .muted"))).toBe("The spender can move all your TKN, now and later. Only continue if you trust it.");
     expect(buttons()).toEqual(["Reject", "Approve all TKN"]);
@@ -1376,7 +1384,7 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     // A contract ID with a 0, which Sozu's driver writes in hex.
     const pool = "10".repeat(32);
     await render("send_tx", tokenCall("sozu_staked_dusk", "approve", `["${pool}","18446744073709551615"]`));
-    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "18,446,744,073.709551615 TKN"]);
+    expect([head().querySelector("h1").textContent, amount()]).toEqual(["Allow spending?", "Unlimited TKN"]);
     expect(visibleText(row("Spender"))).toBe(`A contract${pool}`);
     expect(app.querySelector(".callout.warn .callout-title").textContent).toBe("Unlimited allowance");
     expect(approve().disabled).toBe(true);
@@ -1469,7 +1477,7 @@ describe("a site's token call, read with the wallet's token drivers", () => {
 
       give(STAKED);
       await shown;
-      expect([amount(), visibleText(head().querySelector(".ap-sub"))]).toEqual(["10 stDUSK", "Staked Dusk · DRC20"]);
+      expect([amount(), head().querySelector(".ap-sub")]).toEqual(["10 stDUSK", null]);
       expect(visibleText(row("Token"))).toBe(`Staked Dusk (stDUSK) · ${shortAddress("11".repeat(32))}`);
       expect(unreadNote()).toBeNull();
       expect(buttons()).toEqual(["Reject", "Approve 10 stDUSK"]);
@@ -2012,7 +2020,7 @@ describe("typed-data approval", () => {
       ["Request from", "Domain name", "Domain version", "Chain ID", "Verifying contract", "Primary type", "item · string", "quantity · uint64"].map(value)
     ).toEqual(["https://shop.example", "Shop", "1", "dusk:2", "None (32 zero bytes)", "Order", "Dusk hoodie", "2"]);
     const summaries = app.querySelectorAll("details summary").map((s) => s.textContent);
-    expect(summaries).toEqual(["Full signing request (escaped JSON)", "Digest (check it against the site's)"]);
+    expect(summaries).toEqual(["Full signing request", "Digest"]);
     expect(JSON.parse(app.querySelector("textarea").textContent)).toEqual(input);
     expect(app.querySelector(".ap-digest").textContent).toBe(hashTypedDataHex(input));
     expect(button("Sign").disabled).toBe(false);

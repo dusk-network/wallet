@@ -127,9 +127,9 @@ export const resetKeptText = () => (platform.capabilities.dapp ? "contacts, name
 /**
  * Reset, as Settings chose it: every wallet here goes, so the password first,
  * as for removing one, or in the app with fingerprint unlock on, a
- * fingerprint. Locked or not: the wallet checks it against the vault. It
- * says what goes, as Settings does above its button, and that only each
- * wallet's recovery phrase gets the funds back.
+ * fingerprint. Locked or not: the wallet checks it against the vault. Only
+ * here, where it's done, it says what goes, and that only each wallet's
+ * recovery phrase gets the funds back.
  */
 export function resetWalletView(ov, { state, actions } = {}) {
   const pwd = unlockPasswordField({ onEnter: () => btn.click() });
@@ -481,14 +481,15 @@ export function checkWordsView(ov, { state, actions } = {}) {
 }
 
 /**
- * A new password for every wallet here: what it does to each one's recovery
- * phrase, then the current one, then the new one twice.
+ * A new password for every wallet here: the current one, then the new one
+ * twice. With more than one wallet here, it says it's for all of them.
  */
 export function changePasswordView(ov, { state, actions } = {}) {
   const current = passwordField({ label: "Current password", onEnter: () => next.input.focus() });
   // The new one, twice, apart from the current one (FormControls.js).
   const next = newPasswordField({ caption: "New password", placeholder: "At least 8 characters", onEnter: () => again.input.focus() });
   const again = newPasswordField({ caption: "Confirm password", placeholder: "Same password again", onEnter: () => btn.click() });
+  const several = (Array.isArray(ov?.wallets) && ov.wallets.length > 1) || Number(ov?.walletsHere) > 1;
   const err = formError();
   const fields = [current, next, again];
 
@@ -552,7 +553,7 @@ export function changePasswordView(ov, { state, actions } = {}) {
   return Object.assign([
     subnav({ title: "Change password", onBack: () => backToSettings(state, actions) }),
     h("div", { class: "row onboard-form" }, [
-      h("p", { class: "auth-lead", text: "Every recovery phrase here is encrypted again with the new password." }),
+      several ? h("p", { class: "auth-lead", text: "For every wallet here." }) : null,
       passwordForm(current.els),
       passwordForm([...next.els, ...again.els]),
       err.el,

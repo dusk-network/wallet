@@ -30,11 +30,12 @@ import { waiting } from "../../components/Waiting.js";
 import { REPLACED_TEXT } from "../../../shared/waitingSends.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
-// then its date, memo, fee, the profile it left or reached, and its ID, which
-// opens the explorer; a transfer to another chain that arrived adds when, and
-// its transaction there. Block, gas, finality and a call's contract sit under
-// Details, labelled as in every Dusk app. A row shows an amount short; here
-// it's exact, the fee too. Hide balances hides the amount; the fee stays.
+// then its date, memo, fee and the profile it left or reached; a transfer to
+// another chain that arrived adds when, and its transaction there. Its ID,
+// which opens the explorer, with Copy, and its block, gas, finality and a
+// call's contract sit under Details, labelled as in every Dusk app. A row
+// shows an amount short; here it's exact, the fee too. Hide balances hides
+// the amount; the fee stays.
 
 const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 
@@ -520,14 +521,13 @@ export function txDetailsView(ov, { state, actions } = {}) {
     ledger ? null : feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,
-    kv("Transaction ID", [idButton, copyId]),
     arrivalRow,
   ].filter(Boolean));
 
-  // Details stay open across redraws (a sync can redraw this view).
+  // Details stay open across redraws (a sync can redraw this view): the ID first.
   const tech = h("details", { class: "advanced tx-tech", open: Boolean(state?.txTechOpen) }, [
     h("summary", { text: "Details" }),
-    h("div", { class: "group group--inset" }, technicalRows(tx, ov, nodeUrl, showToast, hidden)),
+    h("div", { class: "group group--inset" }, [kv("Transaction ID", [idButton, copyId]), ...technicalRows(tx, ov, nodeUrl, showToast, hidden)]),
   ]);
   tech.addEventListener("toggle", () => {
     if (state) state.txTechOpen = tech.open;

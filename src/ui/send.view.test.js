@@ -956,9 +956,11 @@ describe("names on Send and Review", () => {
     const view = mount(state);
     await settle();
     const rows = () => dom.document.body.querySelectorAll(".send-review > .group > .kv").map(visibleText);
-    // A contact's address in full under its names, as anyone's: nothing of it under a fold.
-    expect(rows()).toEqual([`ToBobby · bob.dusk${BOB.account}`, "Fromme.dusk · Public"]);
-    expect(dom.document.body.querySelector(".send-review > details")).toBeNull();
+    // A contact's address by its short form, whole one tap away under Details.
+    expect(rows()).toEqual([`ToBobby · bob.dusk${shortAddress(BOB.account)}`, "Fromme.dusk · Public"]);
+    const details = dom.document.body.querySelector(".send-review > details");
+    expect([isShown(details), visibleText(details.querySelector("summary")), visibleText(details.querySelector(".kv"))]).toEqual([true, "Details", `To${BOB.account}`]);
+    expect(dom.document.body.querySelector(".review-to__address").getAttribute("title")).toBe(BOB.account);
     // Your name, said as yours.
     expect(view.visibleLine()).toBe("Anyone can see the amount, your name me.dusk and the recipient.");
     // Saved already: no Save contact.
@@ -1001,7 +1003,7 @@ describe("names on Send and Review", () => {
     expect(from()).toBe("Fromme.dusk · Public");
   });
 
-  it("names your other profile, on the form and on Review, its address in full, and offers no Save contact", async () => {
+  it("names your other profile, on the form and on Review, its address short, and offers no Save contact", async () => {
     const ov = overview({ accountNames: { 1: "Savings" } });
     const form = mount(newState(), ov);
     typeInto(form.to, OTHER_PROFILE);
@@ -1018,8 +1020,8 @@ describe("names on Send and Review", () => {
     );
     await settle();
     expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Your profile Savings");
-    expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(OTHER_PROFILE);
-    expect(dom.document.body.querySelector(".send-review > details")).toBeNull();
+    expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(shortAddress(OTHER_PROFILE));
+    expect(visibleText(dom.document.body.querySelector(".review-to-details .kv"))).toBe(`To${OTHER_PROFILE}`);
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
 
     // Marek's: a contact named like it, for someone else, never reads the same on Review.
@@ -1033,8 +1035,9 @@ describe("names on Send and Review", () => {
     );
     await settle();
     expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings · looks like your profile's name");
-    // Its address whole, which tells it from your profile.
+    // Its address whole, which tells it from your profile: nothing under Details.
     expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(ALICE.account);
+    expect(isShown(dom.document.body.querySelector(".review-to-details"))).toBe(false);
   });
 
   it("offers no Save contact for this wallet's own account or address", () => {
@@ -1052,8 +1055,52 @@ describe("names on Send and Review", () => {
       draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
     });
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(true);
-    // Someone who's no contact: their address whole on Review.
+    // Someone who's no contact: their address whole on Review, nothing under Details.
     expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(ALICE.account);
+    expect(isShown(dom.document.body.querySelector(".review-to-details"))).toBe(false);
+  });
+
+  // Contacts read after Review is drawn: whole till then, as anyone's; then a contact's short, whole under Details,
+  // and one whose name looks like another contact's whole still, as its address is what tells them apart.
+  it("shortens a contact's address once Contacts is read, but never one whose name looks like another's", async () => {
+    const { listAddressBook } = await import("../shared/addressBook.js");
+    const address = () => visibleText(dom.document.body.querySelector(".review-to__address"));
+    const folded = () => isShown(dom.document.body.querySelector(".review-to-details"));
+    for (const [items, shown, fold] of [
+      [[{ name: "Bobby", address: BOB.account }], shortAddress(BOB.account), true],
+      [[{ name: "Estudio Marta", address: ALICE.account }, { name: "Estudio M\u0430rta", address: BOB.account }], BOB.account, false],
+    ]) {
+      let read;
+      listAddressBook.mockImplementationOnce(() => new Promise((resolve) => (read = resolve)));
+      mount({
+        route: "confirm",
+        addressBook: { loaded: false, items: null },
+        draft: { to: BOB.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+      });
+      expect([address(), folded()]).toEqual([BOB.account, false]);
+      read(items);
+      await settle();
+      expect([address(), folded()]).toEqual([shown, fold]);
+    }
+  });
+
+  it("keeps Review's Details open, or closed, as it was left as Review is drawn again", () => {
+    const state = {
+      route: "confirm",
+      addressBook: { loaded: true, items: [{ name: "Bobby", address: BOB.account }] },
+      draft: { to: BOB.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
+    };
+    const details = () => dom.document.body.querySelector(".review-to-details");
+    mount(state);
+    expect(details().open).toBe(false);
+    details().open = true;
+    details().dispatchEvent(fakeEvent("toggle"));
+    mount(state);
+    expect(details().open).toBe(true);
+    details().open = false;
+    details().dispatchEvent(fakeEvent("toggle"));
+    mount(state);
+    expect(details().open).toBe(false);
   });
 });
 

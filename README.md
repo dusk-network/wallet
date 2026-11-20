@@ -115,8 +115,8 @@ wallet.on("chainChanged", console.log);
 `dusk_signTypedData` signs structured, wallet-rendered data rather than an opaque
 digest — the Dusk analogue of `eth_signTypedData_v4`, not of `eth_sign`. The approval
 screen shows the domain, primary type, message previews and digest. Previews may be
-truncated; **Full signing request (escaped JSON)** exposes the complete request
-without normalizing its values. Sign is disabled if the full disclosure cannot
+truncated; **Full signing request** exposes the complete request, as escaped
+JSON, without normalizing its values. Sign is disabled if the full disclosure cannot
 match the pending digest within display limits. See the [disclosure behavior and
 resource limits](docs/provider-api.md#dusk_signtypeddata) and
 [#113](https://github.com/dusk-network/wallet/issues/113).

@@ -69,6 +69,9 @@ export const CANCEL_FAILED_TEXT = "Couldn't stop it. Try again.";
 /** What Don't send says of a payment that went out meanwhile. */
 export const WENT_ALREADY_TEXT = "It went out already.";
 
+// The Sent screens whose Details are open, kept as the screen redraws.
+const detailsOpen = new WeakSet();
+
 // A payment held for Send it too, as the overview keeps it, with what its
 // account sent meanwhile; and that said, the recipient named as the Sent
 // screen names this one's, a profile of the wallet's by its name.
@@ -171,7 +174,6 @@ export function sentStatus(sent, ov) {
  */
 export function sentSteps(sent, ov) {
   const { phase, status, error, blockHeight } = sentStatus(sent, ov);
-  const sentLine = [clock(sent?.sentAt || sent?.startedAt), sent?.from].filter(Boolean).join(" · ");
 
   if (phase === "not_sent") {
     // Called off by the person: said plainly, in no colour.
@@ -230,7 +232,8 @@ export function sentSteps(sent, ov) {
     ];
   }
 
-  const sending = { label: "Sending", state: "done", sub: sentLine };
+  // When it was sent, and from which balance, are under Details (sentView).
+  const sending = { label: "Sending", state: "done", sub: "" };
   if (status === "executed") {
     const height = safeBigInt(blockHeight ?? 0, 0n);
     return [
@@ -711,14 +714,30 @@ export function sentView(ov, { state, actions, sozu } = {}) {
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
-  const details = h("div", { class: "group" }, [
+  // What it got or gave back, and the fee.
+  const rows = h("div", { class: "group" }, [
     ...(sent.sozu && status === "executed" ? sozuLines(sent, sozu, hidden) : []).map(({ label, value }) => kv(label, value)),
+    feeRow ? kv(feeRow[0], feeRow[1]) : null,
+  ].filter(Boolean));
+
+  // What decides nothing once it's confirmed, under Details: its transaction
+  // ID, its memo, and when it was sent, from which balance.
+  const sentAt = phase === "sent" ? [clock(sent.sentAt || sent.startedAt), sent.from].filter(Boolean).join(" · ") : "";
+  const detailRows = [
     sent.hash
       ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: shortAddress(sent.hash) }), copyBtn])
       : null,
     sent.memo ? kv("Memo", safeTextEl(sent.memo)) : null,
-    feeRow ? kv(feeRow[0], feeRow[1]) : null,
-  ].filter(Boolean));
+    sentAt ? kv("Sent at", sentAt) : null,
+  ].filter(Boolean);
+  // Open or closed as it was left: the screen redraws as the steps move on.
+  const details = detailRows.length
+    ? h("details", { class: "advanced", open: detailsOpen.has(sent) }, [
+        h("summary", { text: "Details" }),
+        h("div", { class: "advanced-body" }, [h("div", { class: "group group--inset" }, detailRows)]),
+      ])
+    : null;
+  details?.addEventListener("toggle", () => (details.open ? detailsOpen.add(sent) : detailsOpen.delete(sent)));
 
   // Nothing sent: Back to review leads, to fix it and try again. Not
   // confirmed: Done leads, and Back is there once Activity says it didn't go.
@@ -849,7 +868,8 @@ export function sentView(ov, { state, actions, sozu } = {}) {
       note,
       final || held ? null : noticeOffer({ state, actions }),
       stepper,
-      details.children.length ? details : null,
+      rows.children.length ? rows : null,
+      details,
       h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : held ? [...heldActions, done] : cancel ? [cancel, done] : [done, explorer]).filter(Boolean)),
     ].filter(Boolean)),
   ];

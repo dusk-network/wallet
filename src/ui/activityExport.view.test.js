@@ -220,12 +220,12 @@ describe("Activity's Export", () => {
       "Q1 2025",
       "Choose dates",
     ]);
-    // On Testnet: no value to add, and that's said where it would be.
+    // On Testnet: no value to add, and nothing said of it: the test-network strip says test DUSK has none.
     expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual(["Period", "Add contact names", "Keep accents for Excel"]);
-    expect(visibleText(panel())).toContain("Test DUSK has no value, so the file gives none.");
-    // What the file is for, and what's in it; saved from this tab, as it's no popup.
-    expect(visibleText(panel())).toContain("For tax tools such as Koinly: one profile, exact amounts, times in UTC, transfers between your profiles marked.");
-    expect(visibleText(panel())).not.toContain("new tab");
+    expect(visibleText(panel())).not.toContain("Test DUSK");
+    // What's in the file, with no tool named.
+    expect(visibleText(panel())).toContain("One profile, exact amounts, times in UTC, transfers between your profiles marked.");
+    expect(visibleText(panel())).not.toContain("Koinly");
     // Before the list and its filters.
     expect(body().querySelector(".activity-page").children[0]).toBe(panel());
   });
@@ -626,7 +626,7 @@ describe("Activity's Export", () => {
   });
 
   // Amélie's: a testnet export, euros ticked, gave test DUSK a euro value in a file for her tax return.
-  it("gives test DUSK no value: none to add on Testnet, said so, and none in the file, ticked on Mainnet before or not", async () => {
+  it("gives test DUSK no value: none to add on Testnet, and none in the file, ticked on Mainnet before or not", async () => {
     page("/full.html");
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "fr-FR" });
     const asked = [];
@@ -636,7 +636,8 @@ describe("Activity's Export", () => {
     // Ticked before, as on Mainnet: Testnet's file has none all the same.
     state.activityExport.fiat = true;
     expect(body().querySelector("#activity-export-value")).toBeNull();
-    expect(visibleText(panel())).toContain("Test DUSK has no value, so the file gives none.");
+    // The test-network strip says test DUSK has no value; the panel doesn't say it again.
+    expect(visibleText(panel())).not.toContain("value");
     button("Save CSV").click();
     await settle();
     expect(asked).toEqual([]);
@@ -939,7 +940,8 @@ describe("Activity's Export", () => {
     page("/popup.html");
     setup();
     button("Export").click();
-    expect(visibleText(panel())).toContain("The file is saved from a new tab.");
+    // Nothing narrates the new tab it's saved from.
+    expect(visibleText(panel())).not.toContain("new tab");
     pickPeriod("2026-3");
     choose("activity-export-contacts");
     button("Save CSV").click();

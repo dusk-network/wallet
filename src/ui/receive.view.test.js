@@ -45,9 +45,7 @@ const overview = {
   selectedAccountIndex: 0,
 };
 
-const PUBLIC_NOTE = "People who send to alice.dusk reach this public account.";
-const SHIELDED_NOTE =
-  "People who pay alice.dusk choose public or shielded. Anyone can see this address belongs to alice.dusk.";
+const SHIELDED_NOTE = "Anyone can see this address belongs to alice.dusk.";
 
 // DUSK's price now as CoinGecko gives it, the one place a mainnet screen reads it from (app-core's /prices):
 // nothing in these tests leaves the machine.
@@ -164,20 +162,19 @@ describe("receive", () => {
     expect(css).toMatch(/button\.acct-menu-copy,\s*button\.receive-copy \{\s*display: inline-grid;\s*place-items: center;\s*\}/);
   });
 
-  it("says what the name reaches right under it, with no ⓘ to press", async () => {
+  it("says nothing under the public account's name, and on the shielded address that anyone can see it's the name's, with no ⓘ to press", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");
-    expect(view.shownNote()).toBe(PUBLIC_NOTE);
+    expect([view.name(), view.shownNote()]).toEqual(["alice.dusk", ""]);
+    expect(visibleText(dom.document.body)).not.toContain("reach this public account");
     expect(dom.document.body.querySelector(".receive-info")).toBeNull();
-    // It follows the fields it speaks of.
-    const row = dom.document.body.querySelector(".row").children;
-    expect(row.indexOf(view.note)).toBe(row.indexOf(view.addressField.parentNode) + 1);
-    // On the shielded tab: that the payer chooses, and that the address is the name's for anyone to see.
+    // The shielded address paid through the name: that it's public, right under the fields it speaks of.
     lookupShieldedName.mockResolvedValue("alice.dusk");
     const shielded = await receive("shielded");
     expect(shielded.shownNote()).toBe(SHIELDED_NOTE);
-    const shieldedRow = dom.document.body.querySelector(".row").children;
-    expect(shieldedRow.indexOf(shielded.note)).toBe(shieldedRow.indexOf(shielded.addressField.parentNode) + 1);
+    expect(visibleText(dom.document.body)).not.toContain("choose public or shielded");
+    const row = dom.document.body.querySelector(".row").children;
+    expect(row.indexOf(shielded.note)).toBe(row.indexOf(shielded.addressField.parentNode) + 1);
   });
 
   it("names the shielded address only when the name's record is that address", async () => {
@@ -247,8 +244,8 @@ describe("receive", () => {
     expect(copied).toBe(`You're asked to pay 1.5 DUSK\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.5&network=testnet`);
     // The QR holds the same request, for a wallet to read.
     expect(dom.document.body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(`dusk:public-${ACCOUNT}@dusk:2?amount=1.5`));
-    // What the QR holds, and where the link opens: said in the form.
-    expect(visibleText(dom.document.body.querySelector(".receive-request"))).toContain("The QR holds the request. The link opens the web wallet's Send, filled in.");
+    // No note narrates what the QR and the link do.
+    expect(visibleText(dom.document.body.querySelector(".receive-request"))).not.toMatch(/The QR holds|web wallet/);
   });
 
   it("copies a shielded request with its memo, and the dusk: link where the network has no web wallet", async () => {
@@ -266,9 +263,8 @@ describe("receive", () => {
     view.button("Copy request").click();
     await settle();
     expect(dom.clipboard.writeText.mock.calls.at(-1)[0]).toBe(`You're asked for a payment in DUSK · Factura 33\nPay here: dusk:public-${ACCOUNT}@dusk:42?memo=Factura+33`);
-    // What the QR holds is still said; no web wallet's Send is.
-    expect(visibleText(dom.document.body.querySelector(".receive-request"))).toContain("The QR holds the request.");
-    expect(visibleText(dom.document.body.querySelector(".receive-request"))).not.toContain("web wallet");
+    // Nor here, with the one link there is.
+    expect(visibleText(dom.document.body.querySelector(".receive-request"))).not.toMatch(/The QR holds|web wallet/);
   });
 
   // Chen's: the request says who asks by the name given the profile here, where it has no .dusk name.

@@ -137,8 +137,8 @@ test("a keyboard-accessible full view includes every omitted value, bytes and de
     p.message = { amounts: Array(210).fill(1), note: "A".repeat(2048) + " ORIGINAL TAIL", blob: "0X00AB", marker: {} };
   });
   const input = await refreshPreview(page);
-  const summary = page.getByText("Full signing request (escaped JSON)", { exact: true });
-  const fullView = page.getByRole("textbox", { name: "Full signing request (escaped JSON)" });
+  const summary = page.getByText("Full signing request", { exact: true });
+  const fullView = page.getByRole("textbox", { name: "Full signing request" });
   await expect(summary).toBeVisible();
   await expect(page.locator("textarea")).toBeHidden();
   await summary.focus();
@@ -172,8 +172,8 @@ test("the full view preserves string tails and Unicode originals, not normalized
   for (const text of ["A".repeat(2048) + " X", "A".repeat(2048) + " Y", "é", "e\u0301", "\\u00e9", "<img src=x onerror=alert(1)>\namount : uint64 = 5\u202e"]) {
     await page.evaluate(text => { window.pending.params.message.text = text; }, text);
     const input = await refreshPreview(page);
-    await page.getByText("Full signing request (escaped JSON)", { exact: true }).click();
-    const full = await page.getByRole("textbox", { name: "Full signing request (escaped JSON)" }).inputValue();
+    await page.getByText("Full signing request", { exact: true }).click();
+    const full = await page.getByRole("textbox", { name: "Full signing request" }).inputValue();
     expect(full).not.toMatch(/[\u007f-\uffff]/);
     expect(JSON.parse(full)).toEqual(input);
     expect(hashTypedDataHex(JSON.parse(full))).toBe(hashTypedDataHex(input));
@@ -246,7 +246,7 @@ for (const [section, field] of [["domain", "name"], ["domain", "version"], ["mes
       await expect(warning).toHaveCount(unsafe ? 1 : 0);
       if (unsafe) await expect(warning).toBeVisible();
       await expect(notice).toHaveCount(clipped ? 1 : 0);
-      await page.getByText("Digest (check it against the site's)", { exact: true }).click();
+      await page.getByText("Digest", { exact: true }).click();
       await expect(page.getByText(digestHex, { exact: true })).toBeVisible();
       expect(await page.evaluate(([section, field]) => window.pending.params[section][field], [section, field])).toBe(raw);
       await expect(page.getByRole("button", { name: "Sign", exact: true })).toBeEnabled();

@@ -1487,6 +1487,9 @@ export function publicSendLine({ memo, name, memoAs = "memo" } = {}) {
 // by the draft it's drawn for: once, however often it's drawn (readTheirs).
 const theirsRead = new WeakMap();
 
+// The drafts whose Review has its Details open, kept as Review redraws.
+const toDetailsOpen = new WeakSet();
+
 export function sendConfirmView(ov, { state, actions } = {}) {
   const d = state.draft;
   const duskName = draftDuskName(d);
@@ -1542,7 +1545,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
 
   const own = toAddr === ownAccount || toAddr === ownAddress;
   // Who it goes to: a contact's label and the recipient's .dusk name, both
-  // when there are both, over the full address.
+  // when there are both, over its address.
   const contactName = () => {
     const key = toAddr.toLowerCase();
     const hit = (Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).find(
@@ -1553,17 +1556,38 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     const profile = own ? "" : ownProfileName(ov, toAddr);
     return profile ? `Your profile ${profile}` : contactNameText(hit?.name);
   };
-  // A contact whose name looks like another's says so beside it, over the address.
-  const alike = own || ownProfileName(ov, toAddr) ? "" : contactAlikeOf(ov, state.addressBook?.items)(toAddr).toLowerCase();
+  // A contact whose name looks like another's says so beside it, over the
+  // address, once Contacts is read.
+  const alikeOf = () => (own || ownProfileName(ov, toAddr) ? "" : contactAlikeOf(ov, state.addressBook?.items)(toAddr).toLowerCase());
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
   const toNameNote = nameCheckNoteEl(ov?.nodeUrl, { hidden: true });
+  // The address in full, for anyone who isn't a contact or a profile of the
+  // wallet's; theirs as "26FCH7…Tck927" by their name, whole under Details.
+  // One whose name looks like another contact's keeps it whole: its address
+  // is what tells them apart.
+  const toAddress = h("span", { class: "mono review-to__address", text: toAddr });
+  const toDetails = h("details", { class: "advanced review-to-details", hidden: true, open: toDetailsOpen.has(d) }, [
+    h("summary", { text: "Details" }),
+    h("div", { class: "advanced-body" }, [
+      h("div", { class: "group group--inset" }, [
+        h("div", { class: "kv kv--wrap" }, [h("span", { class: "kv-label", text: "To" }), h("span", { class: "kv-value" }, [h("span", { class: "mono", text: toAddr })])]),
+      ]),
+    ]),
+  ]);
+  toDetails.addEventListener("toggle", () => (toDetails.open ? toDetailsOpen.add(d) : toDetailsOpen.delete(d)));
   const showToNames = () => {
+    const alike = alikeOf();
     const names = service ? [`The bridge's account for ${service.chain}`] : [contactName(), alike, duskName?.name || verifiedName].filter(Boolean);
     const unique = names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
     toNames.textContent = unique.join(" · ");
     toNames.hidden = !unique.length;
     if (toNameNote) toNameNote.hidden = Boolean(service) || !(duskName?.name || verifiedName);
+    const known = !service && !alike && Boolean(contactName());
+    toAddress.textContent = known ? shortAddress(toAddr) : toAddr;
+    if (known) toAddress.setAttribute("title", toAddr);
+    else toAddress.removeAttribute("title");
+    toDetails.hidden = !known;
   };
 
   // The same payment waiting to go out, as the network didn't answer; else
@@ -1847,11 +1871,13 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         privacy === "public" ? visibleLine : null,
       ].filter(Boolean)),
       h("div", { class: "group" }, [
-        kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
+        kv("To", h("span", { class: "review-to" }, [toNames, toAddress]), "kv--wrap"),
         // With more than one wallet, the wallet first: "Wallet 2 · alice.dusk · Public".
         kv("From", h("span", {}, [withReviewWallet(fromName, actions?.review), h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
         d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", safeTextEl(d.memo), "kv--wrap") : null,
       ].filter(Boolean)),
+      // A contact's or a profile's address whole, under its short form.
+      toDetails,
       // As the form said it: it goes, for a fee.
       own ? h("div", { class: "send-self-note review-self-note", text: `This is your own ${toAddr === ownAccount ? "account" : "shielded address"}. Sending to yourself only costs a fee.` }) : null,
       theirsNote,
