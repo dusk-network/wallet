@@ -133,6 +133,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said You haven't connected this site before. on the connection window of a site never connected to a wallet here, or forgotten since, where a first connection looked like any other's.
 - Said Reading the token… on a site's token call, with Approve off, until the token's details come, and where they can't be read showed the call's raw units beside its contract, rather than those units as an unnamed token's amount ("10,000,000,000 TOKEN" for 10 stDUSK).
 - Said what in a pasted message disagrees with its link, as "The message says 0.002 DUSK; its link asks 0.15 DUSK.", and kept a refused paste in To rather than emptying it.
 - Refused a pasted message whose request line names its payee with a spaced or look-alike dot, that says a total with no unit, or that names another Dusk address than its link's.

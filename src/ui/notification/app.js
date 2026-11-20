@@ -329,6 +329,9 @@ export const ENDED_TEXT = "This request isn't waiting any more, and this window 
 /** The same, for a request that sends nothing: a connection, a signature. */
 export const ENDED_ASK_TEXT = "This request isn't waiting any more. Ask the site again if you still want to.";
 
+/** Under a connection's title, for a site never connected to a wallet here. */
+export const FIRST_CONNECTION_TEXT = "You haven't connected this site before.";
+
 // The kind of request this window shows, and whether it said it ended.
 let shownKind = "";
 let endedSaid = false;
@@ -964,7 +967,8 @@ export async function renderNotification() {
     show(
       [
         site,
-        requestHead({ title: summary.title }),
+        // A site never connected here before, which a look-alike of a site you use is.
+        requestHead({ title: summary.title, sub: params?.firstConnection === true ? FIRST_CONNECTION_TEXT : null }),
         h("section", { class: "ap-profiles", "aria-labelledby": "connect-profile-label" }, [
           sectionTitle(`${choosing ? "Choose a profile" : "Profile"}${walletName ? ` in ${walletName}` : ""}`, "connect-profile-label"),
           h(

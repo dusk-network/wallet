@@ -118,6 +118,17 @@ export async function getPermissionForOrigin(origin, walletId) {
 }
 
 /**
+ * Whether `origin` has a connection kept to any wallet here, one whose time is
+ * up included, or among the connections from before.
+ * @param {string} origin
+ * @returns {Promise<boolean>}
+ */
+export async function connectedAnywhere(origin) {
+  const { legacy, byWallet } = await readAll();
+  return Boolean(legacy && Object.hasOwn(legacy, origin)) || Object.values(byWallet).some((perms) => isObject(perms) && Object.hasOwn(perms, origin));
+}
+
+/**
  * Whether `perm` is still a valid grant, and the profile its site sees: its
  * public account, its shielded receive address with `includeShielded`, and its
  * verified .dusk name when `names` has one for that account.

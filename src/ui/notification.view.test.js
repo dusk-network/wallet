@@ -281,6 +281,20 @@ describe("connect approval", () => {
     expect(visibleText(savings)).toBe(`Profile 2${shortAddress(SAVINGS)}`);
   });
 
+  // The copy audit's: a site's first connection looked like any other's, only its address said which it was.
+  it("says a site has never been connected here, under the title, and says nothing of one that has", async () => {
+    await render("connect", { requestedProfiles: true, firstConnection: true });
+    expect(visibleText(head())).toBe("Connect this site?You haven't connected this site before.");
+    await render("connect", { requestedProfiles: true, firstConnection: true, shieldedReceiveAddress: true });
+    expect(visibleText(head())).toBe("Connect and share your shielded address?You haven't connected this site before.");
+
+    for (const params of [{ requestedProfiles: true, firstConnection: false }, { requestedProfiles: true }, { shieldedReceiveAddress: true, currentAccountIndex: 0 }]) {
+      await render("connect", params);
+      expect(head().querySelector(".ap-sub")).toBeNull();
+      expect(visibleText(app)).not.toContain("connected this site before");
+    }
+  });
+
   it("says plainly what the site sees, that it can't move funds, and until when", async () => {
     await render("connect", { requestedProfiles: true });
 
