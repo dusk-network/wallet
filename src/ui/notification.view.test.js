@@ -1105,6 +1105,8 @@ describe("a fee the site chose", () => {
 });
 
 describe("the recipient of a site's request to send", () => {
+  // Beside one that's none of your profiles or contacts, as Send's Review says it.
+  const STRANGER = "Not in your contacts";
   const answerName = (result) => {
     mocks.answers.DUSK_UI_RECIPIENT_NAME = async () => ({ ok: true, result });
   };
@@ -1113,7 +1115,7 @@ describe("the recipient of a site's request to send", () => {
     answerName("carol.dusk");
     await render("send_tx", transfer(CAROL));
 
-    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: null }));
+    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: STRANGER }));
     expect(mocks.sent).toContainEqual({ type: "DUSK_UI_RECIPIENT_NAME", rid: "r1", recipient: CAROL });
     expect(head().querySelector(".ap-recipient__lead").title).toBe(`carol.dusk · ${CAROL}`);
     expect(row("To").textContent).toBe(CAROL);
@@ -1152,7 +1154,7 @@ describe("the recipient of a site's request to send", () => {
     mocks.answers.DUSK_UI_RECIPIENT_NAME = () => new Promise((resolve) => (answer = resolve));
     await render("send_tx", transfer(CAROL));
     const lead = head().querySelector(".ap-recipient__lead");
-    expect(recipient()).toEqual({ lead: shortAddress(CAROL), tag: null });
+    expect(recipient()).toEqual({ lead: shortAddress(CAROL), tag: STRANGER });
     expect(lead.classList.contains("mono")).toBe(true);
 
     pastClickGuard();
@@ -1176,6 +1178,30 @@ describe("the recipient of a site's request to send", () => {
     await render("send_tx", transfer(CAROL));
     await settle();
     expect(nameAsks()).toEqual([CAROL]);
+    expect(recipient()).toEqual({ lead: shortAddress(CAROL), tag: STRANGER });
+  });
+
+  // The copy audit's: Send's Review says a recipient isn't one of your contacts; a site's request to pay said nothing.
+  it("says a recipient that's none of your profiles or contacts isn't a contact, an account or a shielded address", async () => {
+    answerName(null);
+    for (const params of [transfer(CAROL), transfer(STRANGER_ADDRESS, { privacy: "shielded" })]) {
+      await render("send_tx", params);
+      expect(recipient().tag).toBe(STRANGER);
+    }
+    // A contact, or one of your profiles, says whose it is instead.
+    await render("send_tx", transfer(BOB));
+    expect(recipient().tag).toBe("Bob · saved contact");
+    await render("send_tx", transfer(SAVINGS));
+    expect(recipient().tag).toBe("Profile 2 · your profile");
+  });
+
+  it("calls no recipient a stranger where the contacts weren't read: locked, or their store didn't open", async () => {
+    answerName(null);
+    await render("send_tx", transfer(CAROL), { contacts: null });
+    expect(recipient()).toEqual({ lead: shortAddress(CAROL), tag: null });
+    // Locked: what's asked shows over the unlock, the contacts unknown.
+    await render("send_tx", transfer(CAROL), { isUnlocked: false, accounts: [], duskNames: {}, contacts: [] });
+    expect(app.querySelector("label[for=approval-password]")?.textContent).toBe("Unlock to answer");
     expect(recipient()).toEqual({ lead: shortAddress(CAROL), tag: null });
   });
 
@@ -1211,7 +1237,7 @@ describe("the recipient of a site's request to send", () => {
 
     // A site picks the address: one that differs from a contact's in case only is not that contact.
     await render("send_tx", transfer(CAROL), { contacts: [{ name: "Carol", address: CAROL.toLowerCase() }] });
-    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: null }));
+    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: STRANGER }));
   });
 
   it("asks for no name for a shielded address or off Mainnet and Testnet", async () => {
@@ -1221,7 +1247,7 @@ describe("the recipient of a site's request to send", () => {
       transfer(CAROL, { nodeUrl: "http://127.0.0.1:8080" }),
     ]) {
       await render("send_tx", params);
-      expect(recipient().tag).toBeNull();
+      expect(recipient().tag).toBe(STRANGER);
     }
     await settle();
     expect(nameAsks()).toEqual([]);
@@ -1250,7 +1276,7 @@ describe("the recipient of a site's request to send", () => {
     Object.assign(mocks.answers, answers);
     answerName("carol.dusk");
     await render("send_tx", params);
-    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: null }));
+    await vi.waitFor(() => expect(recipient()).toEqual({ lead: "carol.dusk", tag: STRANGER }));
     expect(row("To").textContent).toBe(CAROL);
   });
 

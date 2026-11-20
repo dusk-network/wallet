@@ -983,6 +983,36 @@ describe("background Phoenix tx lifecycle flow", () => {
     });
   });
 
+  describe("the contacts a site's request to send names its recipient by", () => {
+    const BOOK = { c1: { id: "c1", name: "Bob", address: "bob-account", updatedAt: 1 } };
+    const contactsFor = async ({ kind = "send_tx", unlocked = true, opens = true } = {}) => {
+      const { engineCall, getEngineStatus } = await import("../background/engineHost.js");
+      const { getPending } = await import("../background/pending.js");
+      getPending.mockReturnValueOnce({ kind, origin: "https://dapp.example", params: { kind: "transfer", privacy: "public" }, shown: { walletId: unlocked ? "acct0" : "" } });
+      getEngineStatus.mockResolvedValueOnce(unlocked ? { isUnlocked: true, accounts: ["acct0"], addresses: ["addr0"], selectedAccountIndex: 0 } : { isUnlocked: false, accounts: [] });
+      engineCall.mockImplementation(async (method) => {
+        if (method !== "engine_contactsOpen") return true;
+        if (!opens) throw new Error("Wallet locked");
+        return { namespace: "acct0", text: JSON.stringify(BOOK) };
+      });
+      vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 503 })));
+      try {
+        return (await sendBackgroundMessage({ type: "DUSK_GET_PENDING", rid: "rid-1" }))?.contacts;
+      } finally {
+        vi.unstubAllGlobals();
+        engineCall.mockImplementation(async () => true);
+      }
+    };
+
+    // Its window says of a recipient that isn't among them that it's no contact: only of contacts it read.
+    it("are the saved ones while the wallet is unlocked, and none at all where they weren't read", async () => {
+      expect(await contactsFor()).toEqual([{ name: "Bob", address: "bob-account" }]);
+      expect(await contactsFor({ opens: false })).toBeNull();
+      expect(await contactsFor({ unlocked: false })).toBeNull();
+      expect(await contactsFor({ kind: "connect" })).toBeNull();
+    });
+  });
+
   describe("a send still marked on its way that no watcher follows", () => {
     const HASH = "ab".repeat(32);
     // It's looked up after the overview answers: wait for the outcome, however busy the machine.

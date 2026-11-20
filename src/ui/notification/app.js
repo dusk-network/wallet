@@ -332,6 +332,9 @@ export const ENDED_ASK_TEXT = "This request isn't waiting any more. Ask the site
 /** Under a connection's title, for a site never connected to a wallet here. */
 export const FIRST_CONNECTION_TEXT = "You haven't connected this site before.";
 
+/** Beside a recipient that's none of your profiles or contacts, as Send's Review says it. */
+export const NOT_A_CONTACT_TEXT = "Not in your contacts";
+
 // The kind of request this window shows, and whether it said it ended.
 let shownKind = "";
 let endedSaid = false;
@@ -642,6 +645,9 @@ export async function renderNotification() {
   // The accounts and addresses a bridge call may name as its `to`: the wallet's own.
   const own = [...accountsArr, ...ownAddresses].filter(Boolean);
   const savedContacts = Array.isArray(contacts) ? contacts : [];
+  // Whether the contacts were read, so one that isn't among them can be said
+  // to be no contact: they open only while the wallet is unlocked.
+  const contactsRead = Boolean(isUnlocked) && Array.isArray(contacts);
   const knownAs = (to) => {
     const own = [accountsArr.indexOf(to), ownAddresses.indexOf(to)].find((i) => i >= 0);
     if (own !== undefined) return { label: profileLabel(own), source: "your profile", own: accountsArr[own] === to };
@@ -683,12 +689,17 @@ export async function renderNotification() {
         })
         .catch(() => {});
     }
+    // An account or a shielded address that's none of your profiles or
+    // contacts says so, in the words Send's Review uses.
+    const stranger = !known && contactsRead && ["account", "address"].includes(classifyDuskIdentifier(to));
     const tag = known
       ? h("span", { class: "ap-recipient__tag", title: known.label }, [
           h("span", { class: "ap-recipient__label", text: known.label }),
           h("span", { class: "ap-recipient__source", text: ` · ${known.source}` }),
         ])
-      : null;
+      : stranger
+        ? h("span", { class: "ap-recipient__tag ap-recipient__tag--stranger" }, [h("span", { class: "ap-recipient__source", text: NOT_A_CONTACT_TEXT })])
+        : null;
     return { lead, tag, known, note };
   };
 

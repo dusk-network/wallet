@@ -133,6 +133,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Fixed
 
+- Said Not in your contacts beside the recipient of a site's request to pay, or to send tokens, that's none of your profiles or contacts, as Send's Review says it, where the window tagged only those it knew; nothing is said where the contacts couldn't be read.
 - Said You haven't connected this site before. on the connection window of a site never connected to a wallet here, or forgotten since, where a first connection looked like any other's.
 - Said Reading the token… on a site's token call, with Approve off, until the token's details come, and where they can't be read showed the call's raw units beside its contract, rather than those units as an unnamed token's amount ("10,000,000,000 TOKEN" for 10 stDUSK).
 - Said what in a pasted message disagrees with its link, as "The message says 0.002 DUSK; its link asks 0.15 DUSK.", and kept a refused paste in To rather than emptying it.
