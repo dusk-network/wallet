@@ -1554,7 +1554,11 @@ describe("a send to the bridge's account", () => {
   const body = () => dom.document.body;
   const text = (selector) => visibleText(body().querySelector(selector));
   // Each warning shown: its title, and its line.
-  const warnings = () => body().querySelectorAll(".callout.warn").filter(isShown).map((note) => [visibleText(note.querySelector(".callout-title")), visibleText(note.querySelector(".muted"))]);
+  const warnings = () =>
+    body()
+      .querySelectorAll(".callout.warn")
+      .filter(isShown)
+      .map((note) => [visibleText(note.querySelector(".callout-title")), note.querySelector(".muted") ? visibleText(note.querySelector(".muted")) : ""]);
   // The row the memo shows in, named for what it is here: its label, and the address it holds.
   const memoRow = () => {
     const row = body().querySelectorAll(".send-review .kv").find((kv) => visibleText(kv.querySelector(".kv-value") ?? kv).includes(EVM));

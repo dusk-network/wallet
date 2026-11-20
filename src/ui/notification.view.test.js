@@ -921,9 +921,8 @@ describe("a site's request to pay the bridge's account", () => {
     expect(arrives()).not.toMatch(/\d/);
     expect(kinds(all)).toEqual(["fee"]);
     expect(warns()).toEqual(titles(all));
-    expect(app.querySelector(".callout.warn .muted").textContent).toBe(rules(all)[0].text);
-    // The 1 DUSK fee that takes it all.
-    expect(app.querySelector(".callout.warn .muted").textContent).toMatch(exactly("1 DUSK"));
+    // The 1 DUSK fee that takes it all, in the warning's one line.
+    expect(app.querySelector(".callout.warn .callout-title").textContent).toMatch(exactly("1 DUSK"));
     // Reject stays the user's choice.
     expect(approve().disabled).toBe(false);
   });
@@ -934,7 +933,6 @@ describe("a site's request to pay the bridge's account", () => {
     expect(service(params).running).toBe(false);
     expect(kinds(params)).toEqual(["off"]);
     expect(warns()).toEqual(titles(params));
-    expect(app.querySelector(".callout.warn .muted").textContent).toBe(rules(params)[0].text);
     // Nothing arrives there while it isn't running: one part says what arrives, with no amount, and nothing else
     // promises one.
     expect(sub()).toBe(bridgeServiceLine(service(params)));
@@ -1924,7 +1922,7 @@ describe("a node that isn't a network's own", () => {
     }
     await render("send_tx", transfer(BOB, { chainId: "dusk:3070325578", nodeUrl: HOSTILE, networkName: "Custom" }), { nodeUrl: HOSTILE, networkName: "Custom", chainId: 1 });
     expect(strip()).toContain("Mainnet");
-    expect(row("Network").textContent).toContain(new URL(HOSTILE).host);
+    expect(row("Node").textContent).toContain(new URL(HOSTILE).host);
     // Details name the chain the signature carries, and the ID sites see apart from it.
     expect(row("Signs for").textContent).toContain("Mainnet");
     expect(app.querySelectorAll(".kv-value").map((v) => v.textContent)).toContain("dusk:3070325578");

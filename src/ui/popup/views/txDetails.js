@@ -169,7 +169,6 @@ function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
   const sent = tx?.sent ?? {};
   const watch = tx?.source === "sent" ? sent : {};
   return [
-    kv("Network", nodeUrl ? networkTextOf(nodeUrl) : String(ov?.networkName ?? "Unknown")),
     num(tx?.blockHeight) ? kv("Block", mono(num(tx.blockHeight))) : null,
     used || limit ? kv("Gas used", h("span", {}, [balance(hidden, used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`)])) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,

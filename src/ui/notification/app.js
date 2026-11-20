@@ -966,6 +966,8 @@ export async function renderNotification() {
     pick(selected);
 
     const summary = requestSummary("connect", params);
+    // A heading where there's a choice or a wallet to name; a lone profile's card says what it is.
+    const profilesTitle = choosing ? `Choose a profile${walletName ? ` in ${walletName}` : ""}` : walletName ? `Profile in ${walletName}` : "";
     const bar = decisionBar({
       approveText: requestedShielded && currentAccountIndex !== null ? "Share" : "Connect",
       getApprovedParams: () => ({ accountIndex: selected, shieldedReceiveAddress: sharesShielded() }),
@@ -975,8 +977,8 @@ export async function renderNotification() {
         site,
         // A site never connected here before, which a look-alike of a site you use is.
         requestHead({ title: summary.title, sub: params?.firstConnection === true ? FIRST_CONNECTION_TEXT : null }),
-        h("section", { class: "ap-profiles", "aria-labelledby": "connect-profile-label" }, [
-          sectionTitle(`${choosing ? "Choose a profile" : "Profile"}${walletName ? ` in ${walletName}` : ""}`, "connect-profile-label"),
+        h("section", { class: "ap-profiles", ...(profilesTitle ? { "aria-labelledby": "connect-profile-label" } : { "aria-label": "Profile" }) }, [
+          profilesTitle ? sectionTitle(profilesTitle, "connect-profile-label") : null,
           h(
             "div",
             {
@@ -1044,8 +1046,8 @@ export async function renderNotification() {
         text: String(preview.text ?? ""),
         title: preview.truncated ? "Preview shortened; the hash covers the full message." : undefined,
       });
-      message = h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-message-title" }, [
-        sectionTitle(preview.truncated ? "Message, shortened" : "Message", "ap-message-title"),
+      message = h("section", { class: "ap-message-wrap", ...(preview.truncated ? { "aria-labelledby": "ap-message-title" } : { "aria-label": "Message" }) }, [
+        preview.truncated ? sectionTitle("Message, shortened", "ap-message-title") : null,
         box,
         goesOnNote(box, "message"),
         preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash under Details covers all of it." }) : null,
@@ -1061,8 +1063,7 @@ export async function renderNotification() {
             : reason === "control_characters"
               ? "It contains hidden control characters."
               : "It isn't shown.";
-      message = h("section", { class: "ap-message-wrap", "aria-labelledby": "ap-message-title" }, [
-        sectionTitle("Message", "ap-message-title"),
+      message = h("section", { class: "ap-message-wrap", "aria-label": "Message" }, [
         h("div", { class: "ap-message ap-message--bytes" }, [
           h("div", { class: "ap-message__title", text: `${messageLen} bytes` }),
           h("div", { class: "ap-sub", text: `${reasonText} Only sign it if you trust this site.` }),
@@ -1081,7 +1082,6 @@ export async function renderNotification() {
           group(
             [
               kv("Message hash", mono(hashLine), { stack: true }),
-              kv("Network", nodeUrl ? networkTextOf(nodeUrl) : chainName(chainId) || "Custom"),
               kv("Chain ID", mono(chainId || "—")),
             ],
             { className: "group--inset" }
@@ -1320,7 +1320,6 @@ export async function renderNotification() {
   async function renderSendTx() {
     const txKind = String(params?.kind ?? "").toLowerCase();
     const txChainId = String(params?.chainId ?? "");
-    const networkName = nodeUrl ? networkTextOf(nodeUrl) : String(params?.networkName ?? "");
     const privacy = String(params?.privacy ?? (txKind === TX_KIND.CONTRACT_CALL ? "public" : "")).trim().toLowerCase();
     const shielded = privacy === "shielded";
     const rail = shielded ? "Shielded" : "Public";
@@ -1332,9 +1331,9 @@ export async function renderNotification() {
 
     // The network's lines, which most people skip: the chain the signature
     // carries, and apart from it the ID sites are told, a custom node's own.
+    // The network itself is the header's.
     const signsFor = chainIdForNode(nodeUrl);
     const networkRows = () => [
-      kv("Network", networkName || "Unknown"),
       signsFor !== null ? kv("Signs for", chainWords(signsFor)) : null,
       txChainId ? kv("Chain ID sites see", mono(txChainId)) : null,
       nodeUrl ? kv("Node", mono(nodeUrl), { stack: true }) : null,
@@ -1554,15 +1553,20 @@ export async function renderNotification() {
     // The call as a person checks it: the contract and the DUSK it sends,
     // and whom its amount pays when the site names someone.
     const amountTo = String(params?.to ?? "").trim();
-    // `contract`: false where a token's row names it already.
-    const callRows = ({ from = false, contract = true } = {}) =>
-      group([
+    // `contract`: false where a token's row names it already. `inHead`: the
+    // head shows the DUSK it sends, so an amount or a deposit alone is said
+    // there, and only both are broken down here.
+    const callRows = ({ from = false, contract = true, inHead = false } = {}) => {
+      const [sendsAmount, sendsDeposit] = [safeBigInt(amountLux, 0n) > 0n, safeBigInt(depositLux, 0n) > 0n];
+      const breakdown = !inHead || (sendsAmount && sendsDeposit);
+      return group([
         from ? kv("From", payerLine(rail)) : null,
         contract ? kv("Contract", contractValueEl(contractLabel(contractShown, nodeUrl), shortMono(contractShown))) : null,
-        safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
-        safeBigInt(amountLux, 0n) > 0n && amountTo ? kv("Amount to", h("code", { class: "ap-address", text: amountTo }), { stack: true }) : null,
-        safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
+        sendsAmount && breakdown ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
+        sendsAmount && amountTo ? kv("Amount to", h("code", { class: "ap-address", text: amountTo }), { stack: true }) : null,
+        sendsDeposit && breakdown ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
       ]);
+    };
     // Under Details: what the call names in full (`rows`), the network, the
     // function, its arguments' size and hash (the line a site can show to
     // match), the bytes, and the site's words.
@@ -1891,7 +1895,7 @@ export async function renderNotification() {
           title: summary.title,
           amount: sendsLux > 0n ? { value: formatDuskExact(sendsLux), unit: "DUSK" } : null,
         }),
-        callRows({ from: true }),
+        callRows({ from: true, inHead: true }),
         unchecked,
         // A bridge call read as an allowance still waits for MAX.
         unreadAllowance && bridgeUnchecked ? warning("It may allow unlimited spending", "", [ackInput]) : null,

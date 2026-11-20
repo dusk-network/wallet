@@ -269,8 +269,8 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       h("div", { class: "review-head" }, [
         h("div", { class: "review-kind", text: kind === TX_KIND.SHIELD ? "Shield" : "Unshield" }),
         h("div", { class: "balance-amount" }, [formatDuskExact(d.amountLux), h("span", { class: "balance-unit", text: " DUSK" })]),
-        h("div", { class: "review-line", text: flowLine(kind) }),
       ]),
+      // Which balance it leaves and which it goes to, as the form said it.
       h("div", { class: "group" }, [kv("From", fromRail), kv("To", toRail)]),
       gasEditor,
       reviewActions(confirmBtn, confirmError, pay.el),

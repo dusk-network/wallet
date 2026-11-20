@@ -130,19 +130,20 @@ export function noBridgeRecipientText(chain) {
 }
 
 /**
- * What to warn of before paying the bridge's account, each as a title and
- * a line: a route the bridge doesn't pay out on now ("off"), and an amount
- * its fee takes whole ("fee").
+ * What to warn of before paying the bridge's account, each in one line, its
+ * title; `text`, a line under it, is empty: the line under the amount says
+ * nothing arrives (bridgeServiceLine). A route the bridge doesn't pay out on
+ * now ("off"), and an amount its fee takes whole ("fee").
  * @param {ReturnType<typeof bridgeServiceTransfer>} service
  * @returns {{ kind: "off" | "fee", title: string, text: string }[]}
  */
 export function bridgeServiceWarnings(service) {
   const out = [];
   if (!service.running) {
-    out.push({ kind: "off", title: `Not paying out on ${service.chain} now`, text: "Nothing sent to it would arrive." });
+    out.push({ kind: "off", title: `Not paying out on ${service.chain} now`, text: "" });
   }
   if (service.arrivesLux <= 0n) {
-    out.push({ kind: "fee", title: `Nothing arrives on ${service.chain}`, text: `The ${formatDuskExact(service.feeLux)} DUSK bridge fee takes it all.` });
+    out.push({ kind: "fee", title: `The ${formatDuskExact(service.feeLux)} DUSK bridge fee takes it all`, text: "" });
   }
   return out;
 }

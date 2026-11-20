@@ -1126,9 +1126,10 @@ export function optionsView(ov, { state, actions } = {}) {
       },
     });
 
-  const section = (title, children = [], className = "") =>
+  // `quiet`: a heading for screen readers alone, where the one button under it says the same.
+  const section = (title, children = [], className = "", { quiet = false } = {}) =>
     h("section", { class: ["settings-section", className].filter(Boolean).join(" ") }, [
-      bracketTitle({ class: "settings-section-title", text: title }),
+      bracketTitle({ class: quiet ? "settings-section-title sr-only" : "settings-section-title", text: title }),
       ...children.filter(Boolean),
     ]);
 
@@ -1158,7 +1159,7 @@ export function optionsView(ov, { state, actions } = {}) {
     section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), switchError, nodeDetails]),
     // Advanced is its own section, its title the disclosure's.
     h("section", { class: "settings-section" }, [advanced]),
-    section("Reset", [resetBtn], "settings-section--danger"),
+    section("Reset", [resetBtn], "settings-section--danger", { quiet: true }),
     section("About", [
       installedVersion ? h("p", { class: "settings-note", text: `Dusk Wallet v${installedVersion}` }) : null,
       h("p", { class: "settings-note settings-legal" }, [

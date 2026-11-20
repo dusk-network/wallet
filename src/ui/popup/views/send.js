@@ -1885,7 +1885,7 @@ export function sendConfirmView(ov, { state, actions } = {}) {
       toNameNote,
       ...serviceNotes
         .filter((n) => n.kind !== "fee")
-        .map((n) => h("div", { class: "callout warn", role: "note" }, [h("div", { class: "callout-title", text: n.title }), h("div", { class: "muted", text: n.text })])),
+        .map((n) => h("div", { class: "callout warn", role: "note" }, [h("div", { class: "callout-title", text: n.title }), n.text ? h("div", { class: "muted", text: n.text }) : null])),
       service && !service.recipientOk
         ? h("div", { class: "callout warn", role: "note" }, [
             h("div", { class: "callout-title", text: `The memo isn't an address on ${service.chain}` }),
