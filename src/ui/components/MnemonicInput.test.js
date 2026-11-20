@@ -31,9 +31,16 @@ function mount(opts = {}) {
   const box = (n) => input.el.querySelectorAll("input").find((i) => i.getAttribute("aria-label") === `Word ${n}`);
   const cell = (n) => box(n).parentNode.parentNode;
   const words = () => input.el.querySelectorAll("input").filter(isShown).map((i) => i.value);
-  // What `onCheck` was told last: what's wrong with the words, "" for nothing.
-  const said = () => onCheck.mock.lastCall?.[0];
-  return { input, onCheck, box, cell, words, said };
+  // What `onCheck` is told of `act`, and only of it: what's wrong with the words then, "" for nothing.
+  const said = (act) => {
+    onCheck.mockClear();
+    act();
+    expect(onCheck).toHaveBeenCalled();
+    return onCheck.mock.lastCall[0];
+  };
+  // The boxes marked as holding no recovery word, by number.
+  const marked = () => input.el.querySelectorAll("input").filter(isShown).flatMap((i, n) => (i.getAttribute("aria-invalid") === "true" && cell(n + 1).classList.contains("is-invalid") ? [n + 1] : []));
+  return { input, onCheck, box, cell, words, said, marked };
 }
 
 const paste = (field, text) => field.dispatchEvent(fakeEvent("paste", { clipboardData: { getData: () => text } }));
@@ -41,6 +48,10 @@ const paste = (field, text) => field.dispatchEvent(fakeEvent("paste", { clipboar
 const leave = (field, to = null) => field.dispatchEvent(fakeEvent("focusout", { relatedTarget: to }));
 // Show words, or Hold to show words, whatever it says.
 const showButton = (input) => input.el.querySelector(".srp-show");
+// The numbers a sentence names, in order: the words it means, or a count.
+const numbersIn = (text) => text.match(/\d+/g) ?? [];
+// `text` exactly: no digit, point or comma just before it, nor a digit just after (13 words isn't 113 words).
+const exactly = (text) => new RegExp("(?<![\\d.,])" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\d])");
 
 describe("on a phone", () => {
   // The rule ui.css has for `selector`, its declarations.
@@ -246,6 +257,14 @@ describe("on a phone", () => {
       expect(showButton(input)).toBeNull();
     }
   });
+
+  it("is a form of its own, which Enter never submits", () => {
+    const { input, box } = mount();
+    expect(input.el.localName).toBe("form");
+    const submit = fakeEvent("submit");
+    box(1).dispatchEvent(submit);
+    expect(submit.defaultPrevented).toBe(true);
+  });
 });
 
 describe("the recovery phrase's word boxes", () => {
@@ -331,26 +350,35 @@ describe("the recovery phrase's word boxes", () => {
   });
 
   it("marks a word that isn't a recovery word after a paste, and says which", () => {
-    const { box, cell, said } = mount();
-    paste(box(1), OTHER.replace("worth", "wurth"));
-    expect([cell(7).classList.contains("is-invalid"), box(7).getAttribute("aria-invalid")]).toEqual([true, "true"]);
-    expect(cell(6).classList.contains("is-invalid")).toBe(false);
-    expect(said()).toMatch(/\b7\b/);
+    const { box, said, marked } = mount();
+    // Marked, and named: the word that isn't one, not one that's missing.
+    const one = said(() => paste(box(1), OTHER.replace("worth", "wurth")));
+    expect(marked()).toEqual([7]);
+    expect(numbersIn(one)).toEqual(["7"]);
+    expect(one).not.toMatch(/missing/i);
 
-    paste(box(1), OTHER.replace("legal", "legl").replace("worth", "wurth"));
-    expect(said()).toMatch(/\b1\b[\s\S]*\b7\b/);
+    const two = said(() => paste(box(1), OTHER.replace("legal", "legl").replace("worth", "wurth")));
+    expect(marked()).toEqual([1, 7]);
+    expect(numbersIn(two)).toEqual(["1", "7"]);
+    expect(two).not.toMatch(/missing/i);
   });
 
   it("says when a pasted phrase has the wrong count or its checksum fails, and nothing for a good one", () => {
     const { box, said } = mount();
-    paste(box(1), `${OTHER} wave`);
-    expect(said()).toMatch(/\b13\b/);
-    paste(box(1), `${TWENTY_FOUR} art`);
-    expect(said()).toMatch(/\b25\b/);
-    paste(box(1), NO_CHECKSUM);
-    expect(said()).not.toBe("");
-    paste(box(1), OTHER);
-    expect(said()).toBe("");
+    // Too many words: how many, and nothing of the phrase being valid.
+    for (const [phrase, count] of [
+      [`${OTHER} wave`, "13 words"],
+      [`${TWENTY_FOUR} art`, "25 words"],
+    ]) {
+      const told = said(() => paste(box(1), phrase));
+      expect(told, count).toMatch(exactly(count));
+      expect(told, count).not.toMatch(/valid/i);
+    }
+    // Every word the list's, as many as a phrase has, its checksum wrong: not a valid phrase, naming no word or count.
+    const checksum = said(() => paste(box(1), NO_CHECKSUM));
+    expect(checksum).toMatch(/valid/i);
+    expect(numbersIn(checksum)).toEqual([]);
+    expect(said(() => paste(box(1), OTHER))).toBe("");
   });
 
   // bip39-vectors.json: test phrases and verdicts from bip39 3.1.0, the library before @scure/bip39.
@@ -361,13 +389,12 @@ describe("the recovery phrase's word boxes", () => {
       ...bip39Vectors.seeds.filter((v) => v.words === 12 || v.words === 24).map((v) => v.phrase),
       ...["spaces around", "two spaces between words", "a tab and a newline between words", "no-break spaces between words", "a capital first letter", "capitals"].map(verdict),
     ];
-    for (const phrase of took) {
-      paste(box(1), phrase);
-      expect(said()).toBe("");
-    }
+    for (const phrase of took) expect(said(() => paste(box(1), phrase))).toBe("");
+    // Refused for its checksum: not a valid phrase, naming no word or count.
     for (const name of ["wrong checksum, 12 words", "wrong checksum, 24 words"]) {
-      paste(box(1), verdict(name));
-      expect(said(), name).not.toBe("");
+      const told = said(() => paste(box(1), verdict(name)));
+      expect(told, name).toMatch(/valid/i);
+      expect(numbersIn(told), name).toEqual([]);
     }
   });
 
@@ -383,35 +410,39 @@ describe("the recovery phrase's word boxes", () => {
     const words = OTHER.split(" ");
     words.forEach((w, i) => typeInto(box(i + 1), w));
     typeInto(box(5), "");
-    leave(box(12), password);
-    expect(said()).toMatch(/\b5\b/);
+    const missing = said(() => leave(box(12), password));
+    expect(missing).toMatch(/missing/i);
+    expect(numbersIn(missing)).toEqual(["5"]);
 
     typeInto(box(5), "wave");
     typeInto(box(12), "");
-    leave(box(11), password);
-    expect(said()).toMatch(/\b11\b/);
+    const few = said(() => leave(box(11), password));
+    expect(few).toMatch(exactly("11 words"));
+    expect(few).not.toMatch(/missing|valid/i);
 
     typeInto(box(12), "abandon");
-    leave(box(12), null);
-    expect(said()).not.toBe("");
+    const checksum = said(() => leave(box(12), null));
+    expect(checksum).toMatch(/valid/i);
+    expect(numbersIn(checksum)).toEqual([]);
     // Typing again takes back what was said.
-    typeInto(box(12), "yellow");
-    expect(said()).toBe("");
+    expect(said(() => typeInto(box(12), "yellow"))).toBe("");
   });
 
   it("checks a phrase typed into one box with spaces as it checks a paste", () => {
-    const { box, words, said } = mount();
-    typeInto(box(9), OTHER.replace("worth", "wurth"));
+    const { box, words, said, marked } = mount();
+    const told = said(() => typeInto(box(9), OTHER.replace("worth", "wurth")));
     expect(words()).toEqual(OTHER.replace("worth", "wurth").split(" "));
-    expect(said()).toMatch(/\b7\b/);
+    expect(marked()).toEqual([7]);
+    expect(numbersIn(told)).toEqual(["7"]);
+    expect(told).not.toMatch(/missing/i);
   });
 
   it("says the same on asking (problem), for the form's submit", () => {
     const { input, box, said } = mount();
     expect(input.problem()).toBe("");
-    paste(box(1), NO_CHECKSUM);
-    expect(input.problem()).not.toBe("");
-    expect(input.problem()).toBe(said());
+    const checksum = said(() => paste(box(1), NO_CHECKSUM));
+    expect(checksum).toMatch(/valid/i);
+    expect(input.problem()).toBe(checksum);
     paste(box(1), OTHER);
     expect([input.problem(), input.getMnemonic()]).toEqual(["", OTHER]);
   });
@@ -466,12 +497,12 @@ describe("words suggested as a box is typed in", () => {
   });
 
   it("still spreads a pasted phrase over the boxes and moves on at a space, with nothing left suggested", () => {
-    const { input, box, words, onCheck } = mount();
+    const { input, box, words, said } = mount();
     box(1).focus();
     typeInto(box(1), "ap");
     expect(chips(input)).toEqual(["apart", "apology", "appear", "apple"]);
-    paste(box(1), OTHER);
-    expect([words(), chips(input), onCheck.mock.lastCall]).toEqual([OTHER.split(" "), [], [""]]);
+    const told = said(() => paste(box(1), OTHER));
+    expect([words(), chips(input), told]).toEqual([OTHER.split(" "), [], ""]);
     box(3).focus();
     typeInto(box(3), "");
     typeKeys("ca", { as: "text" });
@@ -497,7 +528,7 @@ describe("words suggested as a box is typed in", () => {
     typeKeys("ca", { as: "text" });
     expect([words()[0], chips(input)]).toEqual(["ca", []]);
     typeInto(box(1), "xq");
-    expect([note(input), chips(input)]).toEqual([expect.stringMatching(/\S/), []]);
+    expect([note(input), chips(input), box(1).getAttribute("aria-invalid")]).toEqual([expect.stringMatching(/\S/), [], "true"]);
   });
 
   it("asks nothing of the network and logs nothing as words are typed", () => {
@@ -509,7 +540,7 @@ describe("words suggested as a box is typed in", () => {
     for (const typed of ["w", "wa", "wal", "walk"]) typeInto(box(1), typed);
     keydown(box(1), "Enter");
     typeInto(box(2), "xq");
-    expect([fetch.mock.calls.length, ...logged.map((spy) => spy.mock.calls.length), note(input)]).toEqual([0, 0, 0, 0, 0, 0, expect.stringMatching(/\S/)]);
+    expect([fetch.mock.calls.length, ...logged.map((spy) => spy.mock.calls.length), note(input), box(2).getAttribute("aria-invalid")]).toEqual([0, 0, 0, 0, 0, 0, expect.stringMatching(/\S/), "true"]);
     for (const spy of logged) spy.mockRestore();
   });
 

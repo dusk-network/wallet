@@ -43,6 +43,18 @@ describe("shield and unshield", () => {
   const button = (text) => body().querySelectorAll("button").find((b) => b.textContent === text);
   // A Review's Confirm, whatever it says: the one button at the Review's end (FormControls.js reviewActions).
   const confirm = () => body().querySelector(".review-actions button");
+  // A figure as written, whole: 1,482.8883 DUSK is no 11,482.8883 DUSK, 0.05 DUSK no 10.05 DUSK.
+  const exactly = (s) => new RegExp(`(?<![\\d.,])${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`);
+  // The most a fee can be, as the form says it under the amount: "up to 0.05 DUSK", never 10.05.
+  const upTo = (s) => new RegExp(`\\bup to ${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`, "i");
+  // What a Review says, each in its own place: the amount, a row's value by its label, the fee and the total.
+  const reviewed = () => ({
+    amount: visibleText(body().querySelector(".review-head .balance-amount")),
+    from: visibleText(body().querySelectorAll(".kv").find((kv) => visibleText(kv.querySelector(".kv-label")) === "From").querySelector(".kv-value")),
+    to: visibleText(body().querySelectorAll(".kv").find((kv) => visibleText(kv.querySelector(".kv-label")) === "To").querySelector(".kv-value")),
+    fee: visibleText(body().querySelector(".gas-fee-value")),
+    total: visibleText(body().querySelector(".gas-total-value")),
+  });
 
   it("says which way it goes, and what's available after fees, as Send does", () => {
     const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
@@ -51,14 +63,14 @@ describe("shield and unshield", () => {
     const available = () => visibleText(body().querySelector(".amount-avail__text"));
     const fee = () => visibleText(body().querySelector(".amount-fee-note"));
     expect(flow()).toMatch(/public.*shielded/);
-    expect(available()).toMatch(/1,482\.8883 DUSK/);
-    expect(fee()).toMatch(/0\.05 DUSK/);
+    expect(available()).toMatch(exactly("1,482.8883 DUSK"));
+    expect(fee()).toMatch(upTo("0.05 DUSK"));
     // The other way, picked on the switch.
     body().querySelector("[role=tab][aria-selected=false]").click();
     expect(state.draft.kind).toBe(TX_KIND.UNSHIELD);
     expect(flow()).toMatch(/shielded.*public/);
-    expect(available()).toMatch(/24\.95 DUSK/);
-    expect(fee()).toMatch(/0\.05 DUSK/);
+    expect(available()).toMatch(exactly("24.95 DUSK"));
+    expect(fee()).toMatch(upTo("0.05 DUSK"));
   });
 
   // Lena's and Chen's: opened with no signal, the shielded balance said 0 where it couldn't be read.
@@ -82,7 +94,7 @@ describe("shield and unshield", () => {
     expect(input.value).toBe("24.95");
     typeInto(input, "30");
     // How much is missing, of the shielded balance.
-    expect(error()).toMatch(/5\.05 DUSK/);
+    expect(error()).toMatch(exactly("5.05 DUSK"));
     expect(error()).toMatch(/shielded/);
     typeInto(input, "");
     button("Review").click();
@@ -106,27 +118,23 @@ describe("shield and unshield", () => {
         })
       );
     show();
-    expect(visibleText(body().querySelector(".amount-avail__text"))).toMatch(/1,482\.7883 DUSK/);
-    expect(visibleText(body().querySelector(".amount-fee-note"))).toMatch(/0\.15 DUSK/);
+    expect(visibleText(body().querySelector(".amount-avail__text"))).toMatch(exactly("1,482.7883 DUSK"));
+    expect(visibleText(body().querySelector(".amount-fee-note"))).toMatch(upTo("0.15 DUSK"));
     button("Max").click();
     expect(body().querySelector("input.amount-field__input").value).toBe("1482.7883");
     button("Review").click();
     await settle();
     // The fee at most, and the total at most.
-    expect(visibleText(body().querySelector(".gas-fee"))).toMatch(/0\.15 DUSK.*1,482\.9383 DUSK/);
+    expect(reviewed()).toMatchObject({ fee: "up to 0.15 DUSK", total: "up to 1,482.9383 DUSK" });
   });
 
   it("reviews the amount, the profile it moves within, and the fee, with Back and Confirm", async () => {
     const state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: "1000000000", amountDusk: "1" } };
     draw(state);
     await settle();
-    // 1 DUSK, not 0.1 or 21.
-    expect(visibleText(body().querySelector(".review-head"))).toMatch(/(?<![\d.,])1 DUSK/);
-    const row = (label) => body().querySelectorAll(".convert-review > .group > .kv").map(visibleText).find((text) => text.startsWith(label));
-    expect(row("From")).toMatch(/alice\.dusk.*Public/);
-    expect(row("To")).toMatch(/alice\.dusk.*Shielded/);
-    // The fee at most, and the total at most, with a fee of your own on offer.
-    expect(visibleText(body().querySelector(".gas-fee"))).toMatch(/0\.05 DUSK.*1\.05 DUSK/);
+    // The amount, the profile's two balances it moves between, the fee at most and the total at most, with a fee of
+    // your own on offer.
+    expect(reviewed()).toEqual({ amount: "1 DUSK", from: "alice.dusk · Public", to: "alice.dusk · Shielded", fee: "up to 0.05 DUSK", total: "up to 1.05 DUSK" });
     expect(body().querySelector("details.gas-custom")).toBeTruthy();
     expect(isShown(body().querySelector(".subnav-back"))).toBe(true);
     expect(confirm().disabled).toBe(false);
@@ -183,7 +191,7 @@ describe("shield and unshield", () => {
     dom.document.body.replaceChildren(...convertConfirmView(ov, { state, actions }));
     await settle();
     // How much is missing, of the shielded balance.
-    expect(dom.document.body.querySelector(".pay-guard").textContent).toMatch(/0\.05 DUSK/);
+    expect(dom.document.body.querySelector(".pay-guard").textContent).toMatch(exactly("0.05 DUSK"));
     expect(dom.document.body.querySelector(".pay-guard").textContent).toMatch(/shielded/);
     expect(confirm().disabled).toBe(true);
   });
@@ -193,8 +201,6 @@ describe("shield and unshield", () => {
     const two = { ...ov, wallets: [{ key: "w1", n: 1, active: true }, { key: "w2", n: 2 }] };
     dom.document.body.replaceChildren(...convertConfirmView(two, { state, actions: { ...actions(state), review: reviewOf(two, state) } }));
     await settle();
-    const row = (label) => body().querySelectorAll(".convert-review > .group > .kv").map(visibleText).find((text) => text.startsWith(label));
-    expect(row("From")).toMatch(/Wallet 1.*alice\.dusk.*Shielded/);
-    expect(row("To")).toMatch(/Wallet 1.*alice\.dusk.*Public/);
+    expect(reviewed()).toMatchObject({ from: "Wallet 1 · alice.dusk · Shielded", to: "Wallet 1 · alice.dusk · Public" });
   });
 });

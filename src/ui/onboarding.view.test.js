@@ -13,7 +13,7 @@ import {
   restoreWalletView,
 } from "./popup/views/onboarding.js";
 import { changePasswordView, removeWalletView } from "./popup/views/wallets.js";
-import { FINGERPRINTS_CHANGED_TEXT, lockedView } from "./popup/views/locked.js";
+import { FINGERPRINTS_CHANGED_TEXT, WRONG_PASSWORD_TEXT, lockedView } from "./popup/views/locked.js";
 
 const MNEMONIC = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
 // Check your recovery words: each box asked filled with the phrase's word at its place.
@@ -52,6 +52,10 @@ const describedBy = (el) =>
   (el.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean).map((id) => dom.document.getElementById(id)).filter((n) => n && isShown(n));
 // What the field's error says.
 const errorOf = (el) => describedBy(el).find((n) => n.classList.contains("field-error"))?.textContent ?? "";
+// The numbers a sentence names, in order: the words it means, or a count.
+const numbersIn = (text) => text.match(/\d+/g) ?? [];
+// `text` exactly: no digit, point or comma just before it, nor a digit just after (8 characters isn't 18 characters).
+const exactly = (text) => new RegExp("(?<![\\d.,])" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\d])");
 // The password the wallets here share, where one's added or removed.
 const SHARED_PASSWORD = "input[autocomplete=current-password]";
 // Two wallets here, by number.
@@ -71,7 +75,7 @@ describe("setting up and unlocking", () => {
     typeInto(pwd, "short");
     mainButton(body).click();
     await settle();
-    expect([errorOf(pwd), pwd.getAttribute("aria-invalid")]).toEqual([expect.stringMatching(/\b8\b/), "true"]);
+    expect([errorOf(pwd), pwd.getAttribute("aria-invalid")]).toEqual([expect.stringMatching(exactly("8 characters")), "true"]);
     // Typing again clears it.
     typeInto(pwd, "long enough");
     expect([errorOf(pwd), pwd.getAttribute("aria-invalid")]).toEqual(["", null]);
@@ -101,23 +105,28 @@ describe("setting up and unlocking", () => {
     const body = show(onboardingImportView({ state, actions: acts }));
     const group = body.querySelector("[role=group]");
 
+    // Nothing typed: said under the words.
     mainButton(body).click();
     await settle();
     expect(errorOf(group)).not.toBe("");
 
-    // A whole phrase put in at once is checked then, before Import.
+    // A whole phrase put in at once is checked then, before Import: not a valid phrase, naming no word or count.
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
-    expect(errorOf(group)).not.toBe("");
+    const checksum = errorOf(group);
+    expect(checksum).toMatch(/valid/i);
+    expect(numbersIn(checksum)).toEqual([]);
     mainButton(body).click();
     await settle();
-    expect(errorOf(group)).not.toBe("");
+    expect(errorOf(group)).toBe(checksum);
 
-    // Words missing, on Import.
+    // A word missing, on Import: which one.
     typeInto(field(body, "Word 1"), MNEMONIC);
     typeInto(field(body, "Word 4"), "");
     mainButton(body).click();
     await settle();
-    expect(errorOf(group)).toMatch(/\b4\b/);
+    const missing = errorOf(group);
+    expect(missing).toMatch(/missing/i);
+    expect(numbersIn(missing)).toEqual(["4"]);
     expect(acts.send).not.toHaveBeenCalled();
 
     typeInto(field(body, "Word 1"), MNEMONIC);
@@ -180,7 +189,7 @@ describe("setting up and unlocking", () => {
       wordBoxes(body).forEach((input, i) => typeInto(input, typed[i]));
       mainButton(body).click();
       await settle();
-      expect(visibleText(body)).toContain(RECOVERY_WORDS_MISMATCH);
+      expect(body.querySelectorAll("[role=alert]").filter(isShown).map((el) => el.textContent)).toEqual([RECOVERY_WORDS_MISMATCH]);
       expect(visibleText(body)).not.toContain("abandon");
       expect([body.querySelector(".srp-grid"), wordBoxes(body)]).toEqual([null, []]);
       expect([state.route, state.onboard.reveal, acts.send.mock.calls]).toEqual(["onboard_create_confirm", false, []]);
@@ -207,7 +216,11 @@ describe("setting up and unlocking", () => {
     mainButton(body).click();
     await settle();
     expect(acts.send).toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CREATE_WALLET", mnemonic: MNEMONIC }));
+    // Said once: that they match, not that they don't.
     expect(acts.showToast).toHaveBeenCalledTimes(1);
+    const [[matched]] = acts.showToast.mock.calls;
+    expect(matched).toMatch(/match/i);
+    expect(matched).not.toMatch(/n['’]t\b|\bnot\b/i);
     expect(state.route).toBe("home");
   });
 
@@ -255,12 +268,15 @@ describe("setting up and unlocking", () => {
     const acts = actions();
     const body = show(restoreWalletView({ state, actions: acts }));
     // Every other wallet here goes: said before anything's typed.
-    expect(visibleText(body.querySelector(".auth-lead"))).not.toBe("");
+    expect(visibleText(body.querySelector(".auth-lead"))).toMatch(/remov/i);
     const group = body.querySelector("[role=group]");
     typeInto(field(body, "Word 1"), MNEMONIC.replace("about", "abandon"));
     mainButton(body).click();
     await settle();
-    expect(errorOf(group)).not.toBe("");
+    // Not a valid phrase, naming no word or count, and nothing restored.
+    const checksum = errorOf(group);
+    expect(checksum).toMatch(/valid/i);
+    expect(numbersIn(checksum)).toEqual([]);
     expect(acts.send).not.toHaveBeenCalled();
 
     typeInto(field(body, "Word 1"), MNEMONIC);
@@ -445,7 +461,8 @@ describe("adding a wallet beside the ones here", () => {
     await settle();
     // A phrase made here: the wallet sets its shielded checkpoint as it adds it.
     expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123", fresh: true });
-    expect([errorOf(pwd), pwd.value]).toEqual([expect.stringMatching(/\S/), ""]);
+    // What the wallet said, under the password, and the password gone.
+    expect([errorOf(pwd), pwd.value]).toEqual(["Incorrect password", ""]);
 
     reply = { ok: true };
     typeInto(pwd, "password123");
@@ -466,7 +483,7 @@ describe("adding a wallet beside the ones here", () => {
     mainButton(body).click();
     await settle();
     expect(acts.send).toHaveBeenCalledWith({ type: "DUSK_UI_ADD_WALLET", mnemonic: MNEMONIC, password: "password123" });
-    expect(errorOf(body.querySelector("[role=group]"))).not.toBe("");
+    expect(errorOf(body.querySelector("[role=group]"))).toBe(DUP);
     expect(state.route).toBe("wallet_add_import");
     backButton(body).click();
     await settle();
@@ -490,7 +507,8 @@ describe("removing a wallet, and a new password", () => {
     const state = { route: "wallet_remove", walletRemove: "k2" };
     const acts = actions([{ error: { message: "Incorrect password" } }, { ok: true }]);
     const body = show(removeWalletView(ov, { state, actions: acts }));
-    expect(visibleText(body)).toContain("Savings");
+    // Which wallet: by its name, then its first profile's account, as names can be alike.
+    expect(visibleText(body.querySelector(".settings-profile-line"))).toMatch(/^Savings\b.*\bacct2$/);
     const pwd = body.querySelector(SHARED_PASSWORD);
     mainButton(body).click();
     await settle();
@@ -500,7 +518,7 @@ describe("removing a wallet, and a new password", () => {
     typeInto(pwd, "wrong one");
     mainButton(body).click();
     await settle();
-    expect(errorOf(pwd)).not.toBe("");
+    expect(errorOf(pwd)).toBe("Incorrect password");
     typeInto(pwd, "password123");
     mainButton(body).click();
     await settle();
@@ -523,25 +541,26 @@ describe("removing a wallet, and a new password", () => {
     typeInto(next, "short");
     mainButton(body).click();
     await settle();
-    expect(errorOf(next)).toMatch(/\b8\b/);
+    expect(errorOf(next)).toMatch(exactly("8 characters"));
     typeInto(next, "a new password");
     typeInto(again, "another one");
     mainButton(body).click();
     await settle();
     expect(errorOf(again)).not.toBe("");
-    // The one it has already changes nothing, so it's said.
+    // The one it has already changes nothing, so it's said: of the current one, not of its length.
     typeInto(next, "password123");
     typeInto(again, "password123");
     mainButton(body).click();
     await settle();
-    expect(errorOf(next)).not.toBe("");
+    expect(errorOf(next)).toMatch(/current/i);
+    expect(errorOf(next)).not.toMatch(exactly("8 characters"));
     expect(acts.send).not.toHaveBeenCalled();
 
     typeInto(next, "a new password");
     typeInto(again, "a new password");
     mainButton(body).click();
     await settle();
-    expect(errorOf(current)).not.toBe("");
+    expect(errorOf(current)).toBe("Incorrect password");
     mainButton(body).click();
     await settle();
     expect(acts.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_CHANGE_PASSWORD", password: "password123", newPassword: "a new password" });
@@ -622,6 +641,8 @@ describe("fingerprint unlock", () => {
     dom.window.__TAURI_INTERNALS__ = { invoke };
     return { asked };
   };
+  // What the unlock screen says beside its buttons, shown.
+  const notes = (body) => body.querySelectorAll(".auth-note").filter(isShown).map((n) => n.textContent);
 
   it("asks for the fingerprint by itself as the wallet opens, and unlocks with the password it kept", async () => {
     const { asked } = phone({ on: true });
@@ -666,7 +687,7 @@ describe("fingerprint unlock", () => {
     const { asked } = phone({ on: true, unlock: { ok: false, reason: "invalidated" } });
     const acts = actions();
     const body = show(lockedView({ state: {}, actions: acts }));
-    await vi.waitFor(() => expect(visibleText(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
+    await vi.waitFor(() => expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
     expect(isShown(outlineButton(body))).toBe(false);
     typeInto(unlockPassword(body), "typed password");
     mainButton(body).click();
@@ -681,7 +702,7 @@ describe("fingerprint unlock", () => {
     const { asked } = phone({ available: true, on: false, lost: true });
     const acts = actions();
     const body = show(lockedView({ state: {}, actions: acts }));
-    await vi.waitFor(() => expect(visibleText(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
+    await vi.waitFor(() => expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
     expect(isShown(outlineButton(body))).toBe(false);
     expect(asked.map(([action]) => action)).toEqual(["status"]);
     typeInto(unlockPassword(body), "typed password");
@@ -695,7 +716,7 @@ describe("fingerprint unlock", () => {
     const { asked } = phone({ available: false, on: false, lost: true });
     const acts = actions();
     const body = show(lockedView({ state: {}, actions: acts }));
-    await vi.waitFor(() => expect(visibleText(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
+    await vi.waitFor(() => expect(notes(body)).toContain(FINGERPRINTS_CHANGED_TEXT));
     typeInto(unlockPassword(body), "typed password");
     mainButton(body).click();
     await vi.waitFor(() => expect(asked.at(-1)).toEqual(["disable", undefined]));
@@ -708,7 +729,10 @@ describe("fingerprint unlock", () => {
     const body = show(lockedView({ state: {}, actions: acts }));
     await vi.waitFor(() => expect(asked.map(([action]) => action)).toContain("disable"));
     await settle();
-    expect(visibleText(body.querySelector("#unlock-error"))).not.toBe("");
+    // Said under the password: fingerprint unlock is off, not that a password typed is wrong.
+    const said = visibleText(body.querySelector("#unlock-error"));
+    expect(said).toMatch(/fingerprint/i);
+    expect(said).not.toBe(WRONG_PASSWORD_TEXT);
   });
 
   it("offers it beside a new wallet's password, and asks for the fingerprint once the wallet is made", async () => {

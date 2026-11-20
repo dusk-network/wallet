@@ -73,6 +73,10 @@ async function open(page, pending, { held = false } = {}) {
 // The approval's buttons, by their place in its bar rather than their words.
 const approveButton = (page) => page.locator("#approval-actions .btn-primary");
 const rejectButton = (page) => page.locator("#approval-actions .btn-outline");
+// A figure exactly as written, never the head or tail of a longer one (1.5 not in 11.5, 2,000,000 not in 12,000,000).
+const exactly = (text) => new RegExp(`(?<![\\d.,])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
+// A row's value, by its label.
+const rowValue = (page, label) => page.locator(".kv").filter({ has: page.locator(".kv-label", { hasText: new RegExp(`^${label}$`) }) }).locator(".kv-value");
 // The fold that holds the request's details, before any fold inside it.
 const detailsFold = (page) => page.locator("details.ap-details > summary").first();
 
@@ -113,7 +117,7 @@ test("what keeps Approve off is in view with it, under a long request", async ({
   const highFee = { ...pay, gas: { limit: "10000000", price: "50" }, feeFromSite: { limit: true, price: true } };
   await open(page, pendingFor("send_tx", highFee, { payBalance: "1000" }));
   const reason = page.locator(".pay-guard");
-  await expect(reason).toContainText("1.5 DUSK");
+  await expect(reason).toHaveText(exactly("1.5 DUSK"));
   await expect(approveButton(page)).toBeDisabled();
   expect(await inView(page, reason)).toBe(true);
   expect(await inView(page, rejectButton(page))).toBe(true);
@@ -149,7 +153,7 @@ test("a Review keeps Confirm, and what stops it, in view at the popup's size as 
 
   const confirm = page.locator("#app button.btn-primary");
   const reason = page.locator(".pay-guard");
-  await expect(reason).toContainText("0.0025 DUSK");
+  await expect(reason).toHaveText(exactly("0.0025 DUSK"));
   await expect(confirm).toBeDisabled();
   const scroller = page.locator(".panel-content");
   // It does go on under the fold.
@@ -185,12 +189,14 @@ test("a DuskEVM deposit shows what it does on top, and its bytes' hash under Det
   for (const locator of [page.locator(".ap-amount"), page.locator(".ap-tag"), recipient]) {
     expect(await inView(page, locator)).toBe(true);
   }
-  // The call data's hash, under Details.
-  const callData = page.getByText(/2f64b19f5ac0/);
+  // The call data's size and hash, under Details.
+  const callData = rowValue(page, "Call data");
   await expect(callData).toBeHidden();
   await detailsFold(page).click();
   await callData.scrollIntoViewIfNeeded();
   await expect(callData).toBeVisible();
+  await expect(callData).toHaveText(exactly("40 bytes"));
+  await expect(callData).toContainText("2f64b19f5ac0…731c7c2a");
   const [recipientY, callY] = await Promise.all([recipient.boundingBox(), callData.boundingBox()]).then((boxes) => boxes.map((b) => b.y));
   expect(recipientY).toBeLessThan(callY);
 });
@@ -215,11 +221,14 @@ test("a DRC20 standard transfer shows its exact amount and its recipient without
   await expect(page.locator(".ap-amount")).toHaveText("9,007,199.254740993 TKN");
   await expect(page.locator(".ap-recipient__lead")).toHaveText("wallet-both.dusk");
   await expect(page.locator(".ap-recipient__tag")).toContainText("WB shop");
-  // Its raw units, exactly, on the page.
-  await expect(page.getByText("9007199254740993", { exact: true })).toHaveCount(1);
   for (const locator of [page.locator(".ap-amount"), page.locator(".ap-recipient__lead"), approveButton(page)]) {
     expect(await inView(page, locator)).toBe(true);
   }
+  // Its raw units, exactly, in their row: on the main view or under Details.
+  const units = rowValue(page, "Units");
+  await expect(units).toHaveText("9007199254740993");
+  if (!(await units.isVisible())) await detailsFold(page).click();
+  await expect(units).toBeVisible();
 });
 
 test("a gas limit under the transaction's minimum, or a price of 0, keeps Approve off, saying why", async ({ page }) => {
@@ -228,17 +237,18 @@ test("a gas limit under the transaction's minimum, or a price of 0, keeps Approv
   const approve = approveButton(page);
   const error = page.locator("dusk-gas-editor .field-error").filter({ visible: true });
   await page.getByLabel("Gas limit", { exact: true }).fill("1500000");
-  await expect(error).toContainText("2,000,000");
+  await expect(error).toHaveText(exactly("2,000,000"));
   await expect(approve).toBeDisabled();
   await page.getByLabel("Gas limit", { exact: true }).fill("2000000");
   await page.getByLabel("Gas price (LUX)", { exact: true }).fill("0");
   await expect(error).toHaveCount(1);
-  await expect(error).not.toContainText("2,000,000");
+  // The floor: 1 LUX.
+  await expect(error).toHaveText(exactly("1 LUX"));
   await expect(approve).toBeDisabled();
   expect(await page.evaluate(() => window.decisions)).toEqual([]);
   await page.getByLabel("Gas price (LUX)", { exact: true }).fill("1");
   await expect(error).toHaveCount(0);
-  await expect(page.locator("dusk-gas-editor .gas-max")).toContainText("0.002 DUSK");
+  await expect(page.locator("dusk-gas-editor .gas-max")).toHaveText(exactly("0.002 DUSK"));
   await page.clock.runFor(500);
   await approve.click();
   await expect.poll(() => page.evaluate(() => window.decisions.map((d) => [d.decision, d.approvedParams?.gas?.limit]))).toEqual([

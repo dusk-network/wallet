@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { accessibleName, installFakeDom, settle, typeInto } from "../testing/fakeDom.js";
+import { accessibleName, installFakeDom, settle, typeInto, visibleText } from "../testing/fakeDom.js";
+import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
@@ -65,8 +66,13 @@ const menuItem = (dom, menu, text) =>
     .querySelectorAll(`${menu} [role=menuitemradio]`)
     .find((el) => el.querySelector(".net-menu-item-label").textContent === text);
 
-// What the stake's own screen says after a switch: nothing was sent, as the network or profile changed.
-const SWITCHED = /network|profile/i;
+// What the stake's own screen says after a switch: nothing was sent, as the network or profile changed, never as
+// the wallet locked.
+const saysSwitched = (app) => {
+  const text = app.querySelector(".sozu-notice")?.textContent ?? "";
+  expect(text).toMatch(/network|profile/i);
+  expect(text).not.toMatch(/lock/i);
+};
 
 // The popup on Testnet at the Review of a 100 DUSK stake, drafted on
 // Staking's Sozu screen, with the wallet answering as `answer` says.
@@ -156,9 +162,52 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     switched.resolve({ ...TESTNET, ...after });
     await flush();
     expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
-    expect(app.querySelector(".sozu-notice")?.textContent).toMatch(SWITCHED);
+    saysSwitched(app);
     expect(amount().value).toBe("100");
     expect(sent()).toEqual([]);
+  });
+
+  it("shows a stake with Sozu on Staking when it completes, with the screen left open", async () => {
+    const { dom, app } = popupPage();
+    vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
+    vi.resetModules();
+    const { send } = await import("../../wallet/bus.js");
+    const { state } = await import("./state.js");
+    const hash = "ab".repeat(32);
+    let completed = false;
+    send.mockReset();
+    send.mockImplementation(async (message) => {
+      switch (message.type) {
+        case "DUSK_UI_OVERVIEW":
+          return { ...TESTNET, txs: [{ hash, status: completed ? "executed" : "submitted", profileIndex: 0, asset: { kind: "sozu", action: "sozu_stake" } }] };
+        case "DUSK_UI_GET_SOZU_STATUS":
+          return { ok: true, result: { ...SOZU, position: completed ? { poolBalanceLux: "99749998", stDuskBalanceLux: "31800000" } : SOZU.position } };
+        case "DUSK_UI_GET_STAKE_OWNER_STATUS":
+          return { ok: true, result: { hasStake: false, profileIndex: 0, account: ACCOUNT, minimumStakeLux: "1000000000000", related: [] } };
+        case "DUSK_UI_GET_CACHED_GAS_PRICE":
+          return { min: "1", median: "1", max: "1" };
+        default:
+          return {};
+      }
+    });
+    // Staking's figure with Sozu, by its label, as written; and what Staking says of a stake on its way.
+    const withSozu = () => {
+      const label = app.querySelectorAll(".stake-sum .stake-lbl").find((el) => /sozu/i.test(visibleText(el)));
+      return label ? visibleText(label.parentNode.querySelector(".stake-big")) : undefined;
+    };
+    const caps = () => app.querySelectorAll(".stake-sum .stake-cap").map(visibleText).join(" ");
+    state.route = "stake";
+    const { render } = await import("./app.js");
+    await render();
+    await flush();
+    // On its way: said so, and no figure with Sozu yet.
+    expect([withSozu(), caps()]).toEqual([undefined, expect.stringMatching(/on its way/i)]);
+
+    // It completes while Staking is open: what's with Sozu shows, to its figure, and no longer as on its way.
+    completed = true;
+    dom.window.dispatchEvent(new CustomEvent(WALLET_MESSAGE_EVENT, { detail: { type: "DUSK_UI_TX_STATUS", hash, status: "executed" } }));
+    await vi.waitFor(() => expect(withSozu()).toBe("0.0997 DUSK"), { timeout: 2000 });
+    expect(caps()).not.toMatch(/on its way/i);
   });
 
   it("offers no Confirm on a Review left idle while the header switches to Profile 2, and sends nothing from Profile 1", async () => {
@@ -192,7 +241,7 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     expect(sent()).toEqual([]);
     expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
     expect(confirm()).toBeUndefined();
-    expect(app.querySelector(".sozu-notice")?.textContent).toMatch(SWITCHED);
+    saysSwitched(app);
     expect(amount().value).toBe("100");
   });
 

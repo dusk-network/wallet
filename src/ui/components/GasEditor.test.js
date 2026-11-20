@@ -15,6 +15,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+// A figure exactly as written, never the head or tail of a longer one (0.005 not in 10.005, 2,000,000 not in 12,000,000).
+const exactly = (text) => new RegExp(`(?<![\\d.,])${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
+// The fee's value and the total's (or what comes back), each in its own element.
+const feeValue = (editor) => visibleText(editor.querySelector(".gas-fee-value"));
+const totalValue = (editor) => visibleText(editor.querySelector(".gas-total-value"));
+
 // A 1 DUSK public transfer's fee, as Review draws it: the node asks 2 LUX.
 async function feeEditor({ stats = { min: "1", median: "2", max: "5" }, gas = null } = {}) {
   const editor = dom.document.createElement("dusk-gas-editor");
@@ -25,51 +31,54 @@ async function feeEditor({ stats = { min: "1", median: "2", max: "5" }, gas = nu
   await settle();
   const field = (name) => editor.querySelectorAll("input").find((i) => accessibleName(i) === name);
   const fee = () => visibleText(editor.querySelector(".gas-fee"));
-  return { editor, field, fee, send };
+  return { editor, field, fee, send, feeIs: () => feeValue(editor), totalIs: () => totalValue(editor) };
 }
 
 describe("fee editor", () => {
   it("uses the network's gas price", async () => {
-    const { editor, fee, send } = await feeEditor();
+    const { editor, send, feeIs, totalIs } = await feeEditor();
     expect(send).toHaveBeenCalledWith({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
-    expect(fee()).toMatch(/0\.005 DUSK[\s\S]*1\.005 DUSK/);
+    expect(feeIs()).toMatch(exactly("0.005 DUSK"));
+    expect(totalIs()).toMatch(exactly("1.005 DUSK"));
     expect(editor.readFinalGas()).toEqual({ limit: "2500000", price: "2" });
   });
 
   it("warns under the transaction's minimum gas limit while it's typed, and refuses it", async () => {
-    const { editor, field, fee } = await feeEditor();
+    const { editor, field, feeIs, totalIs } = await feeEditor();
     const limit = field("Gas limit");
     const error = editor.querySelector(".field-error");
     typeInto(limit, "1500000");
     expect(isShown(error)).toBe(true);
-    expect(error.textContent).toMatch(/2,000,000/);
-    expect(() => editor.readFinalGas()).toThrow(/2,000,000/);
+    expect(error.textContent).toMatch(exactly("2,000,000"));
+    expect(() => editor.readFinalGas()).toThrow(exactly("2,000,000"));
 
     typeInto(limit, "3000000");
     expect(isShown(error)).toBe(false);
-    expect(fee()).toMatch(/0\.006 DUSK[\s\S]*1\.006 DUSK/);
+    expect(feeIs()).toMatch(exactly("0.006 DUSK"));
+    expect(totalIs()).toMatch(exactly("1.006 DUSK"));
   });
 
   it("shows what the gas comes to in DUSK under the fields, exactly", async () => {
     const { editor, field } = await feeEditor();
     const max = () => editor.querySelector(".gas-max");
     expect(isShown(max())).toBe(true);
-    expect(visibleText(max())).toMatch(/\b0\.005 DUSK/);
+    expect(visibleText(max())).toMatch(exactly("0.005 DUSK"));
     typeInto(field("Gas limit"), "2840001");
     typeInto(field("Gas price (LUX)"), "1");
-    expect(visibleText(max())).toMatch(/\b0\.002840001 DUSK/);
+    expect(visibleText(max())).toMatch(exactly("0.002840001 DUSK"));
     // Nothing to add up without both.
     typeInto(field("Gas price (LUX)"), "");
     expect(isShown(max())).toBe(false);
   });
 
   it("refuses a price of 0, and shows no fee or total for gas that won't do", async () => {
-    const { editor, field, fee } = await feeEditor();
+    const { editor, field, fee, feeIs, totalIs } = await feeEditor();
     const price = field("Gas price (LUX)");
     typeInto(price, "0");
     const error = dom.document.getElementById(price.getAttribute("aria-describedby"));
     expect(isShown(error)).toBe(true);
-    expect(error.textContent).not.toBe("");
+    // The floor: 1 LUX.
+    expect(error.textContent).toMatch(exactly("1 LUX"));
     // No fee or total, no figure at all.
     expect(fee()).not.toMatch(/\d/);
     expect(editor.error).not.toBe("");
@@ -83,7 +92,8 @@ describe("fee editor", () => {
     expect(fee()).not.toMatch(/\d/);
     typeInto(field("Gas limit"), "2500000");
     expect(editor.error).toBe("");
-    expect(fee()).toMatch(/0\.0025 DUSK[\s\S]*1\.0025 DUSK/);
+    expect(feeIs()).toMatch(exactly("0.0025 DUSK"));
+    expect(totalIs()).toMatch(exactly("1.0025 DUSK"));
   });
 
   it("tells the page the most the gas comes to as it changes, and none while it won't do", async () => {
@@ -129,7 +139,7 @@ describe("fee editor", () => {
     const limit = editor.querySelectorAll("input").find((i) => accessibleName(i) === "Gas limit");
 
     typeInto(limit, "1500000");
-    expect(() => editor.readOverrideGas(base)).toThrow(/2,000,000/);
+    expect(() => editor.readOverrideGas(base)).toThrow(exactly("2,000,000"));
     typeInto(limit, "2000000");
     expect(editor.readOverrideGas(base)).toEqual({ gas: { limit: "2000000" } });
     typeInto(limit, "2500000");
@@ -143,20 +153,20 @@ describe("fee editor", () => {
     editor.amountLux = "100000000";
     editor.setGas({ limit: "10000000", price: "1" });
     dom.document.body.appendChild(editor);
-    const rows = () => editor.querySelectorAll(".gas-fee .kv").filter(isShown).map(visibleText);
-    // The fee, then the 0.1 DUSK coming back: never fee and amount added up.
+    const rows = () => editor.querySelectorAll(".gas-fee .kv").filter(isShown);
+    // The fee, and the 0.1 DUSK coming back in its own row: never fee and amount added up (0.11).
     expect(rows()).toHaveLength(2);
-    expect(rows()[0]).toMatch(/\b0\.01 DUSK/);
-    expect(rows()[1]).toMatch(/\b0\.1 DUSK/);
+    expect(feeValue(editor)).toMatch(exactly("0.01 DUSK"));
+    expect(totalValue(editor)).toMatch(exactly("0.1 DUSK"));
     // Gas that won't do has no fee; what comes back is the same.
     typeInto(editor.querySelectorAll("input").find((i) => accessibleName(i) === "Gas price (LUX)"), "0");
-    expect(rows()[0]).not.toMatch(/\d/);
-    expect(rows()[1]).toMatch(/\b0\.1 DUSK/);
+    expect(feeValue(editor)).not.toMatch(/\d/);
+    expect(totalValue(editor)).toMatch(exactly("0.1 DUSK"));
     // Hidden as the balance it is.
     editor.hideTotal = true;
     editor.amountLux = "100000000";
-    expect(rows()[1]).toMatch(/•••• DUSK/);
-    expect(rows()[1]).not.toMatch(/0\.1/);
+    expect(totalValue(editor)).toMatch(/•••• DUSK/);
+    expect(totalValue(editor)).not.toMatch(/\d/);
     editor.amountLux = "0";
     expect(rows()).toHaveLength(1);
   });
@@ -167,7 +177,8 @@ describe("fee editor", () => {
     // 0.001840001 DUSK at most: 0.0018 to the nearest would read lower.
     editor.setGas({ limit: "1840001", price: "1" });
     dom.document.body.appendChild(editor);
-    expect(visibleText(editor.querySelector(".gas-fee"))).toMatch(/0\.0019 DUSK[\s\S]*1\.0019 DUSK/);
+    expect(feeValue(editor)).toMatch(exactly("0.0019 DUSK"));
+    expect(totalValue(editor)).toMatch(exactly("1.0019 DUSK"));
   });
 
   it("goes back to the network's price from a custom one", async () => {

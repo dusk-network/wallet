@@ -2,6 +2,9 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
+// A figure as written, whole: 765,44 TKN is no 1.765,44 TKN, 76.55 TKN no 176.55 TKN.
+const exactly = (s) => new RegExp(`(?<![\\d.,])${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`);
+
 describe("assets view", () => {
   it("passes token data-driver hints through balance, encode, and tx metadata paths", async () => {
     const source = await readFile(
@@ -38,7 +41,7 @@ describe("tokens and NFTs after a switch to another wallet, on the same network 
     const ov = (wallet) => ({ isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [wallet], selectedAccountIndex: 0 });
     const rows = (state, wallet) => {
       document.body.replaceChildren(...assetsSectionsView(ov(wallet), { state, actions }));
-      return document.body.querySelectorAll(".asset-row").map(visibleText);
+      return document.body.querySelectorAll(".asset-row");
     };
 
     // Wallet A's token, read and shown; then wallet B's screen shows none of it.
@@ -46,10 +49,10 @@ describe("tokens and NFTs after a switch to another wallet, on the same network 
     rows(state, "wallet-a");
     reads.shift().resolve({ result: walletA });
     await settle();
-    // Its balance, read as the row shows.
+    // Its balance, read as the row shows: in the row's amount, with the token's symbol.
     rows(state, "wallet-a");
     await settle();
-    expect(rows(state, "wallet-a")).toEqual([expect.stringMatching(/123\.45 TKN/)]);
+    expect(rows(state, "wallet-a").map((row) => visibleText(row.querySelector(".asset-amt")))).toEqual(["123.45 TKN"]);
     expect(rows(state, "wallet-b")).toEqual([]);
 
     // A read for wallet A still on its way when wallet B opens.
@@ -109,7 +112,7 @@ describe("sending a token from its page", () => {
     document.body.replaceChildren(...assetTokenConfirmView(ov, { state, actions }));
     await settle();
     // How much the public balance is short of the fee.
-    expect(document.body.querySelector(".pay-guard").textContent).toMatch(/0\.5 DUSK/);
+    expect(document.body.querySelector(".pay-guard").textContent).toMatch(exactly("0.5 DUSK"));
     expect(document.body.querySelector(".pay-guard").textContent).toMatch(/public/);
     // Its Confirm, whatever it says: the one button at the Review's end.
     expect(document.body.querySelector(".review-actions button").disabled).toBe(true);
@@ -120,7 +123,7 @@ describe("sending a token from its page", () => {
     const { document } = globalThis;
     expect(document.body.querySelector(".asset-token-balance-value").textContent).toBe("1.234,56 TKN");
     await press("Review transfer");
-    expect(document.body.querySelector(".asset-action-section .field-error").textContent).toMatch(/765,44 TKN/);
+    expect(document.body.querySelector(".asset-action-section .field-error").textContent).toMatch(exactly("765,44 TKN"));
     const { vi } = await import("vitest");
     vi.unstubAllGlobals();
   });
@@ -131,7 +134,7 @@ describe("sending a token from its page", () => {
     expect(state.route).toBe("asset_token");
     expect(send.mock.calls.map(([m]) => m.type)).not.toContain("DUSK_UI_DRC20_ENCODE_INPUT");
     const { document } = globalThis;
-    expect(document.body.querySelector(".asset-action-section .field-error").textContent).toMatch(/76\.55 TKN/);
+    expect(document.body.querySelector(".asset-action-section .field-error").textContent).toMatch(exactly("76.55 TKN"));
   });
 
   it("asks the engine for the token's own call, and reviews what it asked", async () => {
@@ -177,7 +180,7 @@ describe("sending a token from its page", () => {
     const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn() };
     document.body.replaceChildren(...assetTokenConfirmView(ov, { state, actions }));
     await settle();
-    expect(document.body.querySelector(".review-head").textContent).toContain("1.234567891");
+    expect(document.body.querySelector(".review-head .balance-amount").textContent).toBe("1.234567891 TKN");
     vi.unstubAllGlobals();
   });
 
@@ -229,14 +232,16 @@ describe("a token send's Review", () => {
     });
     // A local node: no .dusk names, so the profile shows by its label.
     const ov = (wallets) => ({ isUnlocked: true, nodeUrl: "http://127.0.0.1:8080", accounts: ["acct"], selectedAccountIndex: 0, wallets });
-    const rows = (o) => {
+    // What the Review's From row says, or null where it has none.
+    const from = (o) => {
       const state = { route: "asset_token_confirm", assetTxDraft: draft() };
       const actions = { send: vi.fn(async () => ({})), render: vi.fn(async () => {}), showToast: vi.fn(), review: reviewOf(o, state) };
       document.body.replaceChildren(...assetTokenConfirmView(o, { state, actions }));
-      return document.body.querySelectorAll(".asset-review > .group > .kv").map(visibleText);
+      const row = document.body.querySelectorAll(".asset-review .kv").find((kv) => visibleText(kv.querySelector(".kv-label")) === "From");
+      return row ? visibleText(row.querySelector(".kv-value")) : null;
     };
-    expect(rows(ov([{ key: "w1", n: 1, active: true }, { key: "w2", n: 2 }])).find((r) => r.startsWith("From"))).toMatch(/Wallet 1.*Profile 1/);
-    expect(rows(ov([{ key: "w1", n: 1, active: true }])).filter((r) => r.startsWith("From"))).toEqual([]);
+    expect(from(ov([{ key: "w1", n: 1, active: true }, { key: "w2", n: 2 }]))).toBe("Wallet 1 · Profile 1");
+    expect(from(ov([{ key: "w1", n: 1, active: true }]))).toBeNull();
   });
 
   // Lena's, three rounds: the default followed the mempool's median, which one transaction waiting alone at 2 made

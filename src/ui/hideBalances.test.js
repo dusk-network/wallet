@@ -4,7 +4,9 @@ import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
 import { installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { shortfallText } from "./lib/shortfall.js";
+import { assetTokenView, assetsOwner, assetsSectionsView } from "./popup/views/assets.js";
 import { convertConfirmView, convertFormView } from "./popup/views/convert.js";
+import { homeView } from "./popup/views/home.js";
 import { sendConfirmView, sendFormView } from "./popup/views/send.js";
 import { sozuConfirmView } from "./popup/views/sozu.js";
 import { stakeConfirmView, stakeFormView } from "./popup/views/stake.js";
@@ -16,6 +18,7 @@ const ACCOUNT =
 const OTHER_ACCOUNT =
   "21n5ncyuJkRr9JRoxvWRLMcqcWxmVSSLdefDMTwQeNyZZikU5dcXuawf9kNuG1CxFvz32oBM965PQ2PCcWrwX8YX9a7fqaaQ6fabDhxW5mveEyAt4LgdY3KLH9iKtSfMMLNz";
 const ADDRESS = "2Ana1pUpv2ZbMVkwF5FXapYeBEjdxDatLn7nvJkhgTSXbs59SyZSx866bXirPgj8QQVB57uxHJBG1YFvkRbFj4T";
+const TOKEN = `0x${"cd".repeat(32)}`;
 const NODE = "https://testnet.nodes.dusk.network";
 const dusk = (n) => (BigInt(n) * 1_000_000_000n).toString();
 
@@ -37,6 +40,18 @@ const overview = (over = {}) => ({
 const HIDDEN = { hideBalances: true };
 // What a form says under its amount where the public balance can't pay it, its figure hidden whatever it is.
 const TOO_MUCH = shortfallText({ missingLux: 1n, hidden: true });
+
+// The watched token, 123.45 TKN, with its balance just read.
+const assets = () => ({
+  owner: assetsOwner(overview()),
+  loaded: true,
+  loading: false,
+  updatedAt: Date.now(),
+  tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }],
+  nfts: [],
+  balances: { [TOKEN]: "12345" },
+  balancesAt: { [TOKEN]: Date.now() },
+});
 
 let dom;
 let body;
@@ -64,11 +79,70 @@ async function show(nodes) {
 }
 
 const button = (text) => body.querySelectorAll("button").find((b) => b.textContent === text);
-// A balance with balances hidden: dots, and no figure, to the eyes or to screen readers.
+// A value on its own in a sentence: no digit, point or comma before it, no digit after it.
+const exactly = (s) => new RegExp(`(?<![\\d.,])${s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?!\\d)`);
+// Everything a screen gives away: all its text, shown or not, and each element's title and aria-label.
+const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
+// None of these figures anywhere on the screen.
+const nowhere = (...figures) => {
+  for (const figure of figures) expect(everything(body), figure).not.toMatch(exactly(figure));
+};
+// A balance with balances hidden: dots, no figure to the eyes or to screen readers, and no tooltip.
 const hides = (el) => {
   expect(visibleText(el)).toContain("••••");
   expect([visibleText(el), screenReaderText(el)].join(" ")).not.toMatch(/\d/);
+  expect(el.getAttribute("title")).toBeNull();
 };
+// A field's row on a page, by its label.
+const fieldRow = (label) => body.querySelectorAll(".kv").find((kv) => visibleText(kv.querySelector(".kv-label")) === label);
+
+describe("Hide balances", () => {
+  it("hides the dashboard's balances behind the eye beside Refresh, and shows them again", async () => {
+    const state = { route: "home", overview: overview(), addressBook: { loaded: true, items: [] }, assets: assets() };
+    const act = actions();
+    const draw = () => show(homeView(state.overview, { state, actions: act }));
+    act.render.mockImplementation(draw);
+    const eye = () => body.querySelector(".balance-label button.balance-eye");
+    // The total, each part of it by its label, the token and what Activity says was sent.
+    const item = (label) => body.querySelectorAll(".balance-split-item").find((el) => label.test(visibleText(el.querySelector(".balance-split-label"))));
+    const balances = () => ({
+      total: body.querySelector(".home-hero .balance-amount"),
+      public: item(/^public/i).querySelector(".balance-split-value"),
+      shielded: item(/^shielded/i).querySelector(".balance-split-value"),
+      token: body.querySelector(".asset-amt"),
+      activity: body.querySelector(".tx-amount"),
+    });
+    // Each as the eyes see it, as screen readers say it, and its tooltip; and what the shielded balance holds back.
+    const read = () => ({
+      ...Object.fromEntries(Object.entries(balances()).map(([name, el]) => [name, [visibleText(el), screenReaderText(el), el.getAttribute("title")]])),
+      reserved: item(/^shielded/i).querySelector(".balance-split-label").getAttribute("title"),
+    });
+
+    await draw();
+    expect(read()).toEqual({
+      total: ["1,507.9383 DUSK", "1,507.9383 DUSK", "1,507.9383"],
+      public: ["1,482.9383 DUSK", "1,482.9383 DUSK", "1,482.9383"],
+      shielded: ["25 DUSK", "25 DUSK", "25"],
+      token: ["123.45 TKN", "123.45 TKN", null],
+      activity: ["−1 DUSK", "−1 DUSK", null],
+      reserved: expect.stringMatching(exactly("5 DUSK")),
+    });
+
+    eye().click();
+    await settle();
+    expect(act.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: true });
+    expect([state.hideBalances, state.overview.hideBalances]).toEqual([true, true]);
+    // Each hidden, with no tooltip to give it away, the shielded amount held back included; nor anywhere else.
+    for (const el of Object.values(balances())) hides(el);
+    expect(read().reserved).toBeNull();
+    nowhere("1,507.9383", "1507.9383", "1,482.9383", "1482.9383", "123.45", "12345", "25 DUSK", "5 DUSK");
+
+    eye().click();
+    await settle();
+    expect(act.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: false });
+    expect(read().total).toEqual(["1,507.9383 DUSK", "1,507.9383 DUSK", "1,507.9383"]);
+  });
+});
 
 describe("hidden balances", () => {
   it("hide what Send has available after fees, while Max fills in the real amount", async () => {
@@ -81,8 +155,9 @@ describe("hidden balances", () => {
     typeInto(to, OTHER_ACCOUNT);
     await settle();
     hides(body.querySelector(".amount-avail__text"));
+    nowhere("1,482.9358", "1482.9358", "1,482.9383", "1482.9383");
     // The fee isn't a balance.
-    expect(body.querySelector(".amount-fee-note").textContent).toMatch(/0\.0025 DUSK/);
+    expect(body.querySelector(".amount-fee-note").textContent).toMatch(exactly("up to 0.0025 DUSK"));
     max().click();
     expect(amount.value).toBe("1482.9358");
 
@@ -90,7 +165,7 @@ describe("hidden balances", () => {
     typeInto(to, ADDRESS);
     await settle();
     hides(body.querySelector(".amount-avail__text"));
-    expect(body.querySelector(".amount-fee-note").textContent).toMatch(/0\.05 DUSK/);
+    expect(body.querySelector(".amount-fee-note").textContent).toMatch(exactly("up to 0.05 DUSK"));
     max().click();
     expect(amount.value).toBe("19.95");
 
@@ -103,7 +178,8 @@ describe("hidden balances", () => {
     const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
     await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
     hides(body.querySelector(".amount-avail__text"));
-    expect(visibleText(body.querySelector(".amount-fee-note"))).toMatch(/0\.05 DUSK/);
+    nowhere("1,482.8883", "1482.8883", "1,482.9383", "1482.9383");
+    expect(visibleText(body.querySelector(".amount-fee-note"))).toMatch(exactly("up to 0.05 DUSK"));
     body.querySelector(".amount-avail button").click();
     expect(body.querySelector("input.amount-field__input").value).toBe("1482.8883");
 
@@ -117,7 +193,31 @@ describe("hidden balances", () => {
     state.draft = { kind: TX_KIND.UNSHIELD };
     await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
     hides(body.querySelector(".amount-avail__text"));
-    expect(visibleText(body.querySelector(".amount-fee-note"))).toMatch(/0\.05 DUSK/);
+    nowhere("19.95", "25 DUSK");
+    expect(visibleText(body.querySelector(".amount-fee-note"))).toMatch(exactly("up to 0.05 DUSK"));
+  });
+
+  it("hide token balances on the dashboard and on the token's page", async () => {
+    const state = { route: "asset_token", assets: assets(), assetTokenContractId: TOKEN };
+    await show(assetsSectionsView(overview(HIDDEN), { state, actions: actions() }));
+    hides(body.querySelector(".asset-amt"));
+    nowhere("123.45", "12345");
+
+    await show(assetTokenView(overview(HIDDEN), { state, actions: actions() }));
+    hides(body.querySelector(".asset-token-balance-value"));
+    // Its atomic units too, which say it as well.
+    hides(fieldRow("Atomic units").querySelector(".kv-value"));
+    nowhere("123.45", "12345", "12,345");
+
+    await show(assetTokenView(overview(), { state, actions: actions() }));
+    expect(visibleText(body.querySelector(".asset-token-balance-value"))).toBe("123.45 TKN");
+    expect(visibleText(fieldRow("Atomic units").querySelector(".kv-value"))).toBe("12345");
+    // Its contract as every Dusk app writes one, without the 0x the wallet keeps it with: short, and copied in full.
+    const contract = fieldRow("Contract");
+    expect(visibleText(contract.querySelector(".mono"))).toBe("cdcdcd…cdcdcd");
+    contract.querySelector("button").click();
+    await settle();
+    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith("cd".repeat(32));
   });
 
   it("hide Stake's balance, staked amounts and rewards, while Max and the balance check use the real ones", async () => {
@@ -152,6 +252,7 @@ describe("hidden balances", () => {
     const state = { route: "stake", staking: staking(owner(), "native") };
     await draw(state);
     hides(body.querySelector(".amount-avail span"));
+    nowhere("1,482.9383", "1482.9383", "1,482.8383", "1482.8383");
     button("Max").click();
     expect(state.staking.stakeAmountDusk).toBe("1482.8383");
 
@@ -182,32 +283,33 @@ describe("hidden balances", () => {
     big.forEach(hides);
     hides(body.querySelector(".stake-sum .stake-cap"));
     hides(body.querySelector(".stake-avail"));
+    nowhere("2,000", "2000", "42", "1,482.9383", "1482.9383");
   });
 });
 
 describe("still shown with balances hidden", () => {
   it("the amount, fee and total of the transaction under review", async () => {
-    const amountOf = () => body.querySelector(".balance-amount").textContent;
-    // The fee, then the total.
-    const fee = () => body.querySelectorAll("dusk-gas-editor .gas-fee .kv-value").map((value) => value.textContent).join("\n");
+    // The amount, then the fee and the total, each from its own field.
+    const review = () => [
+      body.querySelector(".balance-amount").textContent,
+      body.querySelector("dusk-gas-editor .gas-fee-value").textContent,
+      body.querySelector("dusk-gas-editor .gas-total-value").textContent,
+    ];
 
     let state = { route: "confirm", draft: { to: OTHER_ACCOUNT, privacy: "public", amountDusk: "1.5", amountLux: "1500000000", memo: "" } };
     await show(sendConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect(amountOf()).toBe("1.5 DUSK");
-    expect(fee()).toMatch(/0\.0025 DUSK[\s\S]*1\.5025 DUSK/);
+    expect(review()).toEqual(["1.5 DUSK", "up to 0.0025 DUSK", "up to 1.5025 DUSK"]);
 
     state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: dusk(2), amountDusk: "2" } };
     await show(convertConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect(amountOf()).toBe("2 DUSK");
-    expect(fee()).toMatch(/0\.05 DUSK[\s\S]*2\.05 DUSK/);
+    expect(review()).toEqual(["2 DUSK", "up to 0.05 DUSK", "up to 2.05 DUSK"]);
 
     state = {
       route: "stake_confirm",
       stakeDraft: { kind: TX_KIND.STAKE, stakeProfileIndex: 0, profileIndex: 0, ownerProfileIndex: 0, amountLux: dusk(1000), payment: "account" },
     };
     await show(stakeConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect(amountOf()).toBe("1,000 DUSK");
-    expect(fee()).toMatch(/0\.05 DUSK[\s\S]*1,000\.05 DUSK/);
+    expect(review()).toEqual(["1,000 DUSK", "up to 0.05 DUSK", "up to 1,000.05 DUSK"]);
 
     state = {
       route: "sozu_confirm",
@@ -222,7 +324,6 @@ describe("still shown with balances hidden", () => {
       },
     };
     await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));
-    expect(amountOf()).toBe("10 DUSK");
-    expect(fee()).toMatch(/0\.005 DUSK[\s\S]*10\.005 DUSK/);
+    expect(review()).toEqual(["10 DUSK", "up to 0.005 DUSK", "up to 10.005 DUSK"]);
   });
 });

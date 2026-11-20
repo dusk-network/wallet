@@ -171,6 +171,8 @@ const panel = () => body().querySelector("#activity-export");
 // Export, and Save CSV, its panel's one button: by where they are, not their words.
 const exportToggle = () => body().querySelector(".activity-export-toggle");
 const saveCsv = () => panel().querySelector("button");
+// A value whole, as a number reads: no digit, point or comma just before it, nor a digit just after (1 isn't 11).
+const exactly = (value) => new RegExp(`(?<![\\d.,])${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\d])`);
 const fieldError = () => panel().querySelectorAll(".field-error").filter(isShown).map((el) => el.textContent).join("");
 
 // The file saved, by its columns' names.
@@ -224,8 +226,9 @@ describe("Activity's Export", () => {
       Memo: "Factura 33, abril",
     });
     expect(lines.map((l) => l.Date)).toEqual([...lines.map((l) => l.Date)].sort());
-    // Saved, and how many lines it has.
-    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(new RegExp(`\\b${lines.length}\\b`));
+    // Saved, and how many lines it has; with the shielded activity synced, nothing said of it still coming.
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(exactly(String(lines.length)));
+    expect(actions.showToast.mock.calls.at(-1)[0]).not.toMatch(/shielded/i);
   });
 
   it("marks a transfer between the person's own profiles, which isn't income", async () => {
@@ -450,7 +453,7 @@ describe("Activity's Export", () => {
     await settle();
     const said = actions.showToast.mock.calls.at(-1)[0];
     // The one line left out, and the shielded activity still to come.
-    expect(said).toMatch(/\b1\b/);
+    expect(said).toMatch(exactly("1"));
     expect(said).toMatch(/shielded/i);
   });
 
@@ -488,7 +491,7 @@ describe("Activity's Export", () => {
     expect(lines.find((l) => l.TxHash === "c1".repeat(32))).toMatchObject({ "Net Worth Amount": "0.62500000", "Net Worth Currency": "EUR" });
     // No price near that time: its columns stay empty, and it says how many lines have none.
     expect(lines.find((l) => l.TxHash === "c2".repeat(32))).toMatchObject({ "Net Worth Amount": "", "Net Worth Currency": "" });
-    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(/\b2\b/);
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(exactly("2"));
     for (const url of asked) {
       expect(url).toContain("https://api.coingecko.com/api/v3/coins/dusk-network/market_chart/range?vs_currency=eur&from=");
       expect(url).not.toContain(ACCOUNT);
@@ -604,7 +607,7 @@ describe("Activity's Export", () => {
     expect(chain).not.toHaveBeenCalled();
     // Its one line, and no fees said to be in the file from that address.
     const told = stranger.actions.showToast.mock.calls.at(-1)[0];
-    expect(told).toMatch(/\b1\b/);
+    expect(told).toMatch(exactly("1"));
     expect(told).not.toContain(shortEvmAddress(owner));
 
     // From the address the profile bridged DUSK to before: booked.
@@ -625,7 +628,7 @@ describe("Activity's Export", () => {
     expect(paidThere(down.lines)).toEqual([]);
     expect(down.lines.find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
     // The one migration's fee missing, on its chain, and no fees said to be in the file.
-    expect(down.toast).toMatch(/\b1\b/);
+    expect(down.toast).toMatch(exactly("1"));
     expect(down.toast).toContain("BNB Smart Chain");
     expect(down.toast).not.toContain(shortEvmAddress(owner));
     // Nor its approvals and revokes there, or on Ethereum: maybe in another profile's file.
@@ -638,7 +641,8 @@ describe("Activity's Export", () => {
       [approval, "0.0000023109", "cost", "BNB Smart Chain", owner],
       [migration, "0.00000243765", "cost", "BNB Smart Chain", owner],
     ]);
-    // Nothing said to be in another profile's file.
+    // Nothing said to be unread, nor in another profile's file.
+    expect(up.toast).not.toMatch(/\bread\b/);
     expect(up.toast).not.toMatch(/profile/);
     // Nandini's: it named none of the EVM addresses whose fees it has. And how far back its approvals were read, on their chain.
     expect(up.toast).toContain(shortEvmAddress(owner));
@@ -652,18 +656,21 @@ describe("Activity's Export", () => {
     const booked = up.lines.filter((l) => l["Sent Currency"] === "BNB").reduce((sum, l) => sum + wei(l["Sent Amount"]), 0n);
     const detailState = { route: "tx", txDetailHash: payout.hash, txDetailFrom: "activity", addressBook: { loaded: true, items: [] } };
     const tx = { hash: payout.hash, nodeUrl: MAINNET, status: "executed", kind: TX_KIND.TRANSFER, direction: "in", from: route.payoutAccount, amount: payout.value, memo: migration };
-    // The details' row of what it paid on BNB Smart Chain, in BNB.
+    // The details' fee on BNB Smart Chain, its row found by its label: the amount alone, apart from what it counts.
     const detailFee = () => {
       dom.document.body.replaceChildren(...txDetailsView({ ...ov, txs: [tx] }, { state: detailState, actions: { render: async () => {}, showToast: vi.fn() } }));
-      return body()
+      const row = body()
         .querySelectorAll(".tx-detail > .group > .kv")
-        .map(visibleText)
-        .find((row) => row.includes("BNB Smart Chain") && /\d BNB\b/.test(row));
+        .find((kv) => {
+          const label = kv.querySelector(".kv-label").textContent;
+          return label.includes(route.chain.name) && /fee/i.test(label);
+        });
+      return row?.querySelector(".kv-value > span").childNodes.filter((node) => node.nodeType === 3).map((node) => node.data).join("");
     };
     detailFee();
     await vi.waitFor(() => expect(detailFee()).toBeDefined());
-    expect(detailFee()).toMatch(/0\.00000474855 BNB\b/);
-    expect(booked).toBe(wei("0.00000474855"));
+    expect(detailFee()).toBe("0.00000474855 BNB");
+    expect(booked).toBe(wei(detailFee().split(" ")[0]));
 
     // An address the profile sent DUSK to on DuskEVM is the person's too.
     page("/full.html");
@@ -792,9 +799,10 @@ describe("Activity's Export", () => {
     expect([first.byHash[revoke].Description, first.byHash[unused].Description]).toEqual(["Network fee on BNB Smart Chain: approval for migrations to Dusk revoked", "Network fee on BNB Smart Chain: approval for a migration to Dusk, not used yet"]);
     // A transfer out to BNB Smart Chain sends what reached it there, and pays the bridge's fee with the network's.
     expect(first.byHash[toOther.hash]).toMatchObject({ "Sent Amount": "1", "Sent Currency": "DUSK", "Fee Amount": "1.00185", Description: `To BNB Smart Chain, bridge fee 1 DUSK · ${other}` });
-    // The addresses whose fees the file has: both.
+    // The addresses whose fees the file has: both; and whose file each is, known: none said to be another profile's.
     expect(first.toast).toContain(shortEvmAddress(owner));
     expect(first.toast).toContain(shortEvmAddress(other));
+    expect(first.toast).not.toMatch(/profile/);
 
     // Profile 2 bridged to it first: Profile 2's file has it, and this one doesn't.
     memoIndex([
@@ -805,6 +813,7 @@ describe("Activity's Export", () => {
     expect(second.lines).toEqual(owners);
     expect(second.toast).toContain(shortEvmAddress(owner));
     expect(second.toast).not.toContain(shortEvmAddress(other));
+    expect(second.toast).not.toMatch(/profile/);
 
     // Whose it is can't be read: in no file, and the toast says it may be in another profile's.
     memoIndex(new Error("archive down"));

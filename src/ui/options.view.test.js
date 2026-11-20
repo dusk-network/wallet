@@ -75,6 +75,17 @@ async function settings(over = {}, { app = false } = {}) {
 const mainButton = (root) => root.querySelectorAll("button.btn-primary, button.btn-destructive").find(isShown);
 // The errors a screen shows.
 const shownErrors = (root) => root.querySelectorAll(".field-error").filter(isShown).map((el) => el.textContent).filter(Boolean);
+// The error shown under a field, as the field is described by it.
+const errorOf = (field) =>
+  (field.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((id) => dom.document.getElementById(id))
+    .filter((el) => el?.classList.contains("field-error") && isShown(el))
+    .map((el) => el.textContent)
+    .join("");
+// `text` exactly: no digit, point or comma just before it, nor a digit just after (0.0025 isn't 10.0025).
+const exactly = (text) => new RegExp("(?<![\\d.,])" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\d])");
 // A site's row in Settings, connected or earlier, by its host.
 const siteRow = (host) => dom.document.body.querySelectorAll(".settings-site").find((row) => visibleText(row.querySelector(".settings-site__host")) === host);
 // The row in Security that opens `route`, whatever it's called: each row pressed until one does.
@@ -114,11 +125,12 @@ describe("profile names", () => {
       const id = label(2).getAttribute("aria-describedby");
       return id ? dom.document.getElementById(id).textContent : "";
     };
-    typeInto(label(2), "‮ecilA");
+    typeInto(label(2), "\u202eecilA");
     label(2).dispatchEvent(fakeEvent("blur"));
     await settle();
     expect(setAccountName).not.toHaveBeenCalled();
-    expect(shownError()).not.toBe("");
+    // Refused for what it hides.
+    expect(shownError()).toMatch(/hidden/i);
     expect(view.actions.showToast).not.toHaveBeenCalled();
 
     typeInto(label(2), "Savings");
@@ -149,15 +161,15 @@ describe("profile names", () => {
       [1, "Profile 2", "Profile 2"],
       // Sofía's: the first profile by its own name too, and its .dusk name in look-alike letters (a Cyrillic а).
       [2, "Profile 1", "Profile 1"],
-      [2, "аlice.dusk", "alice.dusk"],
+      [2, "\u0430lice.dusk", "alice.dusk"],
       [2, "Marta", "Marta"],
       // A Cyrillic М.
-      [2, "Мarta", "Marta"],
+      [2, "\u041carta", "Marta"],
     ]) {
       typeInto(label(n), typed);
       label(n).dispatchEvent(fakeEvent("blur"));
       await settle();
-      expect(shownError(n), typed).toContain(whose);
+      expect(shownError(n), typed).toMatch(exactly(whose));
     }
     expect(setAccountName).not.toHaveBeenCalled();
 
@@ -273,18 +285,18 @@ describe("profile names", () => {
         await name(2, typed);
         expect(shownError(2), typed).toContain("David");
       }
-      for (const typed of ["sofiadesign.ᴅᴜꜱᴋ", "ⓢⓞⓕⓘⓐⓓⓔⓢⓘⓖⓝ.dusk"]) {
+      for (const typed of ["sofiadesign.\u1d05\u1d1c\ua731\u1d0b", "\u24e2\u24de\u24d5\u24d8\u24d0\u24d3\u24d4\u24e2\u24d8\u24d6\u24dd.dusk"]) {
         await name(2, typed);
         expect([shownError(2), question(2)], typed).toEqual(sofias);
       }
       // Marek's, the round after that: "sofiadesign·dusk", a middle dot, saved without a word, and History then filed
       // his transfers under it, right above Sofía's; so after any point that reads as a full stop.
-      for (const point of ["·", "•", "．", "。", "｡", "‧", "∙"]) {
+      for (const point of ["\u00b7", "\u2022", "\uff0e", "\u3002", "\uff61", "\u2027", "\u2219"]) {
         await name(2, `sofiadesign${point}dusk`);
         expect([shownError(2), question(2)], point).toEqual(sofias);
       }
       // R12, Marek's, the round after that again: a dot above, a Braille dot, and a middle dot with a space went by.
-      for (const typed of ["sofiadesign˙dusk", "sofiadesign⠄dusk", "sofiadesign· dusk", "sofiadesign · dusk"]) {
+      for (const typed of ["sofiadesign\u02d9dusk", "sofiadesign\u2804dusk", "sofiadesign\u00b7 dusk", "sofiadesign \u00b7 dusk"]) {
         await name(2, typed);
         expect([shownError(2), question(2)], typed).toEqual(sofias);
       }
@@ -360,7 +372,7 @@ describe("settings", () => {
     const SITE = "https://app.example";
     const permissions = [{ origin: SITE, walletId: ACCOUNTS[0], accountIndex: 0, lastsMs: 7 * DAY, expiresAt: AT + 7 * DAY }];
     const asked = [
-      { at: AT + 3, what: "contract_call", method: "swap‮yenom", answer: "rejected" },
+      { at: AT + 3, what: "contract_call", method: "swap\u202Eyenom", answer: "rejected" },
       { at: AT + 2, what: "transfer", answer: "approved" },
       { at: AT + 1, what: "sign_message", answer: "closed" },
       { at: AT, what: "connect", answer: "approved" },
@@ -375,15 +387,21 @@ describe("settings", () => {
     it("shows what a site asked with its hidden characters as codes, and a payment approved but not sent or not confirmed apart from one sent", async () => {
       await settings({ permissions, siteRecords });
       const row = siteRow("app.example");
+      // Each thing asked, in the record's order: what it was, and how it was answered.
+      const items = row.querySelectorAll(".settings-site__ask");
+      expect(items).toHaveLength(asked.length);
+      const partOf = (entry, part) => visibleText(items[asked.indexOf(entry)].querySelector(`.settings-site__${part}`));
       // Nothing a site chose reads as something else.
-      expect(row.textContent).not.toContain("‮");
-      expect(row.textContent).toMatch(/swap.*yenom/);
-      // Each answer beside what was asked, in the record's order.
-      const answers = row.querySelectorAll(".settings-site__answer").map(visibleText);
-      const payment = (answer) => answers[asked.findIndex((a) => a.what === "transfer" && a.answer === answer)];
-      const said = ["approved", "failed", "unconfirmed"].map(payment);
-      expect(said.every(Boolean)).toBe(true);
-      expect(new Set(said).size).toBe(3);
+      expect(row.textContent).not.toContain("\u202E");
+      expect(partOf(asked.find((a) => a.method === "swap\u202Eyenom"), "what")).toMatch(/swap.*yenom/);
+      // A payment approved and sent, one approved and not sent, and one that may not have gone: each as it was.
+      const payment = (answer) => partOf(asked.find((a) => a.what === "transfer" && a.answer === answer), "answer");
+      expect(payment("approved")).toMatch(/approved/i);
+      expect(payment("approved")).not.toMatch(/\bnot\b/i);
+      expect(payment("failed")).toMatch(/not sent/i);
+      expect(payment("failed")).not.toMatch(/confirmed/i);
+      expect(payment("unconfirmed")).toMatch(/not confirmed/i);
+      expect(payment("unconfirmed")).not.toMatch(/sent/i);
     });
 
     it("sets how long from its Details, and new sites' on their own", async () => {
@@ -460,7 +478,7 @@ describe("settings", () => {
     vi.stubGlobal("confirm", confirm);
     sites.querySelector(".settings-disconnect-all").click();
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(confirm.mock.calls[0][0]).toMatch(/\b2\b/);
+    expect(confirm.mock.calls[0][0]).toMatch(exactly("2 sites"));
     expect(view.actions.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "DUSK_UI_CLEAR_PERMISSIONS" }));
     // A local http:// site by its whole origin, as its approval named it.
     const local = (await settings({ permissions: [{ origin: "http://127.0.0.1:5354", accountIndex: 0 }] })).section("Connected sites");
@@ -483,19 +501,19 @@ describe("settings", () => {
     await settle();
     const body = dom.document.body;
     const password = () => body.querySelector("input[type=password]");
-    // What it removes, and that the funds stay on Dusk: said first.
-    expect(visibleText(body.querySelector(".auth-lead"))).not.toBe("");
-    // Nothing typed: said, and nothing asked of the wallet.
+    // Said first: the funds stay on Dusk, and each wallet's recovery phrase is what gets them back.
+    expect(visibleText(body.querySelector(".auth-lead"))).toMatch(/recovery phrase/i);
+    // Nothing typed: said under the password, and nothing asked of the wallet.
     mainButton(body).click();
     await settle();
-    expect(shownErrors(body)).not.toEqual([]);
+    expect(errorOf(password())).not.toBe("");
     expect(resets()).toEqual([]);
-    // A wrong one: the wallet says so.
+    // A wrong one: the wallet says so, under the field.
     view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_RESET_WALLET" && m.password !== "the password" ? { error: { message: "Incorrect password" } } : {}));
     typeInto(password(), "not it");
     mainButton(body).click();
     await settle();
-    expect(shownErrors(body)).not.toEqual([]);
+    expect(errorOf(password())).toBe("Incorrect password");
     expect(view.state.route).toBe("wallet_reset");
     typeInto(password(), "the password");
     mainButton(body).click();
@@ -591,14 +609,21 @@ describe("settings", () => {
     const view = await settings();
     const advanced = dom.document.body.querySelector("details.settings-advanced");
     const toggle = advanced.querySelector("#custom-gas");
+    // The note under the switch, its own.
+    const note = () => {
+      const label = toggle.closest("label");
+      const kids = label.parentNode.children;
+      return visibleText(kids[kids.indexOf(label) + 1]);
+    };
     expect(toggle.checked).toBe(false);
-    expect(visibleText(advanced)).not.toMatch(/0\.0025 DUSK/);
+    expect(note()).not.toMatch(/DUSK/);
     toggle.checked = true;
     toggle.dispatchEvent({ type: "change", bubbles: true, target: toggle, preventDefault() {}, stopPropagation() {} });
     await settle();
     expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_CUSTOM_GAS", customGas: { limit: "2500000", price: "1" } });
-    // The most a transaction then costs: its gas limit times its price.
-    expect(visibleText(advanced)).toMatch(/0\.0025 DUSK/);
+    // The most a transaction then costs, as a most: its gas limit times its price.
+    expect(note()).toMatch(exactly("0.0025 DUSK"));
+    expect(note()).toMatch(/most|up to|max/i);
   });
 
   it("saves custom gas as it's typed only once its field is left", async () => {
@@ -722,7 +747,7 @@ describe("the network", () => {
     await settle();
     expect(confirm).toHaveBeenCalledWith(question);
     expect(view.actions.send).toHaveBeenCalledTimes(1);
-    expect(visibleText(view.section("Network"))).toContain(refused.error.message);
+    expect(shownText(view.section("Network"))).toContain(refused.error.message);
 
     confirm.mockReturnValue(true);
     saveButton().click();
@@ -751,12 +776,11 @@ describe("wallets", () => {
       { origin: "https://shop.example", walletId: W2[0], accountIndex: 1 },
     ];
     const view = await drawn({ wallets: fresh(), permissions });
-    const [first, savings] = fresh();
+    const [first] = fresh();
     const walletOf = (host) => visibleText(siteRow(host).querySelector(".settings-site__wallet"));
-    expect(walletOf("app.example")).toContain(walletLabel(first));
-    // Another wallet's site, with the profile it sees there.
-    expect(walletOf("shop.example")).toContain(walletLabel(savings));
-    expect(walletOf("shop.example")).toContain("Rainy day");
+    expect(walletOf("app.example")).toBe(walletLabel(first));
+    // Another wallet's site: that wallet, Savings, then the profile it sees there.
+    expect(walletOf("shop.example")).toMatch(/^Savings\b.*\bRainy day$/);
     // The open wallet's site changes profile here; another's doesn't.
     const profileChoice = (host) => siteRow(host).querySelectorAll("select").find((s) => !s.closest("details"));
     expect([Boolean(profileChoice("app.example")), Boolean(profileChoice("shop.example"))]).toEqual([true, false]);
@@ -854,6 +878,38 @@ describe("security in the app on a phone", () => {
     expect(asked.filter(([action]) => action === "enable" || action === "disable")).toEqual([["enable", "right one"]]);
   });
 
+  // Sofía's: no notice when a client paid her with the app in the background, and Settings had nothing for notices.
+  // Then Chen's and Sofía's: a friend's payment was noticed after 14 and 9 minutes, and only Settings said it could.
+  it("has Tell me when money comes in, on while notices are allowed, saying Android checks about every 15 minutes, and turns it off and on", async () => {
+    let allowed = true;
+    const { asked } = onPhone({ notices: () => allowed });
+    const view = await settings({}, { app: true });
+    const { INCOMING_NOTE } = await import("./popup/views/options.js");
+    const toggle = () => dom.document.body.querySelector("#incoming-notices");
+    await vi.waitFor(() => expect(toggle().checked).toBe(true));
+    expect(dom.document.body.querySelector("#incoming-note").textContent).toBe(INCOMING_NOTE);
+
+    toggle().checked = false;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_INCOMING_NOTICES", on: false }));
+    expect(view.ov.incomingNotices).toBe(false);
+
+    // On again with notices not allowed: Android's question, and a no leaves it off, with nothing sent.
+    allowed = false;
+    view.actions.send.mockClear();
+    toggle().checked = true;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(asked).toContainEqual(["notices: ask"]));
+    await settle();
+    expect([toggle().checked, view.actions.send.mock.calls]).toEqual([false, []]);
+    // A yes: on.
+    allowed = true;
+    toggle().checked = true;
+    toggle().dispatchEvent(fakeEvent("change"));
+    await vi.waitFor(() => expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_INCOMING_NOTICES", on: true }));
+    expect(toggle().checked).toBe(true);
+  });
+
   // Chen's: no way in the app to see the recovery words again, or to change the password.
   it("offers the recovery phrase and a new password in the app, each behind the password", async () => {
     onPhone({ on: false });
@@ -877,7 +933,7 @@ describe("security in the app on a phone", () => {
     typeInto(password(), "not it");
     mainButton(body).click();
     await settle();
-    expect(shownErrors(body)).not.toEqual([]);
+    expect(errorOf(password())).toBe("Incorrect password");
     expect(body.querySelector(".srp-grid")).toBeNull();
     typeInto(password(), "the password");
     mainButton(body).click();
@@ -965,7 +1021,7 @@ describe("security in the app on a phone", () => {
     typeInto(password(), "not it");
     mainButton(body).click();
     await settle();
-    expect(shownErrors(body)).not.toEqual([]);
+    expect(errorOf(password())).toBe("Incorrect password");
     expect(boxes()).toEqual([]);
     typeInto(password(), "the password");
     mainButton(body).click();
@@ -985,15 +1041,17 @@ describe("security in the app on a phone", () => {
     expect([check.disabled, asked]).toEqual([true, ["count", "count"]]);
     check.click();
     await settle();
-    expect(visibleText(body)).not.toContain(RECOVERY_WORDS_MISMATCH);
+    expect(shownErrors(body)).toEqual([]);
     for (const input of boxes()) typeInto(input, MNEMONIC.split(" ")[Number(accessibleName(input).slice(5)) - 1]);
     expect(check.disabled).toBe(false);
     check.click();
     await settle();
-    // They match: nothing said against them, and no word of the phrase shown.
-    expect(visibleText(body)).not.toContain(RECOVERY_WORDS_MISMATCH);
-    expect([shownErrors(body), body.querySelector(".srp-grid"), boxes()]).toEqual([[], null, []]);
+    // They match: nothing said against them, no Show my recovery words, and no word of the phrase shown.
+    expect([shownErrors(body), body.querySelector(".words-show"), body.querySelector(".srp-grid"), boxes()]).toEqual([[], null, null, []]);
     expect(asked).toEqual(["count", "count", places]);
+    // Done, its one button: back to Settings.
+    mainButton(body).click();
+    expect(view.state.route).toBe("options");
 
     // Again: one word wrong, then three made up. Said, and nothing else: no word of the phrase.
     draw();
@@ -1005,8 +1063,7 @@ describe("security in the app on a phone", () => {
       boxes().forEach((input, i) => typeInto(input, typed[i]));
       mainButton(body).click();
       await settle();
-      expect(visibleText(body)).toContain(RECOVERY_WORDS_MISMATCH);
-      expect([body.querySelector(".srp-grid"), boxes()]).toEqual([null, []]);
+      expect([shownErrors(body), body.querySelector(".srp-grid"), boxes()]).toEqual([[RECOVERY_WORDS_MISMATCH], null, []]);
       // Try again: the same three, empty, with nothing asked of the wallet till Check.
       const before = asked.length;
       mainButton(body).click();

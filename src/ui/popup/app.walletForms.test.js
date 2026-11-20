@@ -77,6 +77,8 @@ const WORD = (n) => `input[aria-label="Word ${n}"]`;
 const PASSWORD = "input[type=password]";
 const fieldsOf = (app, selectors) => app.querySelectorAll(selectors.join(", "));
 const typeAll = (fields) => fields.forEach((f, i) => typeInto(f, accessibleName(f).startsWith("Word") ? WORDS[i] : "typed password"));
+// `text` exactly: no digit, point or comma just before it, nor a digit just after (5 DUSK isn't 0.5 or 15 DUSK).
+const exactly = (text) => new RegExp("(?<![\\d.,])" + text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "(?![\\d])");
 // A form's main button, whatever it says: the primary or destructive one shown.
 const mainButton = (app) => app.querySelectorAll("button.btn-primary, button.btn-destructive").find(isShown);
 // The error shown under a field, as the field is described by it.
@@ -191,15 +193,15 @@ describe("a wallet form being filled in", () => {
     answer.resolve({ error: { message: "Incorrect password" } });
     await flush();
     await t.deliver({ type: "DUSK_UI_NETWORK_CHANGED" });
-    expect(t.app.querySelectorAll(".field-error").filter((el) => !el.hidden).map((el) => el.textContent)).toEqual([expect.stringMatching(/\S/)]);
+    expect(t.app.querySelectorAll(".field-error").filter((el) => !el.hidden).map((el) => el.textContent)).toEqual(["Incorrect password"]);
     expect(mainButton(t.app).disabled).toBe(false);
   });
 });
 
 describe("the password on big sends, in Settings", () => {
   const saves = (answers) => answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD");
-  // Its row in Settings, by its name, and what it says it's set to.
-  const setTo = (app) => app.querySelectorAll(".settings-row").find((row) => row.textContent.startsWith("Password on big sends"))?.textContent ?? "";
+  // What its row in Settings, found by its name, says it's set to.
+  const setTo = (app) => app.querySelectorAll(".settings-row").find((row) => row.textContent.startsWith("Password on big sends"))?.querySelector(".row-sub")?.textContent ?? "";
 
   it("turns on above an amount, only with the password, and Settings says so", async () => {
     const answers = [];
@@ -241,7 +243,8 @@ describe("the password on big sends, in Settings", () => {
     await flush();
     expect(saves(answers).at(-1)).toMatchObject({ password: "the password", limitLux: "1000500000000" });
     // Back in Settings, it says what it's set to.
-    expect(setTo(app)).toMatch(/1,000\.5 DUSK/);
+    expect(setTo(app)).toMatch(exactly("1,000.5 DUSK"));
+    expect(setTo(app)).toMatch(/above/i);
   });
 
   it("turns off only with the password too, and 0 asks on every send", async () => {
@@ -250,7 +253,8 @@ describe("the password on big sends, in Settings", () => {
       answers.push(message);
       return { ok: true };
     }, { sendPasswordLimit: "5000000000" });
-    expect(setTo(app)).toMatch(/\b5 DUSK/);
+    expect(setTo(app)).toMatch(exactly("5 DUSK"));
+    expect(setTo(app)).toMatch(/above/i);
     app.querySelectorAll(".settings-row").find((row) => row.textContent.startsWith("Password on big sends")).click();
     await flush();
     expect(state.route).toBe("send_password");
@@ -267,15 +271,14 @@ describe("the password on big sends, in Settings", () => {
     mainButton(app).click();
     await flush();
     expect(saves(answers).at(-1)).toMatchObject({ limitLux: null });
-    // Off: no amount said any more.
-    const off = setTo(app);
-    expect(off).not.toBe("");
-    expect(off).not.toMatch(/\d/);
+    // Off, with no amount any more.
+    expect(setTo(app)).toMatch(/\boff\b/i);
+    expect(setTo(app)).not.toMatch(/\d/);
 
-    // 0: on every send, which isn't off.
+    // 0: on every send, not off, and no amount.
     const every = await popupAt("options", {}, async () => ({ ok: true }), { sendPasswordLimit: "0" });
-    expect(setTo(every.app)).not.toBe("");
-    expect(setTo(every.app)).not.toBe(off);
+    expect(setTo(every.app)).toMatch(/every/i);
+    expect(setTo(every.app)).not.toMatch(/\boff\b|\d/i);
   });
 });
 
@@ -298,9 +301,11 @@ describe("Import wallet's network", () => {
     expect([main.textContent, test.textContent]).toEqual([expect.stringContaining("Mainnet"), expect.stringContaining("Testnet")]);
     expect(picked()).toEqual(["false", "false"]);
     // Amélie's: nothing said which one is real money. Each says what its DUSK is, under its name.
-    const said = [main, test].map((tab) => tab.querySelector(".tab-sub")?.textContent ?? "");
-    expect(said.every(Boolean)).toBe(true);
-    expect(said[0]).not.toBe(said[1]);
+    const sub = (tab) => tab.querySelector(".tab-sub")?.textContent ?? "";
+    expect(sub(main)).toMatch(/real/i);
+    expect(sub(main)).not.toMatch(/no value/i);
+    expect(sub(test)).toMatch(/no value/i);
+    expect(sub(test)).not.toMatch(/real/i);
 
     // The words and the password typed first: Import waits for a network, and says so.
     const selectors = [...WORDS.map((_, i) => WORD(i + 1)), PASSWORD];
@@ -309,7 +314,10 @@ describe("Import wallet's network", () => {
     mainButton(t.app).click();
     await flush();
     expect(messages.filter((m) => m.type === "DUSK_UI_CREATE_WALLET")).toEqual([]);
-    expect(t.app.querySelectorAll("[role=alert]").filter(isShown).map((el) => el.textContent).filter(Boolean)).toHaveLength(1);
+    // Said under the network's choice, its own alert.
+    const choice = t.app.querySelector(".onboard-network");
+    const under = choice.parentNode.children[choice.parentNode.children.indexOf(choice) + 1];
+    expect([under.getAttribute("role"), isShown(under), under.textContent]).toEqual(["alert", true, expect.stringMatching(/\S/)]);
 
     tabsOf(t.app)[1].click();
     await flush();

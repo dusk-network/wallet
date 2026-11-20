@@ -4,6 +4,7 @@ import { NAME_HIDES } from "@dusk-network/app-core/names";
 import { markAddressBookNameChecked, removeAddressBookEntry, upsertAddressBookEntry } from "../shared/addressBook.js";
 import { duskNameErrorText, lookupDuskName } from "../shared/duskNames.js";
 import { noteChainId } from "../shared/nodeNetwork.js";
+import { TX_KIND } from "../shared/constants.js";
 import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { HIDDEN_NAME_NOTE, HIDDEN_NAME_ROW, lookAlikeText } from "./lib/contactNames.js";
 import { shortAddress } from "./lib/strings.js";
@@ -30,6 +31,8 @@ const OWN =
 const NODE = "https://testnet.nodes.dusk.network";
 const ALICE = { id: "1", name: "Alice", address: ACCOUNT, type: "account" };
 const SHOP = { ok: true, name: "alice-shop.dusk", account: ACCOUNT, address: ADDRESS };
+// That name, whole: not malice-shop.dusk.
+const SHOP_NAMED = /(?<![\w.-])alice-shop\.dusk(?![\w-])/;
 
 let dom;
 
@@ -183,9 +186,11 @@ describe("contacts", () => {
     const ADDRESS_SECOND = encodeBase58(decodeBase58(ADDRESS_OWN).map((byte, i, all) => (i === all.length - 1 ? byte ^ 1 : byte)));
     const shownNote = () =>
       dom.document.body.querySelectorAll(".contact-note").filter(isShown).map((el) => (el.querySelector(".contact-note__words") ?? el).textContent);
-    // A note that names each of `values`, whatever its words: whose name it is, and that one's address.
+    // A note that names each of `values`, whatever its words: whose name it is, and that one's address. Each whole,
+    // no letter or digit on either side: Profile 1 isn't Profile 12, nor Alice Alicia.
     const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const naming = (...values) => expect.stringMatching(new RegExp(values.map((value) => `(?=[\\s\\S]*${escaped(value)})`).join("")));
+    const naming = (...values) =>
+      expect.stringMatching(new RegExp(values.map((value) => `(?=[\\s\\S]*(?<![\\p{L}\\p{N}])${escaped(value)}(?![\\p{L}\\p{N}]))`).join(""), "u"));
     // Yes, save it, under a name's question at Save.
     const yes = () => dom.document.body.querySelectorAll(".contact-note__yes").find(isShown);
     const edit = (over = {}, ov) => mount({ view: "edit", editId: null, editReturnView: "list", loaded: true, items: [ALICE, { id: "2", name: "Estudio Marta", address: ADDRESS, type: "address" }], ...over }, ov);
@@ -335,9 +340,9 @@ describe("contacts", () => {
       const view = edit({}, ov);
       typeInto(view.field("Address"), CAROL);
       typeInto(view.field("Name"), "Profile 2");
-      expect(view.error("Name")).toMatch(/Profile 2/);
+      expect(view.error("Name")).toMatch(/\bProfile 2\b/);
       typeInto(view.field("Name"), "ProfiIe  2");
-      expect(view.error("Name")).toMatch(/Profile 2/);
+      expect(view.error("Name")).toMatch(/\bProfile 2\b/);
       view.save().click();
       await settle();
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
@@ -430,6 +435,38 @@ describe("contacts", () => {
     expect(view.error("Address")).not.toContain("\u202e");
   });
 
+  it("lists the token approvals that let the contact spend, in its Activity, and one taken back as a revoke", () => {
+    const approval = {
+      hash: "ef".repeat(32),
+      kind: TX_KIND.CONTRACT_CALL,
+      status: "executed",
+      submittedAt: 3,
+      profileIndex: 0,
+      asset: { type: "DRC20", op: "approve", symbol: "TKN", decimals: 0, valueUnits: "5", spender: ACCOUNT },
+    };
+    // One that lets another spend, not Alice's; and Alice's allowance taken back, an approval of 0.
+    const other = { ...approval, hash: "aa".repeat(32), asset: { ...approval.asset, spender: OWN } };
+    const revoke = { ...approval, hash: "bb".repeat(32), submittedAt: 4, asset: { ...approval.asset, valueUnits: "0" } };
+    mount({ view: "detail", detailId: "1", items: [ALICE] }, { nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs: [approval, other, revoke] });
+    const rows = dom.document.body.querySelectorAll(".contact-detail .tx-row").map((row) => ({
+      name: visibleText(row.querySelector(".tx-name")),
+      amount: visibleText(row.querySelector(".tx-amount")),
+      kind: visibleText(row.querySelector(".tx-sub")),
+    }));
+    // Alice's two, under her name, each with what it allows her: 5 TKN, and none.
+    expect(rows.map(({ name, amount }) => [name, amount]).sort()).toEqual([
+      ["Alice", "0 TKN"],
+      ["Alice", "5 TKN"],
+    ]);
+    // What she may spend said as an approval, and the one taken back as a revoke, each refusing the other's word.
+    const granted = rows.find((row) => row.amount === "5 TKN").kind;
+    const revoked = rows.find((row) => row.amount === "0 TKN").kind;
+    expect(granted).toMatch(/approv/i);
+    expect(granted).not.toMatch(/revok/i);
+    expect(revoked).toMatch(/revok/i);
+    expect(revoked).not.toMatch(/approv/i);
+  });
+
   it("saves, checks and deletes a contact for the wallet the page was drawn for", async () => {
     const shown = { walletId: OWN };
     const view = mount({ view: "edit", editId: null, editReturnView: "list" }, { isUnlocked: true, nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs: [] });
@@ -442,8 +479,8 @@ describe("contacts", () => {
 
   describe("a name read through a node the wallet doesn't know", () => {
     const CUSTOM = "https://my-node.example:8443";
-    // Whose word it is: the node it was read through.
-    const NODE_SAYS = "my-node.example:8443";
+    // Whose word it is: the node it was read through, whole (not my-node.example:84430).
+    const NODE_SAID = /(?<![\w.-])my-node\.example:8443(?!\d)/;
     const onCustom = { nodeUrl: CUSTOM, accounts: [OWN], selectedAccountIndex: 0, txs: [] };
     const notes = () => dom.document.body.querySelectorAll('[role="note"]').map(visibleText);
 
@@ -455,7 +492,7 @@ describe("contacts", () => {
       typeInto(view.field("Name"), "Shop");
       typeInto(view.field("Address"), "alice-shop.dusk");
       await settle();
-      expect(notes()).toContainEqual(expect.stringContaining(NODE_SAYS));
+      expect(notes()).toContainEqual(expect.stringMatching(NODE_SAID));
       view.save().click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ duskName: "alice-shop.dusk", checkedAt: 0 }), expect.anything());
@@ -486,8 +523,8 @@ describe("contacts", () => {
       mount({ view: "detail", detailId: "2", items: [shop] }, onCustom);
       await settle();
       const check = visibleText(dom.document.body.querySelector(".contact-name-check"));
-      expect(check).toMatch(/alice-shop\.dusk/);
-      expect(check).toContain(NODE_SAYS);
+      expect(check).toMatch(SHOP_NAMED);
+      expect(check).toMatch(NODE_SAID);
     });
   });
 
@@ -527,11 +564,18 @@ describe("contacts", () => {
     const shop = { id: "2", name: "Shop", address: ACCOUNT, type: "account", duskName: "alice-shop.dusk", checkedAt: Date.now() - NAME_RECHECK_MS - 1 };
     mount({ view: "detail", detailId: "2", items: [shop] });
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".contact-name-check"))).toMatch(/alice-shop\.dusk/);
-    // The contact as saved: its name, and the address it has, not the one the name points to now.
-    const hero = visibleText(dom.document.body.querySelector(".contact-hero"));
-    for (const value of ["Shop", "alice-shop.dusk", shortAddress(ACCOUNT)]) expect(hero).toContain(value);
-    expect(hero).not.toContain(shortAddress(OWN));
+    expect(visibleText(dom.document.body.querySelector(".contact-name-check"))).toMatch(SHOP_NAMED);
+    // The contact as saved, each in its place: its name, its .dusk name, and the address it has, not the one the
+    // name points to now, as shown (short, as the page shows it) and as its Copy gives it, whole.
+    const hero = dom.document.body.querySelector(".contact-hero");
+    expect([hero.querySelector(".tx-hero-name").textContent, hero.querySelector(".tx-hero-lead").textContent, hero.querySelector(".tx-hero-addr .mono").textContent]).toEqual([
+      "Shop",
+      "alice-shop.dusk",
+      shortAddress(ACCOUNT),
+    ]);
+    hero.querySelector(".tx-hero-addr button").click();
+    await settle();
+    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(ACCOUNT);
   });
 });
 
