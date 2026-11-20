@@ -1441,8 +1441,10 @@ export async function renderNotification() {
       // flagged, as are its fee taking the whole amount and a route it
       // doesn't pay out on now.
       const service = bridgeServiceTransfer({ nodeUrl, to, memo, amount: amountLux });
-      // The button says what it does, and how much.
-      const approveText = `${service ? "Bridge" : "Pay"} ${formatDuskExact(amountLux)} DUSK`;
+      // The button says what it does, and how much; to a bridge that pays
+      // nothing out of it, that it sends anyway, never that it bridges.
+      const nothingArrives = Boolean(service) && (!service.running || !service.recipientOk || service.arrivesLux <= 0n);
+      const approveText = nothingArrives ? "Send anyway" : `${service ? "Bridge" : "Pay"} ${formatDuskExact(amountLux)} DUSK`;
       // A recipient the network's file blocks: why, at the top, and no Approve.
       const blocked = blockedRecipient(to, chainIdForNode(nodeUrl));
       const bar = decisionBar({ approveText, approveDisabled: Boolean(blocked), getApprovedParams: () => gasEditor.readOverrideGas(gas), sends: true });

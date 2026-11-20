@@ -862,6 +862,8 @@ describe("a site's request to pay the bridge's account", () => {
   const kinds = (params) => rules(params).map((w) => w.kind);
   const titles = (params) => rules(params).map((w) => w.title);
   const onMainnet = { chainId: "dusk:1", nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" };
+  // The bar's buttons in order: Reject first, then what approving does.
+  const answers = () => bar().querySelectorAll("button").map((b) => b.textContent);
 
   it("shows it as a bridge to the chain the memo's address is on, tagged as known", async () => {
     const params = transfer(testnet.account, { amount: "2000000000", memo: EVM });
@@ -892,6 +894,7 @@ describe("a site's request to pay the bridge's account", () => {
     const two = transfer(mainnet.account, { amount: "2000000000", memo: EVM, ...onMainnet });
     await render("send_tx", two);
     expect([service(two).feeLux, service(two).arrivesLux]).toEqual([1_000_000_000n, 1_000_000_000n]);
+    expect(answers()).toEqual(["Reject", "Bridge 2 DUSK"]);
     expect(sub()).toBe(bridgeServiceLine(service(two)));
     expect(feePart()).toMatch(exactly("1 DUSK"));
     expect(arrivals()).toHaveLength(1);
@@ -912,6 +915,7 @@ describe("a site's request to pay the bridge's account", () => {
     expect(arrives()).not.toMatch(/\d/);
     expect(kinds(noAddress)).toEqual([]);
     expect(warns()).toHaveLength(1);
+    expect(answers()).toEqual(["Reject", "Send anyway"]);
 
     const all = transfer(mainnet.account, { amount: "1000000000", memo: EVM, ...onMainnet });
     await render("send_tx", all);
@@ -921,6 +925,7 @@ describe("a site's request to pay the bridge's account", () => {
     expect(arrives()).not.toMatch(/\d/);
     expect(kinds(all)).toEqual(["fee"]);
     expect(warns()).toEqual(titles(all));
+    expect(answers()).toEqual(["Reject", "Send anyway"]);
     // The 1 DUSK fee that takes it all, in the warning's one line.
     expect(app.querySelector(".callout.warn .callout-title").textContent).toMatch(exactly("1 DUSK"));
     // Reject stays the user's choice.
@@ -933,6 +938,8 @@ describe("a site's request to pay the bridge's account", () => {
     expect(service(params).running).toBe(false);
     expect(kinds(params)).toEqual(["off"]);
     expect(warns()).toEqual(titles(params));
+    // Nothing arrives, so the button sends anyway, never bridges; Reject first.
+    expect(answers()).toEqual(["Reject", "Send anyway"]);
     // Nothing arrives there while it isn't running: one part says what arrives, with no amount, and nothing else
     // promises one.
     expect(sub()).toBe(bridgeServiceLine(service(params)));
