@@ -7,8 +7,8 @@ import { balance } from "../../components/Balance.js";
  * A status in one word, the same in Activity and a transaction's details, and
  * in the words the Sent screen uses: Sending until the network runs it, then
  * Completed or Failed. One the node dropped from its queue before it ran
- * (removed) is Failed, as Sent says it; it and Not confirmed (the wallet
- * stopped waiting) still tone as pending. Unknown is final on chain, its
+ * (removed) is Failed, as Sent says it, and tones as failed; Not confirmed
+ * (the wallet stopped waiting) tones as pending. Unknown is final on chain, its
  * outcome not looked up yet: nothing waits on it, so it tones neutral. Held:
  * handed over, the node never had it, and it goes as it was signed only with
  * Send it now (unsent); Not sent: another of its account's transactions took
@@ -49,7 +49,8 @@ export function txErrorText(error) {
 export function txStatusTone(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "ok";
-  if (s === "failed") return "bad";
+  // Dropped before it ran says Failed, so it looks it.
+  if (s === "failed" || s === "removed") return "bad";
   if ((s === "unknown" && final) || s === "not_sent") return "neutral";
   return "pending";
 }

@@ -45,6 +45,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Coloured a transaction the network dropped before it ran as failed in Activity and on its details, as its word, Failed, says.
 - Cut the wallet's wording to what each step needs, with every fact, warning, address and figure still on screen where it was: narration and repeats are gone, buttons say what they do and how much ("Send 0.1 DUSK", "Pay 1 DUSK", "Approve 10 stDUSK"), and every screen uses the same words: recovery phrase, account, Fee, contact, View in explorer, Waiting and Held for a payment that hasn't gone out, and Don't send to call one off. A spender the network doesn't name shows in full on Allow spending, and the double-send warning names whom it was sent to.
 - Named how much and to whom in the Android app's notice of a payment waiting for the network, where the phone shows a notice whole, and said under Tell me when money comes in that Android checks about every 15 minutes.
 - Showed on Review the whole memo an address that isn't a contact sent you, quoted and wrapped, in an amber warning with its sign, as the web wallet does.

@@ -26,10 +26,10 @@ describe("tx display helpers", () => {
     expect(txErrorText(undefined)).toBe("");
   });
 
-  it("does not visually tone unknown or removed as failed", () => {
+  it("tones a dropped transaction as failed, as its word says, and an unknown one as pending", () => {
     expect(txStatusTone("failed")).toBe("bad");
+    expect([txStatusWord("removed"), txStatusTone("removed")]).toEqual(["Failed", "bad"]);
     expect(txStatusTone("unknown")).toBe("pending");
-    expect(txStatusTone("removed")).toBe("pending");
     expect(txStatusTone("mempool")).toBe("pending");
   });
 
