@@ -627,8 +627,8 @@ describe("a request link the extension's tab opened with", () => {
 });
 
 describe("coming back to the wallet during a payment", () => {
-  // Amélie's, in Firefox for Android: back online, she confirmed again, and Sent said "Waiting
-  // for a block" for 4.5 minutes, the payment long in its block: its watcher never answered.
+  // Amélie's, in Firefox for Android: back online, she confirmed again, and Sent said it was
+  // still waiting for 4.5 minutes, the payment long through: its watcher never answered.
   it("looks the payment up by its ID once its watcher has said nothing for 20 seconds", async () => {
     const HASH = "9d".repeat(32);
     const t = await popupOn(
@@ -642,8 +642,8 @@ describe("coming back to the wallet during a payment", () => {
         return undefined;
       }
     );
-    // Completed, in its block, with its fee.
-    await vi.waitFor(() => expect(finalStep(t)).toEqual({ done: true, sub: expect.stringMatching(exactly("4,831,109")) }));
+    // Completed, with its fee.
+    await vi.waitFor(() => expect(finalStep(t).done).toBe(true));
     expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
     expect(rowValue(t.app, /fee/i)).toBe("0.001856521 DUSK");
   });
@@ -780,18 +780,18 @@ describe("coming back to the wallet during a payment", () => {
     );
     t.open = { ...t.open, txs: [{ hash: HASH, status: "submitted", submittedAt: Date.now() - 40_000 }] };
     await t.render({ forceRefresh: true });
-    // Waiting for a block: not Completed yet, and the most its fee can be.
+    // Confirming: not Completed yet, and the most its fee can be.
     expect(finalStep(t)).toEqual({ done: false, sub: "" });
     expect(rowValue(t.app, /fee/i)).toBe("Up to 0.0025 DUSK");
     expect(t.asked("DUSK_UI_RECHECK_TX")).toEqual([]);
 
-    // Home pressed, then back after the block: the page shows again.
+    // Home pressed, then back once it's through: the page shows again.
     t.dom.document.visibilityState = "visible";
     t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
     await flush();
     expect(t.asked("DUSK_UI_RECHECK_TX").map((m) => m.hash)).toEqual([HASH]);
-    // Completed, in its block, with its real fee.
-    expect(finalStep(t)).toEqual({ done: true, sub: expect.stringMatching(exactly("4,802,949")) });
+    // Completed, with its real fee.
+    expect(finalStep(t).done).toBe(true);
     expect(rowValue(t.app, /fee/i)).toBe("0.002135802 DUSK");
   });
 });

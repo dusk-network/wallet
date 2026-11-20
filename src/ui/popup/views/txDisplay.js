@@ -5,17 +5,17 @@ import { balance } from "../../components/Balance.js";
 
 /**
  * A status in one word, the same in Activity and a transaction's details, and
- * in the words the Sent screen uses: Sending until the network runs it, then
- * Completed or Failed. One the node dropped from its queue before it ran
+ * in the words the Sent screen uses: Confirming once the network has it, until
+ * it runs, then Completed or Failed. One the node dropped from its queue before it ran
  * (removed) is Failed, as Sent says it, and tones as failed; Not confirmed
  * (the wallet stopped waiting) tones as pending. Unknown is final on chain, its
  * outcome not looked up yet: nothing waits on it, so it tones neutral. Held:
  * handed over, the node never had it, and it goes as it was signed only with
  * Send it now (unsent); Not sent: another of its account's transactions took
- * its place, and it never will (not_sent). Never Sending for either.
+ * its place, and it never will (not_sent). Never Confirming for either.
  * @param {string} status
  * @param {{ final?: boolean }} [opts] - `final`: the chain has it, final
- * @returns {"Sending"|"Completed"|"Failed"|"Not confirmed"|"Unknown"|"Held"|"Not sent"}
+ * @returns {"Confirming"|"Completed"|"Failed"|"Not confirmed"|"Unknown"|"Held"|"Not sent"}
  */
 export function txStatusWord(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
@@ -24,7 +24,7 @@ export function txStatusWord(status, { final = false } = {}) {
   if (s === "unsent") return "Held";
   if (s === "not_sent") return "Not sent";
   if (s === "unknown") return final ? "Unknown" : "Not confirmed";
-  return "Sending";
+  return "Confirming";
 }
 
 // Chain errors with a plain meaning, in the words Activity uses. The raw
@@ -61,7 +61,7 @@ export function txRecoveryReasonLabel(reason) {
 
   const key = raw.toLowerCase();
   if (key === "watcher_timeout") {
-    return "The wallet did not receive a final network event before the watcher timed out.";
+    return "The wallet stopped waiting before the network confirmed it.";
   }
   // Its connection to the network went while it waited, as with no signal.
   if (key === "watcher_unavailable") {
@@ -72,13 +72,13 @@ export function txRecoveryReasonLabel(reason) {
     return "The connection went as it was sent. The wallet looks it up by its ID.";
   }
   if (key === "not_found") {
-    return "The transaction was not found in the node's chain or mempool response.";
+    return "The network has no record of it.";
   }
   if (key === "removed_unconfirmed") {
-    return "The node reported removal, but the wallet has not confirmed it yet.";
+    return "The network said it dropped it. The wallet hasn't confirmed that yet.";
   }
   if (key === "removed") {
-    return "The node reported that this transaction was removed from the mempool.";
+    return "The network dropped it before it ran.";
   }
   if (key === "not_reached") {
     return "The connection went as it was sent, and the network never got it.";

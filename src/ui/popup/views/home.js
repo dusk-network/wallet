@@ -326,7 +326,8 @@ function staleNote(ov, hasBalance) {
 /**
  * The payments from Send that wait for the network, each with what it pays,
  * to whom, its memo and when it was made, to tell them apart, and Don't send;
- * those that went out after they waited, as Sent till their block's in; and
+ * those that went out after they waited, as Confirming till the network has
+ * run them; and
  * those that stopped waiting without going out, said plainly, with Send it
  * now, which takes it straight to Review, and Don't send. None goes out by
  * itself once it's said not sent, and each is said until it's sent again and
@@ -471,10 +472,11 @@ function waitingSection(ov, { state, actions } = {}) {
       ]),
     ]);
 
-  // Gone out after it waited: Sent, till its block's in and the balance read
-  // since (Lena's: no card, no payment and the old balance for 20 s as it went).
+  // Gone out after it waited: Confirming, till the network has run it and the
+  // balance is read since (Lena's: no card, no payment and the old balance for
+  // 20 s as it went).
   const wentBox = (send) =>
-    h("div", { class: "callout home-waiting home-waiting--went", role: "status" }, [h("div", { class: "callout-title" }, ["Sent: ", ...what(send)]), madeLine(send)]);
+    h("div", { class: "callout home-waiting home-waiting--went", role: "status" }, [h("div", { class: "callout-title" }, ["Confirming: ", ...what(send)]), madeLine(send)]);
 
   return h("div", { class: "home-waiting-list" }, [...waiting.map(waitingBox), ...went.map(wentBox), ...unsent.map(unsentBox)]);
 }

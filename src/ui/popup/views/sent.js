@@ -1,4 +1,4 @@
-import { formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
+import { formatDuskExact, formatFee, safeBigInt } from "../../../shared/amount.js";
 import { explorerTxUrl } from "../../../shared/explorer.js";
 import { isNodeReply, nodeRefusalText } from "../../../shared/nodeRefusal.js";
 import { openUrl } from "../../../platform/index.js";
@@ -173,14 +173,14 @@ export function sentStatus(sent, ov) {
  * @returns {Array<{ label: string, state: "done"|"current"|"upcoming"|"failed", sub: string }>}
  */
 export function sentSteps(sent, ov) {
-  const { phase, status, error, blockHeight } = sentStatus(sent, ov);
+  const { phase, status, error } = sentStatus(sent, ov);
 
   if (phase === "not_sent") {
     // Called off by the person: said plainly, in no colour.
     if (String(error ?? "") === SEND_CANCELLED_TEXT) {
       return [
         { label: "Not sent", state: "upcoming", sub: "Nothing left your wallet." },
-        { label: "Sent", state: "upcoming", sub: "" },
+        { label: "Confirming", state: "upcoming", sub: "" },
         { label: "Completed", state: "upcoming", sub: "" },
       ];
     }
@@ -188,7 +188,7 @@ export function sentSteps(sent, ov) {
     const reason = reasonText(error);
     return [
       { label: "Not sent", state: "failed", sub: /Nothing left your wallet\.$/.test(reason) ? reason : [reason, "No fee charged."].filter(Boolean).join(" ") },
-      { label: "Sent", state: "upcoming", sub: "" },
+      { label: "Confirming", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
   }
@@ -199,7 +199,7 @@ export function sentSteps(sent, ov) {
         state: "unknown",
         sub: [reasonText(error), "It may have gone out: check Activity before you send again."].filter(Boolean).join(" "),
       },
-      { label: "Sent", state: "upcoming", sub: "" },
+      { label: "Confirming", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
   }
@@ -207,7 +207,7 @@ export function sentSteps(sent, ov) {
     // Its account sent something else while it waited: it goes only on Send it too.
     return [
       { label: "Held", state: "unknown", sub: heldText(sent, ov) },
-      { label: "Sent", state: "upcoming", sub: "" },
+      { label: "Confirming", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
   }
@@ -227,7 +227,7 @@ export function sentSteps(sent, ov) {
           : "";
     return [
       { label: waits ? "Waiting" : "Sending", state: "current", sub },
-      { label: "Sent", state: "upcoming", sub: "" },
+      { label: "Confirming", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
   }
@@ -235,32 +235,27 @@ export function sentSteps(sent, ov) {
   // When it was sent, and from which balance, are under Details (sentView).
   const sending = { label: "Sending", state: "done", sub: "" };
   if (status === "executed") {
-    const height = safeBigInt(blockHeight ?? 0, 0n);
-    return [
-      sending,
-      { label: "Sent", state: "done", sub: "" },
-      { label: "Completed", state: "done", sub: height > 0n ? `In block ${groupThousands(height.toString())}` : "" },
-    ];
+    return [sending, { label: "Confirming", state: "done", sub: "" }, { label: "Completed", state: "done", sub: "" }];
   }
   if (status === "failed") {
     // The fee it was charged is said once, in its row (sentView).
     return [
       sending,
-      { label: "Sent", state: "done", sub: "" },
+      { label: "Confirming", state: "done", sub: "" },
       { label: "Failed", state: "failed", sub: txErrorText(error) || reasonText(error) || "It didn't go through." },
     ];
   }
   if (status === "removed") {
     return [
       sending,
-      { label: "Sent", state: "done", sub: "" },
+      { label: "Confirming", state: "done", sub: "" },
       { label: "Failed", state: "failed", sub: "The network dropped it before it ran. No fee charged." },
     ];
   }
   return [
     sending,
     {
-      label: "Sent",
+      label: "Confirming",
       state: "current",
       sub: offline()
         ? "No connection. It's looked up again once you're back online."
@@ -268,7 +263,7 @@ export function sentSteps(sent, ov) {
           ? "Looking it up again…"
           : status === "unknown"
             ? "Taking longer than usual. It can still go through."
-            : "Waiting for a block, about 10 s",
+            : "About 10 s",
     },
     { label: "Completed", state: "upcoming", sub: "" },
   ];

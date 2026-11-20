@@ -124,7 +124,7 @@ describe("transaction details", () => {
     // No fee charged: its fee field has no amount.
     expect(view.fee).toBeTruthy();
     expect(view.fee).not.toMatch(/[1-9]/);
-    expect(visibleText(view.body)).not.toContain("Sending");
+    expect(visibleText(view.body)).not.toContain("Confirming");
     view.buttons[0].click();
     await settle();
     expect(actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RESEND_TX", hash: HASH });

@@ -157,7 +157,7 @@ describe("a stake or an unstake with Sozu, completed", () => {
 });
 
 describe("after Confirm", () => {
-  it("shows Sending at once, then Sent with the transaction ID, Copy and the Dusk explorer", async () => {
+  it("shows Sending at once, then Confirming with the transaction ID, Copy and the Dusk explorer", async () => {
     const state = reviewState();
     const app = popup(state);
     await settle();
@@ -171,7 +171,7 @@ describe("after Confirm", () => {
 
     reply.resolve({ ok: true, result: { hash: HASH } });
     await settle();
-    expect([phase(), stepStates(), stepTitle(1)]).toEqual(["sent", ["done", "current", "upcoming"], "Sent"]);
+    expect([phase(), stepStates(), stepTitle(1)]).toEqual(["sent", ["done", "current", "upcoming"], "Confirming"]);
     // Its ID, its memo and the most its fee costs.
     expect(visibleText(txId())).toBe("3e6a0e…ae84ba");
     expect(memo()).toBe("Lunch");
@@ -206,9 +206,7 @@ describe("after Confirm", () => {
     expect(noteTxStatus(state.sent, { hash: HASH, status: "executed", feePaid: "312345", blockHeight: "1234567" })).toBe(true);
     app.draw();
     expect([stepStates(), stepTitle(2)]).toEqual([["done", "done", "done"], "Completed"]);
-    // Its block, under Completed; the balance it went from; and its fee to the last lux, as its transaction's details
-    // say it.
-    expect(stepSub(2)).toMatch(exactly("1,234,567"));
+    // The balance it went from, and its fee to the last lux, as its transaction's details say it.
     expect(sentLine()).toMatch(/public/i);
     expect(sentLine()).not.toMatch(/shielded/i);
     expect(fee()).toMatch(exactly("0.000312345 DUSK"));
@@ -311,7 +309,6 @@ describe("after Confirm", () => {
     ov.txs = [{ hash: HASH, status: "executed", feePaid: "2136028", blockHeight: "4817567" }];
     app.draw();
     expect([phase(), stepStates(), stepTitle(2)]).toEqual(["sent", ["done", "done", "done"], "Completed"]);
-    expect(stepSub(2)).toMatch(exactly("4,817,567"));
     expect(sentLine()).toMatch(/public/i);
     expect(sentLine()).not.toMatch(/shielded/i);
     expect(fee()).toMatch(exactly("0.002136028 DUSK"));
@@ -413,7 +410,7 @@ describe("after Confirm", () => {
     expect(phase()).toBe("sending");
     sending.resolve({ ok: true, result: { hash: HASH } });
     await settle();
-    expect([phase(), stepStates(), stepTitle(1), cancelButton()]).toEqual(["sent", ["done", "current", "upcoming"], "Sent", null]);
+    expect([phase(), stepStates(), stepTitle(1), cancelButton()]).toEqual(["sent", ["done", "current", "upcoming"], "Confirming", null]);
   });
 
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent

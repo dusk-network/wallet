@@ -69,7 +69,7 @@ function statusNote(tx, desc, hidden) {
   switch (desc.status) {
     case "pending":
       if (globalThis.navigator?.onLine === false) return "No connection. It's looked up again once you're back online.";
-      return tx?.sent?.status === "mempool" ? "Still waiting to go through. Don't retry yet." : "Waiting for a block, about 10 s";
+      return tx?.sent?.status === "mempool" ? "Still waiting to go through. Don't retry yet." : "About 10 s";
     case "unknown":
       // Final on chain, its outcome not looked up yet; or the wallet's own
       // send it stopped waiting for.
@@ -169,15 +169,12 @@ function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
   const sent = tx?.sent ?? {};
   const watch = tx?.source === "sent" ? sent : {};
   return [
-    num(tx?.blockHeight) ? kv("Block", mono(num(tx.blockHeight))) : null,
     used || limit ? kv("Gas used", h("span", {}, [balance(hidden, used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`)])) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
-    tx?.source !== "sent" && ["executed", "failed"].includes(tx?.status) ? kv("Finality", "Final") : null,
     tx?.kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", contractValue(String(tx.contractId), nodeUrl || ov?.nodeUrl, showToast)) : null,
     tx?.fnName ? kv("Method", safeTextEl(String(tx.fnName), { mono: true })) : null,
-    tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), shortAddress(String(tx.blockHash)))) : null,
     at("Submitted", tx?.submittedAt),
-    at("Seen in mempool", watch.mempoolSeenAt),
+    at("Reached the network", watch.mempoolSeenAt),
     at("Last checked", watch.lastCheckedAt),
     at("Dropped", watch.removedAt),
     sent.reservationStatus ? kv("Shielded reservation", String(sent.reservationStatus)) : null,

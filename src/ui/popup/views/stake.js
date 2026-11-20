@@ -8,7 +8,6 @@ import {
   amountLocale,
   formatLuxForInput,
   formatLuxToDusk,
-  groupThousands,
   maxAmountLux,
   parseDuskToLux,
   safeBigInt,
@@ -899,14 +898,6 @@ function stakingOverview(ov, ctx, { state, actions }) {
           " · ",
           h("span", { class: "mono", title: pos.stakeAccount, text: shortAddress(pos.stakeAccount) }),
         ]),
-        pos.hasStake
-          ? kvRow(
-              "Active from",
-              safeBigInt(pos.info?.amount?.eligibility ?? 0, 0n) > 0n
-                ? ["Block ", h("span", { class: "mono", text: groupThousands(safeBigInt(pos.info.amount.eligibility, 0n).toString()) })]
-                : "Active now"
-            )
-          : null,
         pos.hasStake ? kvRow("Penalties", `${Number(pos.info?.faults ?? 0) || 0} soft · ${Number(pos.info?.hardFaults ?? 0) || 0} hard`) : null,
       ].filter(Boolean)),
       h("div", { class: "stake-cap", text: ownerCopy(pos) }),

@@ -161,7 +161,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(box.memo).toBe(memo);
     expect(box.made).toMatch(exactly(made));
   };
-  // Where a box says it stands, as its title opens: Waiting, Held, Sending, Not confirmed, Not sent or Sent.
+  // Where a box says it stands, as its title opens: Waiting, Held, Sending, Not confirmed, Not sent or Confirming.
   const standing = (box) => box.title.split(": ")[0];
   // What Don't send says: it wasn't sent, and nothing left; never that it went out already or couldn't be stopped.
   const calledOff = (showToast) => {
@@ -286,7 +286,7 @@ describe("payments from Send waiting for the network, on Home", () => {
   });
 
   // Lena's, in the app: "Sending: 0.01 DUSK…", then for 20 s no card, no payment and the old balance.
-  it("says one that went out after it waited went, with no button, till its block's in", () => {
+  it("says one that went out after it waited is confirming, with no button, till the network has run it", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -297,8 +297,8 @@ describe("payments from Send waiting for the network, on Home", () => {
     const [box, ...more] = boxes(document);
     expect(more).toEqual([]);
     pays(box, { memo: "Hors ligne un", made: "02:34" });
-    // Sent: nothing to wait for, or to call off.
-    expect([standing(box), box.kind]).toEqual(["Sent", "home-waiting--went"]);
+    // Confirming: nothing to wait for, or to call off.
+    expect([standing(box), box.kind]).toEqual(["Confirming", "home-waiting--went"]);
     expect([box.note, box.buttons]).toEqual(["", []]);
   });
 

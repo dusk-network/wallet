@@ -226,7 +226,7 @@ function evmWords({ booked = [], unread = [], approvalsUnread = [] } = {}, { sol
       ? `${unread.length === 1 ? "1 migration's fee" : `${unread.length} migrations' fees`} on ${chains.length === 1 ? chains[0] : "their chains"} couldn't be read: export again to add ${unread.length === 1 ? "it" : "them"}.`
       : "",
     failed.length ? `Some network fees${failed.length === 1 && failed[0] ? ` on ${failed[0]}` : ""} ${soleProfile ? "" : "may be in another profile's file, or "}couldn't be read: export again to add them.` : "",
-    ...[...before.values()].map(({ chain, from }) => `Network fees on ${chain || "its chain"} from before block ${Number(from).toLocaleString("en")} aren't in the file.`),
+    ...[...new Set([...before.values()].map(({ chain }) => chain || "its chain"))].map((chain) => `Older network fees on ${chain} aren't in the file.`),
   ];
 }
 
