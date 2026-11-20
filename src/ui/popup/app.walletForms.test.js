@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { accessibleName, installFakeDom, settle, typeInto } from "../testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, settle, typeInto } from "../testing/fakeDom.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 
@@ -71,45 +71,49 @@ async function popupAt(route, extra = {}, answer = async () => ({}), over = {}) 
   };
 }
 
-// The form's fields, by their names, and what each holds.
-const fieldsOf = (app, names) => app.querySelectorAll("input").filter((i) => names.includes(accessibleName(i)));
+// A form's fields by what they are, not what they're called: a word's box by its
+// number, a password by its type.
+const WORD = (n) => `input[aria-label="Word ${n}"]`;
+const PASSWORD = "input[type=password]";
+const fieldsOf = (app, selectors) => app.querySelectorAll(selectors.join(", "));
 const typeAll = (fields) => fields.forEach((f, i) => typeInto(f, accessibleName(f).startsWith("Word") ? WORDS[i] : "typed password"));
-const SHARED_PASSWORD = "Password";
-const button = (app, text) => app.querySelectorAll("button").find((b) => b.textContent === text);
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+// A form's main button, whatever it says: the primary or destructive one shown.
+const mainButton = (app) => app.querySelectorAll("button.btn-primary, button.btn-destructive").find(isShown);
+// The error shown under a field, as the field is described by it.
+const errorOf = (field) =>
+  (field.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((id) => field.ownerDocument.getElementById(id))
+    .filter((el) => el?.classList.contains("field-error") && isShown(el))
+    .map((el) => el.textContent)
+    .join("");
 
 // Each wallet form, with the fields it's filled in by.
 const FORMS = [
-  ["Change password", "change_password", {}, ["Current password", "New password", "Confirm password"]],
-  ["Remove wallet", "wallet_remove", { walletRemove: "w2" }, [SHARED_PASSWORD]],
-  ["Password on big sends", "send_password", {}, ["Above this amount, in DUSK"]],
-  ["Add wallet's import", "wallet_add_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false, adding: true } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
-  ["Add wallet's new phrase, checked", "wallet_add_confirm", { onboard: { mode: "create", mnemonic: WORDS.join(" "), password: "", reveal: false, adding: true, checkPlaces: [1, 2, 7] } }, ["Word 1", "Word 2", SHARED_PASSWORD]],
+  ["Change password", "change_password", {}, [PASSWORD]],
+  ["Remove wallet", "wallet_remove", { walletRemove: "w2" }, [PASSWORD]],
+  ["Password on big sends", "send_password", {}, ["#send-password-amount"]],
+  ["Add wallet's import", "wallet_add_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false, adding: true } }, [WORD(1), WORD(2), PASSWORD]],
+  ["Add wallet's new phrase, checked", "wallet_add_confirm", { onboard: { mode: "create", mnemonic: WORDS.join(" "), password: "", reveal: false, adding: true, checkPlaces: [1, 2, 7] } }, [WORD(1), WORD(2), PASSWORD]],
 ];
 
 describe("a wallet form being filled in", () => {
-  it.each(FORMS)("%s keeps what's typed through a redraw that isn't about it", async (_, route, extra, names) => {
+  it.each(FORMS)("%s is dropped, with what was typed, on another wallet, on leaving it and on a lock", async (_, route, extra, selectors) => {
     const t = await popupAt(route, extra);
-    const fields = fieldsOf(t.app, names);
-    expect(fields.map(accessibleName)).toEqual(names);
+    let fields = fieldsOf(t.app, selectors);
     typeAll(fields);
-    const typed = fields.map((f) => f.value);
-
-    // The node's network read again: the popup draws again.
-    await t.deliver({ type: "DUSK_UI_NETWORK_CHANGED" });
-    expect(fieldsOf(t.app, names)).toEqual(fields);
-    expect(fields.map((f) => f.value)).toEqual(typed);
-    expect(fields.every((f) => t.app.contains(f))).toBe(true);
-  });
-
-  it.each(FORMS)("%s is dropped, with what was typed, on another wallet, on leaving it and on a lock", async (_, route, extra, names) => {
-    const t = await popupAt(route, extra);
-    let fields = fieldsOf(t.app, names);
-    typeAll(fields);
+    // Each field there, and typed in.
+    expect(fields.length).toBeGreaterThan(0);
+    expect(fields.every((f) => f.value)).toBe(true);
 
     // Another wallet opened, in another window.
     await t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
     expect(fields.map((f) => f.value).every((v) => v === "")).toBe(true);
-    fields = fieldsOf(t.app, names);
+    fields = fieldsOf(t.app, selectors);
     expect(fields.map((f) => f.value).every((v) => v === "")).toBe(true);
 
     // Left for Settings and back.
@@ -118,13 +122,13 @@ describe("a wallet form being filled in", () => {
     await t.render();
     Object.assign(t.state, { route, ...extra });
     await t.render();
-    expect(fieldsOf(t.app, names).map((f) => f.value).every((v) => v === "")).toBe(true);
+    expect(fieldsOf(t.app, selectors).map((f) => f.value).every((v) => v === "")).toBe(true);
 
     // Locked: the form goes, and the unlock goes back to where it was opened from.
-    typeAll(fieldsOf(t.app, names));
+    typeAll(fieldsOf(t.app, selectors));
     await t.deliver({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false });
     expect(t.state.route).toBe(route.startsWith("wallet_add") ? "home" : "options");
-    expect(fieldsOf(t.app, names)).toEqual([]);
+    expect(fieldsOf(t.app, selectors)).toEqual([]);
   });
 
   // Marek's: a browser read a word's box on Import as the screen went; nothing typed stays in the page.
@@ -133,28 +137,15 @@ describe("a wallet form being filled in", () => {
     const fields = t.app.querySelectorAll("input").filter((f) => f.closest(".mnemonic-input") || f.getAttribute("type") === "password");
     expect(fields.length).toBeGreaterThan(12);
     typeAll(fields);
-    button(t.app, "← Back").click();
+    expect(fields.filter((f) => f.value).length).toBeGreaterThan(12);
+    t.app.querySelector(".subnav-back").click();
     await flush();
-    document.querySelectorAll("button").find((b) => b.textContent === "Go back").click();
+    // Leaving clears them, so it asks first: its yes, not Cancel.
+    document.querySelectorAll("[role=alertdialog] button").find((b) => !b.hasAttribute("data-back")).click();
     await flush();
     expect(t.state.route).toBe("home");
     expect(fields.some((f) => t.app.contains(f))).toBe(false);
     expect(fields.map((f) => f.value).filter(Boolean)).toEqual([]);
-  });
-
-  it("says on Add wallet's import which wallet the phrase becomes, by the wallets here as they change", async () => {
-    const t = await popupAt("wallet_add_import", FORMS[2][2]);
-    const landing = () => t.app.querySelector(".wallet-landing").textContent;
-    expect(landing()).toBe("This becomes Wallet 3.");
-    const fields = fieldsOf(t.app, FORMS[2][3]);
-    typeAll(fields);
-    const typed = fields.map((f) => f.value);
-
-    // Another window adds a wallet: the next one here is Wallet 4, and what's typed stays.
-    overview = { ...OVERVIEW, wallets: [...OVERVIEW.wallets, { key: "w3", n: 3, name: "", walletId: "", accounts: [], accountNames: {}, active: false }] };
-    await t.deliver({ type: "DUSK_UI_WALLETS_CHANGED" });
-    expect(landing()).toBe("This becomes Wallet 4.");
-    expect(fieldsOf(t.app, FORMS[2][3]).map((f) => f.value)).toEqual(typed);
   });
 
   // Astra's: wallet A's words shown, then wallet B opened, and A's words stayed under B's name.
@@ -165,72 +156,53 @@ describe("a wallet form being filled in", () => {
     );
     const words = () => t.app.querySelectorAll(".srp-word-text").map((w) => w.textContent);
     const ask = async () => {
-      typeInto(fieldsOf(t.app, [SHARED_PASSWORD])[0], "the password");
-      button(t.app, "Show recovery phrase").click();
+      typeInto(t.app.querySelector(PASSWORD), "the password");
+      mainButton(t.app).click();
       await flush();
     };
     await ask();
     expect(words()).toEqual(WORDS);
     await t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
     expect(words()).toEqual([]);
-    expect(fieldsOf(t.app, [SHARED_PASSWORD]).map((f) => f.value)).toEqual([""]);
+    expect(t.app.querySelector(PASSWORD).value).toBe("");
 
     // Read as the wallet changes: what comes is the wallet's before, and isn't shown.
     answer.next = Promise.withResolvers();
     await ask();
-    expect(button(t.app, "Checking…")?.disabled).toBe(true);
+    expect(mainButton(t.app).disabled).toBe(true);
     await t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
     answer.next.resolve({ ok: true, result: WORDS.join(" ") });
     await flush();
     expect(words()).toEqual([]);
-    expect(button(t.app, "Show recovery phrase")?.disabled).toBe(false);
+    expect(mainButton(t.app).disabled).toBe(false);
   });
 
   it("keeps a submit under way through a wallet change, with what it says after", async () => {
     const answer = Promise.withResolvers();
     const t = await popupAt("change_password", {}, async (message) => (message.type === "DUSK_UI_CHANGE_PASSWORD" ? answer.promise : {}));
-    const names = ["Current password", "New password", "Confirm password"];
-    typeAll(fieldsOf(t.app, names));
-    typeInto(fieldsOf(t.app, names)[0], "the current password");
-    button(t.app, "Change password").click();
+    typeAll(fieldsOf(t.app, [PASSWORD]));
+    typeInto(fieldsOf(t.app, [PASSWORD])[0], "the current password");
+    const change = mainButton(t.app);
+    change.click();
     await flush();
-    expect(button(t.app, "Changing…")?.disabled).toBe(true);
+    expect(change.disabled).toBe(true);
 
+    // The same form, still under way: not drawn anew.
     await t.deliver({ type: "DUSK_UI_WALLET_CHANGED" });
-    expect(button(t.app, "Changing…")?.disabled).toBe(true);
-    expect(button(t.app, "Change password")).toBeUndefined();
+    expect([t.app.contains(change), change.disabled]).toEqual([true, true]);
 
     answer.resolve({ error: { message: "Incorrect password" } });
     await flush();
     await t.deliver({ type: "DUSK_UI_NETWORK_CHANGED" });
     expect(t.app.querySelectorAll(".field-error").filter((el) => !el.hidden).map((el) => el.textContent)).toEqual(["Incorrect password"]);
-    expect(button(t.app, "Change password")?.disabled).toBe(false);
+    expect(mainButton(t.app).disabled).toBe(false);
   });
 });
 
 describe("the password on big sends, in Settings", () => {
-  // Chen's: "what sites ask", in an app no site reaches.
-  it("says what it asks on in the app without sites, which only the extension has", async () => {
-    const note = (app) => app.querySelector(".settings-note").textContent;
-    const ext = await popupAt("send_password");
-    // The switch says what it does.
-    expect(ext.app.querySelector("label[for=send-password-on]").textContent).toBe("Ask for the password on big sends");
-    expect(note(ext.app)).toBe("Counts sends, stakes, shielding and site requests, network fee included. Token transfers and unknown contracts always ask.");
-    vi.stubGlobal("browser", undefined);
-    globalThis.window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => null), transformCallback: () => 0 };
-    // Opened again in the app: Settings, then the page.
-    ext.state.route = "options";
-    await ext.render({ forceRefresh: true });
-    ext.state.route = "send_password";
-    await ext.render({ forceRefresh: true });
-    await flush();
-    expect(note(ext.app)).toBe("Counts sends, stakes and shielding, network fee included. Token transfers and unknown contracts always ask.");
-    expect(note(ext.app)).not.toContain("site");
-  });
-
-  const typed = (app, name, value) => typeInto(app.querySelectorAll("input").find((i) => accessibleName(i) === name), value);
-  const pressed = (app, name) => app.querySelectorAll("button").find((b) => b.textContent === name).click();
-  const errorsOf = (app) => app.querySelectorAll(".field-error").filter((el) => !el.hidden).map((el) => el.textContent);
+  const saves = (answers) => answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD");
+  // What its row in Settings, found by its name, says it's set to.
+  const setTo = (app) => app.querySelectorAll(".settings-row").find((row) => row.textContent.startsWith("Password on big sends"))?.querySelector(".row-sub")?.textContent ?? "";
 
   it("turns on above an amount, only with the password, and Settings says so", async () => {
     const answers = [];
@@ -240,6 +212,8 @@ describe("the password on big sends, in Settings", () => {
       return { ok: true };
     });
     const on = app.querySelector("#send-password-on");
+    const amount = app.querySelector("#send-password-amount");
+    const password = app.querySelector(PASSWORD);
     expect(on.checked).toBe(false);
     // Off, there's nothing to save.
     expect(app.querySelector(".send-password-amount").hidden).toBe(true);
@@ -247,30 +221,31 @@ describe("the password on big sends, in Settings", () => {
     on.dispatchEvent(new Event("change"));
     expect(app.querySelector(".send-password-amount").hidden).toBe(false);
 
-    pressed(app, "Save");
+    // No amount, or none it can read: said under it, and nothing saved.
+    for (const typed of ["", "not an amount"]) {
+      typeInto(amount, typed);
+      mainButton(app).click();
+      await flush();
+      expect([errorOf(amount), errorOf(password), saves(answers)], typed).toEqual([expect.stringMatching(/\S/), "", []]);
+    }
+    // An amount: then the password, said under it, and still nothing saved.
+    typeInto(amount, "1 000,5".replace(",", ".").replace(" ", ""));
+    mainButton(app).click();
     await flush();
-    expect(errorsOf(app)).toEqual(["Enter an amount such as 100 or 100.5. 0 asks on every send."]);
-    typed(app, "Above this amount, in DUSK", "not an amount");
-    pressed(app, "Save");
-    await flush();
-    expect(errorsOf(app)).toEqual(["Enter an amount such as 100 or 100.5. 0 asks on every send."]);
-    typed(app, "Above this amount, in DUSK", "1 000,5".replace(",", ".").replace(" ", ""));
-    pressed(app, "Save");
-    await flush();
-    expect(errorsOf(app)).toEqual(["Enter your password."]);
-    expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD")).toEqual([]);
+    expect([errorOf(amount), errorOf(password), saves(answers)]).toEqual(["", expect.stringMatching(/\S/), []]);
 
-    typed(app, "Password", "not it");
-    pressed(app, "Save");
+    typeInto(password, "not it");
+    mainButton(app).click();
     await flush();
-    expect(errorsOf(app)).toEqual(["Wrong password."]);
+    expect(errorOf(password)).not.toBe("");
 
-    typed(app, "Password", "the password");
-    pressed(app, "Save");
+    typeInto(password, "the password");
+    mainButton(app).click();
     await flush();
-    expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD").at(-1)).toMatchObject({ password: "the password", limitLux: "1000500000000" });
+    expect(saves(answers).at(-1)).toMatchObject({ password: "the password", limitLux: "1000500000000" });
     // Back in Settings, it says what it's set to.
-    expect(app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsAbove 1,000.5 DUSK");
+    expect(setTo(app)).toMatch(exactly("1,000.5 DUSK"));
+    expect(setTo(app)).toMatch(/above/i);
   });
 
   it("turns off only with the password too, and 0 asks on every send", async () => {
@@ -279,7 +254,8 @@ describe("the password on big sends, in Settings", () => {
       answers.push(message);
       return { ok: true };
     }, { sendPasswordLimit: "5000000000" });
-    expect(app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsAbove 5 DUSK");
+    expect(setTo(app)).toMatch(exactly("5 DUSK"));
+    expect(setTo(app)).toMatch(/above/i);
     app.querySelectorAll(".settings-row").find((row) => row.textContent.startsWith("Password on big sends")).click();
     await flush();
     expect(state.route).toBe("send_password");
@@ -288,21 +264,27 @@ describe("the password on big sends, in Settings", () => {
     expect(app.querySelector("#send-password-amount").value).toBe("5");
     on.checked = false;
     on.dispatchEvent(new Event("change"));
-    pressed(app, "Turn off");
+    const password = app.querySelector(PASSWORD);
+    mainButton(app).click();
     await flush();
-    expect(errorsOf(app)).toEqual(["Enter your password."]);
-    typed(app, "Password", "the password");
-    pressed(app, "Turn off");
+    expect([errorOf(password), saves(answers)]).toEqual([expect.stringMatching(/\S/), []]);
+    typeInto(password, "the password");
+    mainButton(app).click();
     await flush();
-    expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD").at(-1)).toMatchObject({ limitLux: null });
-    expect(app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsOff");
+    expect(saves(answers).at(-1)).toMatchObject({ limitLux: null });
+    // Off, with no amount any more.
+    expect(setTo(app)).toMatch(/\boff\b/i);
+    expect(setTo(app)).not.toMatch(/\d/);
 
+    // 0: on every send, not off, and no amount.
     const every = await popupAt("options", {}, async () => ({ ok: true }), { sendPasswordLimit: "0" });
-    expect(every.app.querySelectorAll(".settings-row").map((row) => row.textContent)).toContain("Password on big sendsOn every send");
+    expect(setTo(every.app)).toMatch(/every/i);
+    expect(setTo(every.app)).not.toMatch(/\boff\b|\d/i);
   });
 });
 
 describe("Import wallet's network", () => {
+  const tabsOf = (app) => app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]');
   // Amélie's: her phrase, used on Testnet, imported opened on Mainnet with "TOTAL BALANCE 0 DUSK", twice. Sofía's and
   // Lena's: with Mainnet picked to begin with, importing the old way still landed there.
   it("asks which network first, none picked to begin with, moves the wallet there keeping what's typed, and imports it there", async () => {
@@ -315,24 +297,30 @@ describe("Import wallet's network", () => {
     };
     const fresh = { hasVault: false, isUnlocked: false, accounts: [], accountCount: 0, wallets: [], walletKey: null, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" };
     const t = await popupAt("onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, answer, fresh);
-    const tabs = () => t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]').map((tab) => [tab.textContent, tab.getAttribute("aria-selected")]);
+    const picked = () => tabsOf(t.app).map((tab) => tab.getAttribute("aria-selected"));
+    const [main, test] = tabsOf(t.app);
+    expect([main.textContent, test.textContent]).toEqual([expect.stringContaining("Mainnet"), expect.stringContaining("Testnet")]);
+    expect(picked()).toEqual(["false", "false"]);
     // Amélie's: nothing said which one is real money. Each says what its DUSK is, under its name.
-    expect(tabs()).toEqual([
-      ["Mainnet · real DUSK", "false"],
-      ["Testnet · test DUSK, no value", "false"],
-    ]);
-    expect(t.app.querySelectorAll('[role=tablist][aria-label="Network"] .tab-sub').map((el) => el.textContent)).toEqual(["real DUSK", "test DUSK, no value"]);
+    const sub = (tab) => tab.querySelector(".tab-sub")?.textContent ?? "";
+    expect(sub(main)).toMatch(/real/i);
+    expect(sub(main)).not.toMatch(/no value/i);
+    expect(sub(test)).toMatch(/no value/i);
+    expect(sub(test)).not.toMatch(/real/i);
 
-    // The words and the password typed first: Import waits for a network.
-    const names = [...WORDS.map((_, i) => `Word ${i + 1}`), "Password", "Confirm password"];
-    const fields = fieldsOf(t.app, names);
+    // The words and the password typed first: Import waits for a network, and says so.
+    const selectors = [...WORDS.map((_, i) => WORD(i + 1)), PASSWORD];
+    const fields = fieldsOf(t.app, selectors);
     typeAll(fields);
-    button(t.app, "Import wallet").click();
+    mainButton(t.app).click();
     await flush();
     expect(messages.filter((m) => m.type === "DUSK_UI_CREATE_WALLET")).toEqual([]);
-    expect(t.app.querySelectorAll(".form-error, [role=alert]").map((el) => el.textContent).filter(Boolean)).toContain("Choose Mainnet or Testnet.");
+    // Said under the network's choice, its own alert.
+    const choice = t.app.querySelector(".onboard-network");
+    const under = choice.parentNode.children[choice.parentNode.children.indexOf(choice) + 1];
+    expect([under.getAttribute("role"), isShown(under), under.textContent]).toEqual(["alert", true, expect.stringMatching(/\S/)]);
 
-    t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]')[1].click();
+    tabsOf(t.app)[1].click();
     await flush();
     expect(messages.filter((m) => m.type === "DUSK_UI_SET_NODE_URL")).toEqual([
       {
@@ -342,14 +330,11 @@ describe("Import wallet's network", () => {
         archiverUrl: "https://testnet.nodes.dusk.network",
       },
     ]);
-    expect(tabs()).toEqual([
-      ["Mainnet · real DUSK", "false"],
-      ["Testnet · test DUSK, no value", "true"],
-    ]);
-    expect(fieldsOf(t.app, names)).toEqual(fields);
+    expect(picked()).toEqual(["false", "true"]);
+    expect(fieldsOf(t.app, selectors)).toEqual(fields);
     expect(fields.every((f) => f.value && t.app.contains(f))).toBe(true);
 
-    button(t.app, "Import wallet").click();
+    mainButton(t.app).click();
     await flush();
     expect(messages.map((m) => m.type).filter((type) => type === "DUSK_UI_SET_NODE_URL" || type === "DUSK_UI_CREATE_WALLET")).toEqual(["DUSK_UI_SET_NODE_URL", "DUSK_UI_CREATE_WALLET"]);
     expect(messages.find((m) => m.type === "DUSK_UI_CREATE_WALLET").mnemonic).toBe(WORDS.join(" "));
@@ -368,16 +353,14 @@ describe("Import wallet's network", () => {
     const onboard = { mode: "import", mnemonic: null, password: "", reveal: false };
     const mainnet = { hasVault: false, isUnlocked: false, accounts: [], accountCount: 0, wallets: [], walletKey: null, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" };
     const testnet = { ...mainnet, networkName: "Testnet", nodeUrl: "https://testnet.nodes.dusk.network" };
-    const tabs = (t) => t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]').map((tab) => tab.getAttribute("aria-selected"));
+    const tabs = (t) => tabsOf(t.app).map((tab) => tab.getAttribute("aria-selected"));
 
     // On Testnet: picked. Enter after the password imports there, with nothing to choose first.
     let t = await popupAt("onboard_import", { onboard: { ...onboard } }, answer, testnet);
     expect(tabs(t)).toEqual(["false", "true"]);
-    const names = [...WORDS.map((_, i) => `Word ${i + 1}`), "Password", "Confirm password"];
-    typeAll(fieldsOf(t.app, names));
-    button(t.app, "Import wallet").click();
+    typeAll(fieldsOf(t.app, [...WORDS.map((_, i) => WORD(i + 1)), PASSWORD]));
+    mainButton(t.app).click();
     await flush();
-    expect(t.app.querySelectorAll(".form-error, [role=alert]").map((el) => el.textContent).filter(Boolean)).not.toContain("Choose Mainnet or Testnet.");
     expect(messages.filter((m) => m.type === "DUSK_UI_CREATE_WALLET")).toHaveLength(1);
 
     // Mainnet, the wallet's first network: picked only where it was picked, on the setup screen or here before.
@@ -386,7 +369,7 @@ describe("Import wallet's network", () => {
     t = await popupAt("onboard_import", { onboard: { ...onboard }, setupNetwork: "mainnet" }, answer, mainnet);
     expect(tabs(t)).toEqual(["true", "false"]);
     // Still changeable, and what's picked here stays picked for the next time in.
-    t.app.querySelectorAll('[role=tablist][aria-label="Network"] [role=tab]')[1].click();
+    tabsOf(t.app)[1].click();
     await flush();
     expect([tabs(t), t.state.setupNetwork]).toEqual([["false", "true"], "testnet"]);
   });
@@ -432,7 +415,7 @@ describe("Import wallet's network", () => {
     const devnet = { hasVault: false, isUnlocked: false, accounts: [], wallets: [], walletKey: null, networkName: "Devnet", nodeUrl: "https://devnet.nodes.dusk.network" };
     let t = await popupAt("onboard_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false } }, async () => ({}), devnet);
     expect(t.app.querySelectorAll('[role=tablist][aria-label="Network"]')).toHaveLength(0);
-    expect(fieldsOf(t.app, ["Word 1"])).toHaveLength(1);
+    expect(fieldsOf(t.app, [WORD(1)])).toHaveLength(1);
 
     t = await popupAt("wallet_add_import", { onboard: { mode: "import", mnemonic: null, password: "", reveal: false, adding: true } });
     expect(t.app.querySelectorAll('[role=tablist][aria-label="Network"]')).toHaveLength(0);

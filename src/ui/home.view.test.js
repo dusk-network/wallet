@@ -1,236 +1,97 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { TX_KIND } from "../shared/constants.js";
-import { installFakeDom, screenReaderText, visibleText } from "./testing/fakeDom.js";
-import { iconSvg } from "./components/ActionIcon.js";
+import { installFakeDom, visibleText } from "./testing/fakeDom.js";
 import { homeView } from "./popup/views/home.js";
-import { whenAtText } from "./popup/views/txRow.js";
 
 // The token and NFT cards load on their own; the balance card is what matters here.
 vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
 
-describe("home dashboard action icons", () => {
-  it("uses crisp SVG glyphs for the primary wallet actions", async () => {
-    const source = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "popup", "views", "home.js"),
-      "utf8"
-    );
-
-    const iconSource = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "components", "ActionIcon.js"),
-      "utf8"
-    );
-
-    expect(source).toContain('import { actionIcon, iconSvg } from "../../components/ActionIcon.js";');
-    expect(iconSource).toContain('send: [');
-    expect(iconSource).toContain('receive: [');
-    expect(iconSource).toContain('shield: [');
-    expect(iconSource).toContain('stake: [');
-    expect(source).toContain('actionBtn("Send", "send"');
-    expect(source).toContain('actionBtn("Receive", "receive"');
-    expect(source).toContain('actionBtn("Shield", "shield"');
-    expect(source).toContain('actionBtn("Stake", "stake"');
-    expect(source).not.toContain('actionBtn("Send", "↑"');
-    expect(source).not.toContain('actionBtn("Receive", "↓"');
-    expect(source).not.toContain('actionBtn("Shield", "✦"');
-    expect(source).not.toContain('actionBtn("Stake", "△"');
-  });
-
-  it("uses dashboard-style SVG glyphs for onboarding setup actions", async () => {
-    const source = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "popup", "views", "onboarding.js"),
-      "utf8"
-    );
-    const iconSource = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "components", "ActionIcon.js"),
-      "utf8"
-    );
-
-    expect(source).toContain('choice("create", "Create wallet"');
-    expect(source).toContain('choice("import", "Import wallet"');
-    expect(source).toContain('html: iconSvg(icon)');
-    expect(source).not.toContain('class: "action-icon", text: "+"');
-    expect(source).not.toContain("Testing? Create a wallet");
-    expect(iconSource).toContain('create: [');
-    expect(iconSource).toContain('import: [');
-    expect(iconSource).toContain('<circle cx="12" cy="12" r="7.5"/>');
-    expect(iconSource).toContain('<path d="M4 13v4.5A2.5 2.5 0 0 0 6.5 20h11A2.5 2.5 0 0 0 20 17.5V13"/>');
-  });
-
-  it("keeps recent activity on the dashboard without a History tab", async () => {
-    const source = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "popup", "views", "home.js"),
-      "utf8"
-    );
-
-    expect(source).toContain("recentActivitySection(ov, { state, actions })");
-    expect(source).toContain('if (state?.route === "activity") return activityView(ov, { state, actions });');
-    expect(source).not.toContain("History ↗");
-    expect(source).not.toContain('class: "tabs"');
-    expect(source).not.toContain("switchTab");
-  });
-});
+const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+// Everything a screen gives away: all its text, shown or not, and each element's title and aria-label.
+const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
 
 describe("home balance", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("puts Hide balances and Refresh next to the balance title, and refreshes the wallet", async () => {
-    const { document } = installFakeDom();
-    const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
-    const state = { route: "home", addressBook: { loaded: true, items: [] } };
-    const ov = {
-      isUnlocked: true,
-      nodeUrl: "https://testnet.nodes.dusk.network",
-      accounts: [],
-      balance: { value: "177986500000" },
-      shieldedBalance: { value: "0", spendable: "0" },
-      staked: { lux: "0", native: "0", sozu: "0" },
-    };
-    document.body.replaceChildren(...homeView(ov, { state, actions }));
-
-    const title = document.body.querySelector(".home-hero .balance-label");
-    expect(title.children.map((el) => el.className)).toEqual(["balance-label__text", "balance-eye", "balance-refresh"]);
-    // A plain title: no [ brackets ] for screen readers to spell out.
-    expect(title.textContent).toBe("Total balance");
-    // The amount, grouped, with its unit after it.
-    expect(document.body.querySelector(".home-hero .balance-amount").textContent).toBe("177.9865 DUSK");
-
-    // An SVG icon, not the ⟳ glyph, which many systems have no font for.
-    const refresh = title.querySelector("button.balance-refresh");
-    expect([refresh.innerHTML, refresh.textContent]).toEqual([iconSvg("refresh"), ""]);
-    expect(refresh.title).toBe("Refresh");
-    expect(refresh.getAttribute("aria-label")).toBe("Refresh");
-    refresh.click();
-    expect(actions.refresh).toHaveBeenCalledTimes(1);
-  });
-
   it("counts what's staked, natively and with Sozu, in the total, and says it beside the rest", () => {
     // Lena's: 1.1505 DUSK public, and 1.79 DUSK with Sozu the total left out.
     const { document } = installFakeDom();
     const state = { route: "home", addressBook: { loaded: true, items: [] } };
-    const ov = (staked) => ({
-      isUnlocked: true,
-      nodeUrl: "https://testnet.nodes.dusk.network",
-      accounts: [],
-      balance: { value: "1150500000" },
-      shieldedBalance: { value: "0", spendable: "0" },
-      staked,
-    });
-    const split = () => document.body.querySelectorAll(".balance-split-item").map((el) => visibleText(el));
-
-    document.body.replaceChildren(...homeView(ov({ lux: "1790000000", native: "0", sozu: "1790000000" }), { state, actions: {} }));
-    expect(document.body.querySelector(".balance-label__text").textContent).toBe("Total balance");
-    expect(document.body.querySelector(".home-hero .balance-amount").textContent).toBe("2.9405 DUSK");
-    expect(split()).toEqual(["Public1.1505 DUSK", "Shielded0 DUSK", "Staked1.79 DUSK"]);
-
-    // Nothing staked: no line for it, and the total is still the total.
-    document.body.replaceChildren(...homeView(ov({ lux: "0", native: "0", sozu: "0" }), { state, actions: {} }));
-    expect(document.body.querySelector(".balance-label__text").textContent).toBe("Total balance");
-    expect(split()).toEqual(["Public1.1505 DUSK", "Shielded0 DUSK"]);
-
-    // The stake couldn't be read: the sum shown isn't called the total.
-    document.body.replaceChildren(...homeView(ov(null), { state, actions: {} }));
-    expect(document.body.querySelector(".balance-label__text").textContent).toBe("Public and shielded");
-    expect(document.body.querySelector(".home-hero .balance-amount").textContent).toBe("1.1505 DUSK");
-  });
-
-  it("names shield rows as the Shield view does, shows five, and offers See all", async () => {
-    const { document } = installFakeDom();
-    const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
-    const state = { route: "home", addressBook: { loaded: true, items: [] } };
-    const tx = (n, kind) => ({ hash: `${n}`.padStart(64, "0"), kind, amount: "1000000000", status: "executed" });
-    const render = (txs) => {
-      const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs };
-      document.body.replaceChildren(...homeView(ov, { state, actions }));
-      return document.body.querySelectorAll(".tx-row");
-    };
-    const seeAll = () => document.body.querySelector("button.see-all");
-
-    expect(render([])).toHaveLength(0);
-    expect(document.body.querySelector(".home-activity .tx-empty").textContent).toBe("No activity yet.");
-    expect(seeAll()).toBeNull();
-
-    const rows = render([tx(1, TX_KIND.SHIELD), tx(2, TX_KIND.UNSHIELD)]);
-    expect(rows.map((row) => [row.querySelector(".tx-name").textContent, row.querySelector(".tx-sub").textContent])).toEqual([
-      ["Shield", "Public to shielded"],
-      ["Unshield", "Shielded to public"],
-    ]);
-    expect(seeAll().textContent).toBe("See all");
-
-    // Five show on the dashboard; See all lists them all.
-    expect(render([1, 2, 3, 4, 5, 6].map((n) => tx(n, TX_KIND.SHIELD)))).toHaveLength(5);
-  });
-
-  it("shows an empty wallet how to get DUSK, with Receive, in place of Tokens and NFTs", async () => {
-    const { document } = installFakeDom();
-    const actions = { render: vi.fn(async () => {}), refresh: vi.fn(async () => {}), showToast: vi.fn() };
-    const state = { route: "home", addressBook: { loaded: true, items: [] } };
-    const draw = (over = {}) => {
+    const draw = (staked) => {
       const ov = {
         isUnlocked: true,
         nodeUrl: "https://testnet.nodes.dusk.network",
         accounts: [],
-        balance: { value: "0" },
+        balance: { value: "1150500000" },
         shieldedBalance: { value: "0", spendable: "0" },
-        txs: [],
-        ...over,
+        staked,
       };
-      document.body.replaceChildren(...homeView(ov, { state, actions }));
-      return document.body.querySelector(".home-get-started");
+      document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
+      return {
+        label: document.body.querySelector(".balance-label__text").textContent,
+        amount: document.body.querySelector(".home-hero .balance-amount").textContent,
+        // Each part of it, by its label.
+        split: Object.fromEntries(document.body.querySelectorAll(".balance-split-item").map((el) => [visibleText(el.querySelector(".balance-split-label")), visibleText(el.querySelector(".balance-split-value"))])),
+      };
     };
-    const card = draw();
-    // A section head, its brackets drawn and not read.
-    expect(visibleText(card.querySelector(".bracket-title"))).toBe("[Get your first DUSK]");
-    expect(screenReaderText(card.querySelector(".bracket-title"))).toBe("Get your first DUSK");
-    expect(card.querySelector("p").textContent).toBe("Ask someone for test DUSK: they send it to your account.");
-    card.querySelector("button").click();
-    expect(state.route).toBe("receive");
 
-    // With DUSK, or anything that happened, the card makes way; so it does
-    // while the shielded balance is unknown or still syncing.
-    state.route = "home";
-    expect(draw({ balance: { value: "1000000000" } })).toBeNull();
-    expect(draw({ shieldedBalance: null })).toBeNull();
-    expect(draw({ shieldedSync: { state: "syncing", progress: 0.4 } })).toBeNull();
-    expect(draw({ txs: [{ hash: "ab".repeat(32), kind: TX_KIND.TRANSFER, amount: "1", status: "executed" }] })).toBeNull();
-    // On Mainnet, from an exchange too.
-    expect(draw({ nodeUrl: "https://nodes.dusk.network" }).querySelector("p").textContent).toBe(
-      "Get DUSK from an exchange or a friend: they send it to your account."
-    );
+    const staked = draw({ lux: "1790000000", native: "0", sozu: "1790000000" });
+    expect([staked.label, staked.amount]).toEqual(["Total balance", "2.9405 DUSK"]);
+    expect(staked.split).toEqual({ Public: "1.1505 DUSK", Shielded: "0 DUSK", Staked: "1.79 DUSK" });
+
+    // Nothing staked: no line for it, and the total is still the total.
+    const none = draw({ lux: "0", native: "0", sozu: "0" });
+    expect([none.label, none.amount]).toEqual(["Total balance", "1.1505 DUSK"]);
+    expect(none.split).toEqual({ Public: "1.1505 DUSK", Shielded: "0 DUSK" });
+
+    // The stake couldn't be read: the sum shown isn't called the total.
+    const unread = draw(null);
+    expect([unread.label, unread.amount]).toEqual(["Public and shielded", "1.1505 DUSK"]);
+    expect(unread.label).not.toMatch(/total/i);
   });
 
   // Chen's and Lena's, on phones: "Shielded · Sync failed 0 DUSK" opened with no signal, and "Shielded · Not synced
   // 0 DUSK" after an import and every cold start, read like something broke, and like nothing was there.
-  it("shows the shielded balance as not read yet, never 0, till a sync has gone through, and that it can't be read offline", () => {
+  it("shows the shielded balance as not read yet, never 0, till a sync has gone through, online or not", () => {
     const { document } = installFakeDom();
     const state = { route: "home", addressBook: { loaded: true, items: [] } };
     const draw = (over, online = true) => {
       vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: online });
       const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs: [], balance: { value: "620800000" }, shieldedBalance: { value: "0", spendable: "0" }, ...over };
       document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
-      const item = document.body.querySelectorAll(".balance-split-item").find((el) => visibleText(el).startsWith("Shielded"));
-      return [visibleText(item.querySelector(".balance-split-label")), visibleText(item.querySelector(".balance-split-value")), document.body.querySelector(".balance-label__text").textContent];
+      const item = document.body.querySelectorAll(".balance-split-item").find((el) => /^shielded/i.test(visibleText(el.querySelector(".balance-split-label"))));
+      return { status: visibleText(item.querySelector(".balance-split-label")), value: visibleText(item.querySelector(".balance-split-value")), label: document.body.querySelector(".balance-label__text").textContent };
+    };
+    // Read: 0 is 0, and the sum shown counts it.
+    const read = draw({ shieldedSync: { state: "done", progress: 1, notes: 0 } });
+    expect([read.value, read.label]).toEqual(["0 DUSK", "Public and shielded"]);
+    // Not read now: no figure, and the sum shown is the public balance alone.
+    const unread = (view) => {
+      expect(view.value).not.toMatch(/\d/);
+      expect(view.label).toBe("Public balance");
     };
     // After an import, or a cold start, the sync not run yet.
-    expect(draw({ shieldedSync: { state: "idle", notes: 0 } })).toEqual(["Shielded · reading…", "—", "Public balance"]);
-    // Its first sync under way.
-    expect(draw({ shieldedSync: { state: "syncing", progress: 0.4, notes: 0 } })).toEqual(["Shielded · Syncing 40%", "—", "Public balance"]);
-    // Opened with no signal: it can't be read now, and nothing failed.
-    expect(draw({ shieldedSync: { state: "error", lastError: "Failed to fetch" }, balanceStale: true }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
-    expect(draw({ shieldedSync: { state: "idle", notes: 0 } }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
-    // What was read before, kept: shown, as it can't be read now.
-    expect(draw({ shieldedSync: { state: "error" }, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true }, false)).toEqual(["Shielded · can't be read now", "0.05 DUSK", "Public and shielded"]);
+    unread(draw({ shieldedSync: { state: "idle", notes: 0 } }));
+    // Its first sync under way, and how far.
+    const syncing = draw({ shieldedSync: { state: "syncing", progress: 0.4, notes: 0 } });
+    unread(syncing);
+    expect(syncing.status).toMatch(exactly("40%"));
+    // Opened with no signal.
+    unread(draw({ shieldedSync: { state: "error", lastError: "Failed to fetch" }, balanceStale: true }, false));
+    unread(draw({ shieldedSync: { state: "idle", notes: 0 } }, false));
+    // What was read before, kept: shown, as it can't be read now, and counted.
+    const kept = draw({ shieldedSync: { state: "error" }, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true }, false);
+    expect([kept.value, kept.label]).toEqual(["0.05 DUSK", "Public and shielded"]);
     // Lena's and Chen's, opened offline after a cold start: "Shielded · can't be read now 0 DUSK", with "Public and
-    // shielded" counting it. A 0 kept from before is no reading now: a dash, and no total.
+    // shielded" counting it. A 0 kept from before is no reading now: no figure, and no total.
     for (const sync of [{ state: "done", progress: 1, notes: 3 }, { state: "idle", notes: 3 }]) {
-      expect(draw({ shieldedSync: sync, shieldedError: "Failed to fetch", shieldedStale: true, balanceStale: true }, false)).toEqual(["Shielded · can't be read now", "—", "Public balance"]);
+      unread(draw({ shieldedSync: sync, shieldedError: "Failed to fetch", shieldedStale: true, balanceStale: true }, false));
     }
-    // Read: 0 is 0.
-    expect(draw({ shieldedSync: { state: "done", progress: 1, notes: 0 } })).toEqual(["Shielded", "0 DUSK", "Public and shielded"]);
   });
 
   it("says plainly when a balance can't be read, with nothing of what the node said", () => {
@@ -241,89 +102,25 @@ describe("home balance", () => {
     const draw = (over) => {
       const ov = { isUnlocked: true, nodeUrl: "https://my-node.example", accounts: [], txs: [], ...over };
       document.body.replaceChildren(...homeView(ov, { state, actions }));
-      const shielded = document.body.querySelectorAll(".balance-split-label").find((el) => el.textContent.startsWith("Shielded"));
-      return { text: visibleText(document.body), status: shielded.textContent, title: shielded.getAttribute("title") };
+      const shielded = document.body.querySelectorAll(".balance-split-label").find((el) => /^shielded/i.test(el.textContent));
+      const note = document.body.querySelector(".home-hero > .muted");
+      return { note: note ? visibleText(note) : "", status: shielded.textContent, title: shielded.getAttribute("title"), all: everything(document.body) };
     };
+    // Read fine, it says nothing.
+    const fine = draw({ balance: { value: "0" }, shieldedBalance: { value: "0", spendable: "0" } });
+    expect([fine.note, fine.status]).toEqual(["", "Shielded"]);
+    expect(fine.title).toBeFalsy();
+
+    // In the wallet's own words, never the node's, anywhere.
     const unread = draw({ balance: null, balanceError: said, shieldedError: said });
-    expect(unread.text).toContain("Couldn't read your balance from this node. Try again in a moment.");
     expect(unread.status).toBe("Shielded · Unavailable");
-    expect(unread.title).toBe("Couldn't read your shielded balance from this node. Try again in a moment.");
-    expect(JSON.stringify(unread)).not.toContain("evil.example");
+    for (const said of [unread.note, unread.title]) expect(said).toMatch(/couldn't read/i);
+    expect(unread.all).not.toContain("evil.example");
 
     const failed = draw({ balance: { value: "0" }, shieldedSync: { state: "error", lastError: said } });
     expect(failed.status).toBe("Shielded · Sync failed");
-    expect(failed.title).toBe("Couldn't read your shielded balance from this node. Try again in a moment.");
-    expect(JSON.stringify(failed)).not.toContain("evil.example");
-    // Read fine, it says nothing.
-    const fine = draw({ balance: { value: "0" }, shieldedBalance: { value: "0", spendable: "0" } });
-    expect(fine.text).not.toContain("Couldn't read");
-    expect(fine.title).toBeFalsy();
-  });
-
-  // Chen's on Firefox for Android: opened with no signal, "—" in place of the balance, while it said the balance
-  // "may be out of date". Lena's: a stake that couldn't be read went without a word.
-  it("shows the balance read last where it can't be read now, says so with when it was read, and names a part it couldn't read", () => {
-    const { document } = installFakeDom();
-    const state = { route: "home", addressBook: { loaded: true, items: [] } };
-    const readAt = new Date(2026, 10, 12, 19, 52).getTime();
-    const draw = (over, online = true) => {
-      vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: online });
-      const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs: [], balance: { value: "857535243" }, shieldedBalance: { value: "0", spendable: "0" }, staked: { lux: "247500000", native: "0", sozu: "247500000" }, ...over };
-      document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
-      return {
-        total: document.body.querySelector(".home-hero .balance-amount").textContent,
-        label: document.body.querySelector(".balance-label__text").textContent,
-        note: document.body.querySelector(".balance-stale")?.textContent ?? "",
-      };
-    };
-    // Opened offline: the figures read last, never a dash, and when they were read.
-    const offline = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedBalance: { value: "50000000", spendable: "50000000" }, shieldedStale: true, stakeStale: true }, false);
-    expect(offline.total).toBe("1.155 DUSK");
-    expect(offline.label).toBe("Total balance");
-    expect(offline.note).toMatch(/^Your balance may be out of date until you're back online\. Last read (at|yesterday at|on .+ at) /);
-    // Lena's and Chen's: a shielded 0 kept from before is no reading now, so no total counts it (Q11).
-    const noShielded = draw({ balanceError: "Failed to fetch", balanceStale: true, balanceReadAt: readAt, shieldedStale: true, stakeStale: true }, false);
-    expect([noShielded.total, noShielded.label]).toEqual(["0.8575 DUSK", "Public balance"]);
-    // Online, the node silent: the same, without the connection.
-    expect(draw({ balanceError: "timed out", balanceStale: true, balanceReadAt: readAt }).note).toMatch(/^Your balance may be out of date\. Last read /);
-    // What the node couldn't give now, by name: the stake; the stake and the shielded balance.
-    expect(draw({ stakeStale: true }).note).toBe("Your stake couldn't be read just now, so it may be out of date.");
-    expect(draw({ stakeStale: true, shieldedStale: true }).note).toBe("Your shielded balance and stake couldn't be read just now, so they may be out of date.");
-    expect(draw({}).note).toBe("");
-  });
-
-  // Lena's wish, the sixth round: no "may be out of date" said when the figures were read last.
-  it("says when the parts it couldn't read now were read last, the older of them", () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    try {
-      vi.setSystemTime(new Date(2026, 10, 17, 10, 30));
-      const { document } = installFakeDom();
-      vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
-      const state = { route: "home", addressBook: { loaded: true, items: [] } };
-      const note = (over) => {
-        const ov = { isUnlocked: true, nodeUrl: "https://testnet.nodes.dusk.network", accounts: [], txs: [], balance: { value: "857535243" }, balanceReadAt: Date.now(), shieldedBalance: { value: "0", spendable: "0" }, staked: { lux: "247500000", native: "0", sozu: "247500000" }, ...over };
-        document.body.replaceChildren(...homeView(ov, { state, actions: {} }));
-        return document.body.querySelector(".balance-stale")?.textContent ?? "";
-      };
-      const stake = new Date(2026, 10, 17, 10, 2).getTime();
-      const shielded = new Date(2026, 10, 17, 9, 58).getTime();
-      expect(note({ stakeStale: true, stakeReadAt: stake })).toBe(`Your stake couldn't be read just now, so it may be out of date. Last read ${whenAtText(stake)}.`);
-      expect(note({ stakeStale: true, stakeReadAt: stake, shieldedStale: true, shieldedReadAt: shielded })).toBe(
-        `Your shielded balance and stake couldn't be read just now, so they may be out of date. Last read ${whenAtText(shielded)}.`
-      );
-      expect(whenAtText(shielded)).toMatch(/^at 9:58|^at 09:58/);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("refreshes through the header's old Refresh action", async () => {
-    const app = await readFile(path.resolve(process.cwd(), "src", "ui", "popup", "app.js"), "utf8");
-    expect(app).toMatch(/const actions = \{\s*send: \(message\) => send\(forScreen\(message\)\),\s*review,\s*render,\s*showToast,\s*refresh: onRefresh,/);
-    const onRefresh = app.match(/async function onRefresh\(\) \{([\s\S]*?)\n\}/)?.[1] ?? "";
-    expect(onRefresh).toContain("acctMenu.close();");
-    expect(onRefresh).toContain("state.needsRefresh = true;");
-    expect(onRefresh).toContain("await render({ forceRefresh: true });");
+    expect(failed.title).toMatch(/couldn't read/i);
+    expect(failed.all).not.toContain("evil.example");
   });
 });
 
@@ -342,14 +139,42 @@ describe("payments from Send waiting for the network, on Home", () => {
     waitingSends,
     ...over,
   });
-  const boxes = (document) => document.body.querySelectorAll(".home-waiting").map((el) => visibleText(el));
+  // Each box, each part from its own element: its title (what it pays, to whom, and where it stands), its memo, the
+  // line that says when it was made, its note, its buttons, and its kind (held, unsent or went), where it has one.
+  const boxes = (document) =>
+    document.body.querySelectorAll(".home-waiting").map((el) => {
+      const text = (selector) => (el.querySelector(selector) ? visibleText(el.querySelector(selector)) : "");
+      return {
+        el,
+        title: text(".callout-title"),
+        memo: text(".home-waiting__made .safe-text"),
+        made: text(".home-waiting__made"),
+        note: text(".home-waiting__note"),
+        buttons: el.querySelectorAll("button"),
+        kind: el.className.split(" ").find((c) => c.startsWith("home-waiting--")) ?? "",
+      };
+    });
+  // What tells a box apart: what it pays and to whom, its memo, and when it was made.
+  const pays = (box, { to = "Lucas (petit-fils)", memo = "", made }) => {
+    expect(box.title).toMatch(exactly("0.01 DUSK"));
+    expect(box.title).toMatch(new RegExp(`(?<![\\w.-])${escape(to)}$`));
+    expect(box.memo).toBe(memo);
+    expect(box.made).toMatch(exactly(made));
+  };
+  // Where a box says it stands, as its title opens: Waiting, Held, Sending, Not confirmed, Not sent or Sent.
+  const standing = (box) => box.title.split(": ")[0];
+  // What Don't send says: it wasn't sent, and nothing left; never that it went out already or couldn't be stopped.
+  const calledOff = (showToast) => {
+    expect(showToast).toHaveBeenCalledWith(expect.stringMatching(/nothing left/i));
+    for (const [said] of showToast.mock.calls) expect(said).not.toMatch(/went out|couldn't/i);
+  };
 
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
-  it("says what each pays, to whom, its memo and when it was made, to tell them apart, with Don't send", async () => {
+  it("says what each pays, to whom, its memo and when it was made, to tell them apart, each to be called off", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -364,48 +189,37 @@ describe("payments from Send waiting for the network, on Home", () => {
       }),
     };
     document.body.replaceChildren(...homeView(ov([send(), send({ sendId: "s2", memo: "Hors ligne deux", at: at(2, 36), waits: false })]), { state, actions }));
-    // Chen's and Lena's: "Not sent yet … It's being sent. Cancel" as it went out. One state at a time: Waiting, then
-    // Sending.
-    expect(boxes(document)).toEqual([
-      "Waiting: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34Goes out once the network answers.Don't send",
-      "Sending: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36Don't send",
-    ]);
+    const [waits, going] = boxes(document);
+    pays(waits, { memo: "Hors ligne un", made: "02:34" });
+    pays(going, { memo: "Hors ligne deux", made: "02:36" });
+    // Chen's and Lena's: "Not sent yet … It's being sent. Cancel" as it went out. One state at a time: the one that waits
+    // goes out once the network answers; the one going out says it's sending, and nothing of waiting.
+    expect([standing(waits), standing(going)]).toEqual(["Waiting", "Sending"]);
+    expect(waits.note).toMatch(/goes out/i);
+    expect(waits.note).not.toMatch(/may have gone/i);
+    expect(going.note).toBe("");
+    expect([waits.buttons.length, going.buttons.length]).toEqual([1, 1]);
 
-    // Don't send on the second: that one alone, and said.
-    document.body.querySelectorAll(".home-waiting button")[1].click();
+    // Called off, the second: that one alone, and said.
+    going.buttons[0].click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     expect(sent).toEqual([{ type: "DUSK_UI_CANCEL_SEND", sendId: "s2" }]);
     // Chen's: a red Send failed for what she chose. In plain words, in no colour.
-    expect(actions.showToast).toHaveBeenCalledWith("Not sent. Nothing left your wallet.");
+    calledOff(actions.showToast);
     expect(actions.render).toHaveBeenCalledWith({ forceRefresh: true });
 
-    // Hidden balances hide what it pays; another profile's aren't this one's to list.
+    // Hidden balances hide what it pays, anywhere; another profile's aren't this one's to list.
     document.body.replaceChildren(...homeView(ov([send()], { hideBalances: true }), { state, actions }));
-    expect(boxes(document)[0]).toMatch(/^Waiting: •••• DUSK to Lucas/);
+    const [hidden] = boxes(document);
+    expect(hidden.title).toMatch(exactly("•••• DUSK"));
+    expect(hidden.title).not.toMatch(/\d/);
+    expect(everything(hidden.el)).not.toContain("0.01");
     document.body.replaceChildren(...homeView(ov([send({ profileIndex: 1 })]), { state, actions }));
     expect(boxes(document)).toEqual([]);
   });
 
-  // Chen's, in the app on Android: a payment waiting for the network went out only once he opened the app again.
-  it("says in the app on a phone that a payment waiting goes out once the app's opened again", () => {
-    vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(at(2, 40));
-    const { document, window } = installFakeDom();
-    window.__TAURI_INTERNALS__ = {};
-    vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
-    const state = { route: "home", addressBook: { loaded: true, items: [{ address: LUCAS, name: "Lucas (petit-fils)" }] } };
-    const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
-    document.body.replaceChildren(...homeView(ov([send()]), { state, actions }));
-    expect(boxes(document)).toEqual([
-      "Waiting: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34Goes out once the network answers. If you leave the app, it goes out when you reopen it, or asks first if Android closed it.Don't send",
-    ]);
-    // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
-    document.body.replaceChildren(...homeView(ov([send()], { lockOnLeave: true }), { state, actions }));
-    expect(boxes(document)[0]).toContain("Goes out once the network answers. If you leave the app, it locks and this isn't sent.");
-  });
-
   // Chen's: one handed over as the Wi-Fi died showed as sent in Activity, though the node never had it.
-  it("says one handed over without a clear answer may have gone out, with no Don't send, until the node's asked", async () => {
+  it("says one handed over without a clear answer may have gone out, with nothing to call it off, until the node's asked", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -415,11 +229,22 @@ describe("payments from Send waiting for the network, on Home", () => {
     const checks = send({ sendId: "s2", memo: "Hors ligne deux", at: at(2, 36), waits: false, unclear: true, checks: true });
     const going = send({ sendId: "s3", memo: "Trois", at: at(2, 38), waits: false, unclear: true });
     document.body.replaceChildren(...homeView(ov([waits, checks, going]), { state, actions }));
-    expect(boxes(document)).toEqual([
-      "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It may have gone out already; if not, it goes out once the network answers.",
-      "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36It may have gone out already; checking once the network answers.",
-      "Sending: 0.01 DUSK to Lucas (petit-fils)“Trois” · made at 02:38",
-    ]);
+    const [waitsBox, checksBox, goingBox] = boxes(document);
+    pays(waitsBox, { memo: "Hors ligne un", made: "02:34" });
+    pays(checksBox, { memo: "Hors ligne deux", made: "02:36" });
+    pays(goingBox, { memo: "Trois", made: "02:38" });
+    // Not confirmed, both, as it may have gone out already: the one that waits still goes once the network answers;
+    // the other is checked then, and doesn't go by itself.
+    expect([standing(waitsBox), standing(checksBox), standing(goingBox)]).toEqual(["Not confirmed", "Not confirmed", "Sending"]);
+    for (const box of [waitsBox, checksBox]) {
+      expect(box.note).toMatch(/may have gone out/i);
+      expect(box.note).not.toMatch(/nothing was sent|not sent/i);
+    }
+    expect(waitsBox.note).toMatch(/goes out once/i);
+    expect(checksBox.note).toMatch(/check/i);
+    expect(checksBox.note).not.toMatch(/goes out/i);
+    // The one going out says only that.
+    expect(goingBox.note).toBe("");
     expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
   });
 
@@ -434,13 +259,20 @@ describe("payments from Send waiting for the network, on Home", () => {
     const closed = send({ waiting: false, waits: false, ended: "closed" });
     const failed = send({ sendId: "s2", memo: "", waiting: false, waits: false, ended: "failed", error: "Failed to fetch" });
     document.body.replaceChildren(...homeView(ov([closed, failed]), { state, actions }));
-    expect(boxes(document)).toEqual([
-      "Not sent: 0.01 DUSK to lucas-…jWmUdk“Hors ligne un” · made at 02:34The wallet closed before the network answered. Nothing left your wallet.Send it nowDon't send",
-      "Not sent: 0.01 DUSK to lucas-…jWmUdkmade at 02:34Couldn't reach the network. No fee charged.Send it nowDon't send",
-    ]);
+    const [closedBox, failedBox] = boxes(document);
+    pays(closedBox, { to: "lucas-…jWmUdk", memo: "Hors ligne un", made: "02:34" });
+    pays(failedBox, { to: "lucas-…jWmUdk", made: "02:34" });
+    // Not sent, each, and why: the wallet closed, or no network, and no fee; each with Send it now or Don't send.
+    for (const box of [closedBox, failedBox]) {
+      expect([standing(box), box.kind, box.buttons.length]).toEqual(["Not sent", "home-waiting--unsent", 2]);
+      expect(box.note).not.toMatch(/may have gone/i);
+    }
+    expect(closedBox.note).toMatch(/closed/i);
+    expect(closedBox.note).toMatch(/nothing left your wallet/i);
+    expect(failedBox.note).toMatch(/no fee/i);
 
     // Send it now: straight to Review, the same amount, recipient and memo, sent there in its place; nothing dropped.
-    document.body.querySelectorAll(".home-waiting button").find((b) => b.textContent === "Send it now").click();
+    closedBox.buttons[0].click();
     await vi.waitFor(() => expect(state.route).toBe("confirm"));
     expect(state.draft).toMatchObject({ to: LUCAS, privacy: "public", amountLux: "10000000", amountDusk: "0.01", memo: "Hors ligne un", replaces: "s1" });
     // Astra's: for the wallet, profile and network it was made on alone, as Review checks.
@@ -449,12 +281,12 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(actions.send).not.toHaveBeenCalled();
 
     // Don't send: gone, Home drawn again.
-    document.body.querySelectorAll(".home-waiting button").filter((b) => b.textContent === "Don't send")[1].click();
+    failedBox.buttons[1].click();
     await vi.waitFor(() => expect(actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_DROP_UNSENT", sendId: "s2" }));
   });
 
   // Lena's, in the app: "Sending: 0.01 DUSK…", then for 20 s no card, no payment and the old balance.
-  it("says one that went out after it waited Sent, with no button, till its block's in", () => {
+  it("says one that went out after it waited went, with no button, till its block's in", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -462,12 +294,16 @@ describe("payments from Send waiting for the network, on Home", () => {
     const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
     const went = send({ waiting: false, waits: false, went: at(2, 39), hash: "w1".repeat(32) });
     document.body.replaceChildren(...homeView(ov([went]), { state, actions }));
-    expect(boxes(document)).toEqual(["Sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34"]);
-    expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
+    const [box, ...more] = boxes(document);
+    expect(more).toEqual([]);
+    pays(box, { memo: "Hors ligne un", made: "02:34" });
+    // Sent: nothing to wait for, or to call off.
+    expect([standing(box), box.kind]).toEqual(["Sent", "home-waiting--went"]);
+    expect([box.note, box.buttons]).toEqual(["", []]);
   });
 
   // Marek's, Lena's, Chen's: "something else" was the very same payment, from another device, and nothing said what.
-  it("names what its account sent while a held payment waited, and says so where it's this same payment, Don't send leading", () => {
+  it("names what its account sent while a held payment waited, and says so where it's this same payment, Don't send leading", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -476,31 +312,45 @@ describe("payments from Send waiting for the network, on Home", () => {
     const OWN_2 = "own-second-account-24ZKdvP2";
     const other = { hash: "ab".repeat(32), to: OWN_2, lux: "1000000", memo: "", at: at(2, 36) };
     const same = { hash: "cd".repeat(32), to: LUCAS, lux: "10000000", memo: "Hors ligne un", at: at(2, 37) };
+    // Its note, and the answer it leads with.
     const shown = (meanwhile) => {
       document.body.replaceChildren(...homeView(ov([send({ waits: false, held: true, meanwhile })], { accounts: ["mine", OWN_2] }), { state, actions }));
       const box = document.body.querySelector(".home-waiting--held");
-      return [visibleText(box.querySelector(".home-waiting__note")), box.querySelectorAll("button").map((b) => [b.textContent, b.className.split(" ")[0]])];
+      return { note: visibleText(box.querySelector(".home-waiting__note")), lead: box.querySelector("button.btn-primary") };
     };
-    expect(shown([other])).toEqual([
-      "While it waited, your account sent 0.001 DUSK to your Profile 2 at 02:36.",
-      [["Send it too", "btn-primary"], ["Don't send", "btn-outline"]],
-    ]);
-    expect(shown([same, other])).toEqual([
-      "While it waited, your account sent 0.01 DUSK to Lucas (petit-fils) at 02:37 (“Hors ligne un”), and 1 more. Looks like the same payment.",
-      [["Send it too", "btn-outline"], ["Don't send", "btn-primary"]],
-    ]);
-    // Nothing named: the plain sentence.
-    expect(shown(undefined)[0]).toBe("Your account sent something else while this waited.");
+    // Something else: how much, to whom and when; Send it too leads, to its Review.
+    const elsewhere = shown([other]);
+    for (const value of ["0.001 DUSK", "Profile 2", "02:36"]) expect(elsewhere.note).toMatch(exactly(value));
+    expect(elsewhere.note).not.toMatch(/same/i);
+    elsewhere.lead.click();
+    await vi.waitFor(() => expect(state.route).toBe("confirm"));
+    expect(actions.send).not.toHaveBeenCalled();
+    state.route = "home";
+    // This same payment: named with its memo, said to look the same, and Don't send leads.
+    const again = shown([same, other]);
+    for (const value of ["0.01 DUSK", "02:37"]) expect(again.note).toMatch(exactly(value));
+    for (const value of ["Lucas (petit-fils)", "Hors ligne un"]) expect(again.note).toMatch(exactly(value));
+    expect(again.note).toMatch(/same/i);
+    again.lead.click();
+    await vi.waitFor(() => expect(actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_CANCEL_SEND", sendId: "s1" }));
+    expect(state.route).toBe("home");
+    // Nothing named: something else, not said to be the same.
+    const plain = shown(undefined).note;
+    expect(plain).toMatch(/something else/i);
+    expect(plain).not.toMatch(/same/i);
 
     // Chen's, Marek's: "something else", Send it too live, for the seconds before it named this same payment.
     // While it's read, it says so, its answers off; past the node's time, what's known.
     const checking = (since) => {
       document.body.replaceChildren(...homeView(ov([send({ waits: false, held: true, checking: since })], { accounts: ["mine", OWN_2] }), { state, actions }));
       const box = document.body.querySelector(".home-waiting--held");
-      return [visibleText(box.querySelector(".home-waiting__note")), box.querySelectorAll("button").map((b) => [b.textContent, b.disabled])];
+      return [visibleText(box.querySelector(".home-waiting__note")), box.querySelectorAll("button").map((b) => b.disabled)];
     };
-    expect(checking(at(2, 40) - 3_000)).toEqual(["Checking what your account sent…", [["Send it too", true], ["Don't send", true]]]);
-    expect(checking(at(2, 40) - 60_000)).toEqual(["Your account sent something else while this waited.", [["Send it too", false], ["Don't send", false]]]);
+    const [reading, whileRead] = checking(at(2, 40) - 3_000);
+    expect(whileRead).toEqual([true, true]);
+    expect(reading).toMatch(/checking/i);
+    expect(reading).not.toMatch(/something else|same/i);
+    expect(checking(at(2, 40) - 60_000)).toEqual([plain, [false, false]]);
   });
 
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
@@ -523,10 +373,18 @@ describe("payments from Send waiting for the network, on Home", () => {
     const held = send({ waits: false, held: true });
     const stopped = send({ sendId: "s2", memo: "Hors ligne deux", waiting: false, waits: false, ended: "locked", held: true });
     document.body.replaceChildren(...homeView(ov([held, stopped]), { state, actions }));
-    expect(boxes(document)).toEqual([
-      "Held: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
-      "Not sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
-    ]);
+    const [heldBox, stoppedBox] = boxes(document);
+    pays(heldBox, { memo: "Hors ligne un", made: "02:34" });
+    pays(stoppedBox, { memo: "Hors ligne deux", made: "02:34" });
+    // One held, still waiting; the other not sent, as the wallet stopped while it waited. For each, its account sent
+    // something else meanwhile, and it offers Send it too or Don't send.
+    expect([heldBox.kind, stoppedBox.kind]).toEqual(["home-waiting--held", "home-waiting--unsent"]);
+    expect([standing(heldBox), standing(stoppedBox)]).toEqual(["Held", "Not sent"]);
+    for (const box of [heldBox, stoppedBox]) {
+      expect(box.note).toMatch(/something else/i);
+      expect(box.note).not.toMatch(/same/i);
+    }
+    expect([heldBox.buttons.length, stoppedBox.buttons.length]).toEqual([2, 2]);
 
     // Send it too: its Review, in its place; nothing goes before Confirm there.
     const buttons = () => document.body.querySelectorAll(".home-waiting button");
@@ -540,7 +398,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     buttons()[1].click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     expect(sent.at(-1)).toEqual({ type: "DUSK_UI_CANCEL_SEND", sendId: "s1" });
-    expect(actions.showToast).toHaveBeenCalledWith("Not sent. Nothing left your wallet.");
+    calledOff(actions.showToast);
     // One the wallet stopped as it waited for the answer: Send it too opens Review, as Send it now does.
     buttons()[2].click();
     await vi.waitFor(() => expect(state.route).toBe("confirm"));

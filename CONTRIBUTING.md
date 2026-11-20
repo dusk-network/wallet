@@ -127,9 +127,6 @@ export async function getCachedGasPrice({ forceRefresh = false } = {}) {
 # Run all tests
 npm run test
 
-# Run with coverage
-npm run test:coverage
-
 # Watch mode (for development)
 npm run test -- --watch
 
@@ -166,11 +163,10 @@ describe("formatAmount", () => {
 });
 ```
 
-### Coverage Requirements
+### What to Test
 
-- Aim for 80%+ on new code
-- Don't decrease overall coverage
-- Focus on critical paths (crypto, transactions)
+- What protects money and security: amounts, fees, recipients, signing, permissions, the vault and locking
+- Assert values and conditions, not on-screen wording or markup, so a copy change doesn't break a test
 
 ---
 

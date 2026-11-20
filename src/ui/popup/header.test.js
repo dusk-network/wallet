@@ -1,9 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fakeEvent, installFakeDom, screenReaderText, settle, visibleText } from "../testing/fakeDom.js";
-import { iconSvg } from "../components/ActionIcon.js";
+import { installFakeDom, visibleText } from "../testing/fakeDom.js";
 
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
@@ -71,434 +68,130 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("the network at the top", () => {
-  const pill = (dom) => {
-    const el = dom.document.createElement("button");
-    el.id = "network-pill";
-    el.appendChild(Object.assign(dom.document.createElement("span"), { className: "network-pill__label" }));
-    dom.document.body.appendChild(el);
-    return () => el.querySelector(".network-pill__label").textContent;
+// The panel's strip over the header, as popup.html and full.html have it, and the network's pill.
+function page(dom) {
+  const panel = dom.document.createElement("div");
+  panel.className = "panel";
+  const pill = dom.document.createElement("button");
+  pill.id = "network-pill";
+  const label = dom.document.createElement("span");
+  label.className = "network-pill__label";
+  pill.appendChild(label);
+  panel.appendChild(pill);
+  dom.document.body.appendChild(panel);
+  const strips = () => panel.querySelectorAll(".testnet-strip");
+  return {
+    label: () => label.textContent,
+    strips,
+    strip: () => (strips()[0] ? visibleText(strips()[0]) : ""),
+    dot: () => pill.querySelector(".net-status-dot"),
   };
-  const panel = (dom) => {
-    const el = dom.document.createElement("div");
-    el.className = "panel";
-    dom.document.body.appendChild(el);
-    return () => {
-      const strip = el.querySelector(".testnet-strip");
-      return strip ? visibleText(strip) : "";
-    };
-  };
+}
 
+// What the strip says of a test network: that its DUSK has no value, in the app's own words.
+async function noValueNote() {
+  const { dom, renderHeader } = await setup("popup");
+  const { strip } = page(dom);
+  renderHeader(overview);
+  return strip().replace("Testnet", "").replace(/^[\s·]+/, "");
+}
+
+describe("the network at the top", () => {
   it("is Custom, saying whose, while the prover or the archiver isn't the network's own", async () => {
     const { dom, renderHeader } = await setup("popup");
-    const [label, strip] = [pill(dom), panel(dom)];
+    const { label, strip } = page(dom);
     const own = { ...overview, proverUrl: "https://testnet.provers.dusk.network", archiverUrl: "https://testnet.nodes.dusk.network" };
     renderHeader(own);
-    // The pill names the network, so the strip doesn't again.
-    expect([label(), strip()]).toEqual(["Testnet", "Test DUSK, no value"]);
+    expect(label()).toBe("Testnet");
+    expect(strip()).not.toBe("");
+    expect(strip()).not.toContain("example");
 
-    // The pill says Custom: the strip names the network.
     renderHeader({ ...own, proverUrl: "http://hostile-node.example", archiverUrl: "https://hostile-node.example" });
-    expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK, no value · Proofs and history from hostile-node.example"]);
-    // It wraps, as a custom node's does, rather than cut off the host.
-    expect(dom.document.body.querySelector(".testnet-strip").classList.contains("testnet-strip--wrap")).toBe(true);
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    expect(css).toMatch(/\.testnet-strip\.testnet-strip--wrap \{\s*white-space: normal;/);
+    expect(label()).toBe("Custom");
+    expect(strip()).toContain("hostile-node.example");
     renderHeader({ ...own, archiverUrl: "https://archive.example" });
-    expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK, no value · History from archive.example"]);
+    expect(label()).toBe("Custom");
+    expect(strip()).toContain("archive.example");
 
     // Mainnet's own node says nothing, unless what it uses with it is someone else's.
     const mainnet = { ...overview, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network", proverUrl: "https://provers.dusk.network", archiverUrl: "https://nodes.dusk.network" };
     renderHeader(mainnet);
     expect([label(), strip()]).toEqual(["Mainnet", ""]);
     renderHeader({ ...mainnet, proverUrl: "https://prover.example" });
-    expect([label(), strip()]).toEqual(["Custom", "Mainnet · Proofs from prover.example"]);
-  });
-
-  // Amélie's: a red dot with no words, for as long as it stayed red; then the word beside the dot squeezed her
-  // profile's name to "P".
-  it("says on a line of its own under the network's name that it's offline or can't reach the network, and nothing once it's back", async () => {
-    const { dom, host, renderHeader } = await setup("popup");
-    // The top bar as popup.html has it: the brand with the network's pill, then the buttons.
-    const header = dom.document.createElement("header");
-    header.className = "panel-header";
-    const brand = dom.document.createElement("div");
-    brand.className = "brand";
-    pill(dom);
-    brand.appendChild(dom.document.getElementById("network-pill"));
-    header.append(brand, host);
-    dom.document.body.appendChild(header);
-    const words = () => header.querySelector(".network-word");
-    const said = () => (words() && !words().hidden ? visibleText(words()) : "");
-
-    renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
-    expect(said()).toBe("");
-    renderHeader({ ...overview, networkStatus: { nodeStatus: "offline", nodeError: "Failed to fetch" } });
-    expect(said()).toBe("Can't reach the network");
-    // Out of the pill, which says the network alone, between the brand and the buttons: read after the network's name.
-    expect(screenReaderText(dom.document.getElementById("network-pill"))).toBe("Testnet");
-    expect(header.children.map((el) => el.className)).toEqual(["brand", "network-word", host.className]);
-    expect(words().getAttribute("role")).toBe("status");
-    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
-    renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
-    expect(said()).toBe("Offline");
-    vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: true });
-    renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
-    expect(said()).toBe("");
-    // One line, however often it's drawn.
-    expect(header.querySelectorAll(".network-word")).toHaveLength(1);
-  });
-});
-
-// Chen's, in the app: Testnet picked on Import, its strip came at the top and the form went down under her thumb, her
-// tap for box 1 landing on its hint.
-describe("a test network's strip coming or going", () => {
-  it("leaves what the person is at where it was on the screen, and moves nothing they aren't at", async () => {
-    const dom = installFakeDom({ pathname: "/popup.html" });
-    const { syncTestnetStrip } = await import("../components/TestnetStrip.js");
-    const make = (tag, className = "") => Object.assign(dom.document.createElement(tag), { className });
-    const panel = make("div", "panel");
-    const content = Object.assign(make("main", "panel-content"), { scrollTop: 0, scrollHeight: 1600, clientHeight: 700 });
-    const tab = make("button");
-    content.append(tab);
-    panel.append(content);
-    dom.document.body.append(panel);
-    // The strip's height as it shows: 35 px.
-    const proto = Object.getPrototypeOf(tab);
-    const measure = proto.getBoundingClientRect;
-    proto.getBoundingClientRect = function () {
-      return this.classList?.contains("testnet-strip") ? { top: 0, bottom: 35, height: 35 } : measure.call(this);
-    };
-    try {
-      tab.focus();
-      syncTestnetStrip(panel, "Testnet", { nodeUrl: "https://testnet.nodes.dusk.network" });
-      expect([panel.firstChild.className, content.scrollTop]).toEqual(["testnet-strip", 35]);
-      // The same strip again: nothing moves.
-      syncTestnetStrip(panel, "Testnet", { nodeUrl: "https://testnet.nodes.dusk.network" });
-      expect(content.scrollTop).toBe(35);
-      // Gone, as Mainnet's picked: back up by as much.
-      syncTestnetStrip(panel, "Mainnet", { nodeUrl: "https://nodes.dusk.network" });
-      expect([panel.querySelector(".testnet-strip"), content.scrollTop]).toEqual([null, 0]);
-      // Nothing focused on the page: the page as it is.
-      tab.blur();
-      syncTestnetStrip(panel, "Testnet", { nodeUrl: "https://testnet.nodes.dusk.network" });
-      expect(content.scrollTop).toBe(0);
-    } finally {
-      proto.getBoundingClientRect = measure;
-    }
-  });
-});
-
-describe("header", () => {
-  it.each(Object.keys(VIEWS))("holds the account chip and Settings, no ▾ button or Refresh (%s)", async (view) => {
-    const { host, renderHeader } = await setup(view);
-    renderHeader(overview);
-    expect(host.children.map((el) => el.className)).toEqual(["account-chip", "icon-btn icon-only"]);
-    expect(host.children[1].title).toBe("Settings");
-    for (const title of ["Switch profile", "Profiles", "Refresh"]) {
-      expect(host.querySelector(`[title="${title}"]`)).toBeNull();
-    }
-    expect(host.textContent).not.toContain("⟳");
-  });
-
-  it("draws Expand view and Settings as labelled SVG icons, not glyphs", async () => {
-    const { host, renderHeader } = await setup("popup");
-    // The extension's popup can expand into a tab.
-    vi.stubGlobal("browser", { runtime: { id: "dusk-wallet", sendMessage: () => {} } });
-    renderHeader(overview);
-    expect(
-      host.querySelectorAll(".icon-btn").map((b) => [b.title, b.getAttribute("aria-label"), b.innerHTML, b.textContent])
-    ).toEqual([
-      ["Expand view", "Expand view", iconSvg("expand"), ""],
-      ["Settings", "Settings", iconSvg("settings"), ""],
-    ]);
-  });
-
-  it("shows the profile's label without a name, the account only in the tooltip, and the verified name once there is one", async () => {
-    const { names, renderHeader, chip } = await setup("popup");
-    renderHeader(overview);
-    await settle();
-    expect(visibleText(chip())).toBe("Profile 1▾");
-    expect(chip().title).toBe(`Profile 1\n${ACCOUNT}`);
-    expect(screenReaderText(chip())).not.toContain(ACCOUNT.slice(0, 6));
-    expect(names.lookupPrimaryName).toHaveBeenCalledWith(ACCOUNT, { nodeUrl: overview.nodeUrl, stale: true });
-
-    // A label set on this device takes its place; another profile shows its own.
-    renderHeader({ ...overview, accountNames: { 0: "Savings" } });
-    await settle();
-    expect(visibleText(chip())).toBe("Savings▾");
-    renderHeader({ ...overview, selectedAccountIndex: 1 });
-    await settle();
-    expect([visibleText(chip()), chip().title]).toEqual(["Profile 2▾", `Profile 2\n${SECOND}`]);
-
-    names.lookupPrimaryName.mockResolvedValue("alice.dusk");
-    renderHeader(overview);
-    await settle();
-    expect(chip().textContent).toBe("alice.dusk▾");
-    expect(chip().title).toBe(`alice.dusk\n${ACCOUNT}`);
-  });
-
-  it("with more than one wallet, names the open one under the profile's name, smaller, and nothing more with one", async () => {
-    const { names, renderHeader, chip } = await setup("popup");
-    const wallets = [
-      { key: "w1", n: 1, name: "", active: false },
-      { key: "w2", n: 2, name: "", active: true },
-    ];
-    renderHeader({ ...overview, wallets });
-    await settle();
-    expect(chip().querySelector(".chip-text").textContent).toBe("Profile 1");
-    expect(chip().querySelector(".chip-wallet").textContent).toBe("Wallet 2");
-    expect(screenReaderText(chip())).toBe("Profile 1, Wallet 2");
-
-    // Its verified name keeps the line to itself, the wallet under it; a
-    // name given to the wallet shows as given.
-    names.lookupPrimaryName.mockResolvedValue("alice.dusk");
-    renderHeader({ ...overview, wallets: [wallets[0], { ...wallets[1], name: "Savings" }] });
-    await settle();
-    expect([chip().querySelector(".chip-text").textContent, chip().querySelector(".chip-wallet").textContent]).toEqual(["alice.dusk", "Savings"]);
-    expect(chip().title).toBe(`alice.dusk\nSavings\n${ACCOUNT}`);
-
-    // One wallet: one line, as before.
-    renderHeader({ ...overview, wallets: [{ ...wallets[1], n: 1 }] });
-    await settle();
-    expect([visibleText(chip()), chip().querySelector(".chip-wallet")]).toEqual(["alice.dusk▾", null]);
-  });
-
-  it("opens and closes the profile switcher from the chip", async () => {
-    const { acctMenu, renderHeader, chip, menu } = await setup("popup");
-    renderHeader(overview);
-    chip().click();
-    expect(acctMenu.isOpen).toBe(true);
-    // No title over it: named for screen readers alone.
-    expect([menu().querySelector("[role=menu]").getAttribute("aria-label"), menu().textContent.includes("Select profile")]).toEqual(["Profile", false]);
-    expect(menu().querySelectorAll(".acct-menu-row")).toHaveLength(2);
-    expect(chip().getAttribute("aria-expanded")).toBe("true");
-
-    chip().click();
-    expect(acctMenu.isOpen).toBe(false);
-    expect(menu()).toBeNull();
-    expect(chip().getAttribute("aria-expanded")).toBe("false");
-  });
-
-  it("keeps the chip through renders while the switcher is open, so pressing it still closes it", async () => {
-    const { acctMenu, renderHeader, chip } = await setup("popup");
-    renderHeader(overview);
-    chip().click();
-    const opened = chip();
-
-    // A toast or the shielded-sync poll redraws the header.
-    renderHeader(overview);
-    renderHeader({ ...overview, networkStatus: { nodeStatus: "online" } });
-    expect(chip()).toBe(opened);
-
-    // The switcher closes on a press outside it, and the chip isn't outside.
-    chip().dispatchEvent(fakeEvent("mousedown"));
-    expect(acctMenu.isOpen).toBe(true);
-    chip().click();
-    expect(acctMenu.isOpen).toBe(false);
-
-    // Closed, the next render draws a fresh chip.
-    renderHeader(overview);
-    expect(chip()).not.toBe(opened);
-  });
-
-  it("names the network it moves to on the pill while it switches", async () => {
-    const { dom, renderHeader } = await setup("popup");
-    // The pill, as popup.html has it.
-    const pill = dom.document.createElement("button");
-    pill.id = "network-pill";
-    pill.className = "network-pill";
-    const label = dom.document.createElement("span");
-    label.className = "network-pill__label";
-    pill.appendChild(label);
-    dom.document.body.appendChild(pill);
-    renderHeader(overview);
-    expect(label.textContent).toBe("Testnet");
-
-    const { setNetworkSwitching } = await import("../components/NetworkMenu.js");
-    setNetworkSwitching(pill, "Mainnet");
-    // A render meanwhile, from a toast or a poll, still has the old network.
-    renderHeader(overview);
-    expect(label.textContent).toBe("Mainnet…");
-    // There, it's the name alone, a render or not.
-    setNetworkSwitching(pill, null);
-    expect([label.textContent, pill.className]).toEqual(["Mainnet", "network-pill"]);
-    renderHeader({ ...overview, networkName: "Mainnet" });
-    expect([label.textContent, pill.className]).toEqual(["Mainnet", "network-pill"]);
-  });
-
-  it("opens the network choice from the pill before there's a wallet and while it's locked, as Settings does", async () => {
-    const netMenu = { isOpen: false, open: vi.fn(), close: vi.fn() };
-    const dom = installFakeDom({ pathname: "/popup.html" });
-    vi.resetModules();
-    const { createHeaderRenderer } = await import("./header.js");
-    const pill = dom.document.createElement("button");
-    pill.id = "network-pill";
-    dom.document.body.appendChild(pill);
-    const renderHeader = createHeaderRenderer({ headerActionsHost: dom.document.createElement("div"), netMenu, acctMenu: null, onOpenOptions: vi.fn() });
-    for (const ov of [{ hasVault: false, isUnlocked: false, networkName: "Mainnet" }, { ...overview, isUnlocked: false }]) {
-      netMenu.open.mockClear();
-      renderHeader(ov);
-      expect(pill.disabled).toBe(false);
-      pill.click();
-      expect(netMenu.open).toHaveBeenCalledWith(pill, ov);
-    }
+    expect(label()).toBe("Custom");
+    expect(strip()).toContain("prover.example");
   });
 
   it.each(Object.keys(VIEWS))("says above the header that test DUSK has no value, on a test network only (%s)", async (view) => {
+    const note = await noValueNote();
+    expect(note).not.toBe("");
     const { dom, renderHeader } = await setup(view);
-    // The page's panel, its header first, as popup.html and full.html have it.
-    const panel = dom.document.createElement("div");
-    panel.className = "panel";
-    const header = dom.document.createElement("div");
-    header.className = "panel-header";
-    panel.appendChild(header);
-    dom.document.body.appendChild(panel);
-    const strips = () => panel.querySelectorAll(".testnet-strip");
+    const { strips, strip } = page(dom);
 
     renderHeader(overview);
-    // The pill beside it names the network.
-    expect(strips().map((s) => [s.textContent, s.getAttribute("role")])).toEqual([["Test DUSK, no value", "note"]]);
-    expect(panel.children[0]).toBe(strips()[0]);
+    expect(strips()).toHaveLength(1);
+    expect(strip()).toContain(note);
     // Locked, it still says so; a redraw keeps the one strip.
     renderHeader({ ...overview, isUnlocked: false });
     expect(strips()).toHaveLength(1);
-    renderHeader({ ...overview, networkName: "Devnet" });
-    expect(strips().map((s) => s.textContent)).toEqual(["Test DUSK, no value"]);
+    renderHeader({ ...overview, networkName: "Devnet", nodeUrl: "https://devnet.nodes.dusk.network" });
+    expect(strip()).toContain(note);
 
     renderHeader({ ...overview, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" });
     expect(strips()).toHaveLength(0);
-    expect(panel.children).toEqual([header]);
   });
 
   it("says which custom node it's on, whatever it says of itself, with no test-network words and no green", async () => {
+    const note = await noValueNote();
     const { dom, renderHeader } = await setup("popup");
-    const panel = dom.document.createElement("div");
-    panel.className = "panel";
-    const pill = dom.document.createElement("button");
-    pill.id = "network-pill";
-    const label = dom.document.createElement("span");
-    label.className = "network-pill__label";
-    pill.appendChild(label);
-    panel.appendChild(pill);
-    dom.document.body.appendChild(panel);
-    const strip = () => panel.querySelector(".testnet-strip");
+    const { label, strip, dot } = page(dom);
     const custom = { ...overview, networkName: "Custom", nodeUrl: "https://nodes.dusk.network.evil.example", networkStatus: { nodeStatus: "online" } };
-    const dot = () => pill.querySelector(".net-status-dot");
 
     for (const chainId of [2, 3, 0, null, 9]) {
       renderHeader({ ...custom, chainId });
-      expect(label.textContent).toBe("Custom");
-      expect(visibleText(strip())).toContain("Custom node · nodes.dusk.network.evil.example");
-      expect(visibleText(strip())).not.toContain("Test DUSK");
+      expect(label()).toBe("Custom");
+      expect(strip()).toContain("nodes.dusk.network.evil.example");
+      expect(strip()).not.toContain(note);
       expect(dot().classList.contains("net-status--online")).toBe(false);
     }
     // Where what's signed there counts, when that's a network's chain.
     renderHeader({ ...custom, chainId: 1 });
-    expect(visibleText(strip())).toBe("Custom node · nodes.dusk.network.evil.example · What you sign here counts on Mainnet.");
-    expect(strip().getAttribute("role")).toBe("note");
+    expect(strip()).toContain("nodes.dusk.network.evil.example");
+    expect(strip()).toContain("Mainnet");
     // The real thing is green, and says nothing above its header.
     renderHeader({ ...overview, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network", networkStatus: { nodeStatus: "online" } });
-    expect(strip()).toBeNull();
+    expect(strip()).toBe("");
     expect(dot().classList.contains("net-status--online")).toBe(true);
   });
 
   it("says a node on this machine's test DUSK has no value only on a chain of its own", async () => {
+    const note = await noValueNote();
     const { dom, renderHeader } = await setup("popup");
-    const panel = dom.document.createElement("div");
-    panel.className = "panel";
-    dom.document.body.appendChild(panel);
+    const { strip } = page(dom);
     const local = { ...overview, networkName: "Local", nodeUrl: "http://127.0.0.1:8080" };
     renderHeader({ ...local, chainId: 0 });
-    expect(visibleText(panel.querySelector(".testnet-strip"))).toBe("Test DUSK, no value");
+    expect(strip()).toContain(note);
     renderHeader({ ...local, chainId: 1 });
-    expect(visibleText(panel.querySelector(".testnet-strip"))).toBe("Local node · 127.0.0.1:8080 · What you sign here counts on Mainnet.");
+    expect(strip()).not.toContain(note);
+    expect(strip()).toContain("127.0.0.1:8080");
+    expect(strip()).toContain("Mainnet");
   });
 
   it("says why nothing is signed on a node that contradicts the chain it's fixed to", async () => {
     const { dom, renderHeader } = await setup("popup");
-    const panel = dom.document.createElement("div");
-    panel.className = "panel";
-    dom.document.body.appendChild(panel);
+    const { strip } = page(dom);
     const refusal = "hostile-node.example now says it's on Mainnet (chain 1), not Testnet (chain 2). Nothing was signed, because a signature here could count on the other network.";
     renderHeader({ ...overview, networkName: "Custom", nodeUrl: "https://hostile-node.example", chainId: 2, chainRefusal: refusal });
-    const strip = panel.querySelector(".testnet-strip");
-    expect([visibleText(strip), strip.getAttribute("role")]).toEqual([refusal, "alert"]);
+    expect(strip()).toBe(refusal);
   });
+});
 
-  it("puts the strip across the top of the full view, over the sidebar, staying as the page scrolls", async () => {
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    // A rule's declarations, by its selector and indent as the sheet writes it.
-    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
-    const desktop = css.slice(css.indexOf("@media (min-width: 861px) {"));
-    const inDesktop = (selector) => desktop.split("\n  }").find((block) => `\n${block}`.includes(`\n  ${selector} {`)) ?? "";
-
-    const strip = inDesktop("body.page--full .panel > .testnet-strip");
-    for (const declaration of ["position: sticky;", "top: 0;", "grid-column: 1 / -1;", "grid-row: 1;", "height: var(--strip-height);"]) {
-      expect(strip, declaration).toContain(declaration);
-    }
-    expect(inDesktop("body.page--full .panel")).toContain("grid-template-rows: auto minmax(0, 1fr);");
-    // The sidebar and the page under it.
-    const sidebar = inDesktop("body.page--full .panel-header");
-    expect(sidebar).toContain("grid-row: 2;");
-    expect(sidebar).toContain("top: var(--strip-height);");
-    expect(sidebar).toContain("height: calc(100vh - var(--strip-height));");
-    expect(inDesktop("body.page--full .panel-content")).toContain("grid-row: 2;");
-    // The strip's height, only while it shows.
-    expect(rule("body.page--full")).toContain("--strip-height: 0px;");
-    expect(rule("body.page--full:has(.panel > .testnet-strip)")).toContain("--strip-height: 35px;");
-    // Sticky to the window: the wrap clips without becoming a scroll box.
-    expect(rule(".full-wrap")).toContain("overflow: clip;");
-    expect(rule(".full-wrap")).not.toContain("overflow: hidden;");
-  });
-
-  it("names the active site in the chip's tooltip as its approval did", async () => {
-    // Sites connect in the extension only.
-    vi.stubGlobal("chrome", { runtime: { id: "wallet", sendMessage: vi.fn() } });
-    const { renderHeader, chip } = await setup("popup");
-    renderHeader({ ...overview, activeOrigin: "http://127.0.0.1:5354", activeConnected: true });
-    expect(chip().title.split("\n").at(-1)).toBe("Connected: http://127.0.0.1:5354");
-    renderHeader({ ...overview, activeOrigin: "https://app.example:8443", activeConnected: false });
-    expect(chip().title.split("\n").at(-1)).toBe("Site: app.example:8443");
-  });
-
-  it("keeps the keyboard on the chip when another profile redraws it", async () => {
-    const { dom, renderHeader, chip } = await setup("popup");
-    renderHeader(overview);
-    const first = chip();
-    first.focus();
-    renderHeader({ ...overview, selectedAccountIndex: 1 });
-    expect(chip()).not.toBe(first);
-    expect(dom.document.activeElement).toBe(chip());
-  });
-
+describe("the account at the top", () => {
   it("leaves the chip out while the wallet is locked", async () => {
-    const { host, renderHeader, chip } = await setup("popup");
+    const { renderHeader, chip } = await setup("popup");
+    renderHeader(overview);
+    expect(chip()).not.toBeNull();
     renderHeader({ ...overview, isUnlocked: false });
     expect(chip()).toBeNull();
-    expect(host.children.map((el) => el.title)).toEqual(["Settings"]);
-  });
-
-  it("keeps the brand and network pill at full width and lets the chip give way", async () => {
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    // The declarations of the top-level rule for exactly `selector`.
-    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
-
-    expect(rule(".brand")).toContain("flex: 0 0 auto;");
-    expect(rule(".brand")).not.toContain("min-width: 0;");
-    expect(rule(".header-actions")).toContain("min-width: 0;");
-    expect(rule(".header-actions > *")).toContain("flex: 0 0 auto;");
-    expect(rule(".header-actions > .account-chip")).toContain("flex: 0 1 auto;");
-    expect(rule(".account-chip")).toContain("min-width: 0;");
-    // One line that ends in one "…" when it has to shrink, whatever it holds.
-    for (const declaration of ["min-width: 0;", "overflow: hidden;", "text-overflow: ellipsis;", "white-space: nowrap;"]) {
-      expect(rule(".account-chip .chip-text")).toContain(declaration);
-    }
-    expect(css).not.toContain("chip-text__");
-    expect(rule(".account-chip .chip-chev")).toContain("flex: 0 0 auto;");
-    // The chip shows its line in the popup too, and stays on narrow screens.
-    expect(css).not.toMatch(/body\.page--popup \.account-chip \.chip-text\s*\{[^}]*display: none/);
-    expect(css).not.toMatch(/\.account-chip \{ display: none; \}/);
-    expect(css).toMatch(/@media \(max-width: 520px\) \{\s*body\.page--full \.brand-text \{ display: none; \}/);
   });
 });

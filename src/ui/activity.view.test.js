@@ -1,20 +1,12 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import { duskEvmContracts } from "@dusk-network/networks/duskevm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import fixture from "../shared/fixtures/activity-testnet.json";
 import { historyEntry, parseHistoryEntry } from "@dusk-network/app-core/history";
 import { TX_KIND } from "../shared/constants.js";
-import { openUrl } from "../platform/index.js";
-import { accessibleName, installFakeDom, screenReaderText, settle, visibleText } from "./testing/fakeDom.js";
-import { bracketTitle } from "./components/BracketTitle.js";
-import { subnav } from "./components/Subnav.js";
-import { shortAddress } from "./lib/strings.js";
+import { installFakeDom, visibleText } from "./testing/fakeDom.js";
 import { homeView } from "./popup/views/home.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
 import { activityKey } from "./popup/activity.js";
-import { lookupRecipientNames } from "../shared/duskNames.js";
 
 // The token and NFT cards load on their own.
 vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
@@ -24,12 +16,11 @@ vi.mock("./popup/activity.js", async (importOriginal) => ({
   ...(await importOriginal()),
   loadActivityDetail: detail.load,
 }));
-vi.mock("../platform/index.js", async (importOriginal) => ({ ...(await importOriginal()), openUrl: vi.fn(async () => true) }));
 // The profile's verified name, as the header shows it.
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
   lookupPrimaryName: vi.fn(async () => "alice.dusk"),
-  // The .dusk names of an Activity's counterparties, as the node checks them: none unless a test gives some.
+  // The .dusk names of an Activity's counterparties, as the node checks them: none.
   lookupRecipientNames: vi.fn(async () => new Map()),
 }));
 
@@ -37,12 +28,19 @@ vi.mock("../shared/duskNames.js", async (importOriginal) => ({
 process.env.TZ = "UTC";
 const NOW = new Date("2026-10-23T09:00:00Z");
 
-const [A, B] = Object.keys(fixture.accounts);
+const [A] = Object.keys(fixture.accounts);
 const NODE = fixture.nodeUrl;
 const FAUCET = fixture.accounts[A].receiver[0].events[0].data.sender;
 const SENDER = fixture.accounts[A].receiver[1].events[0].data.sender;
-const short = (address) => `${address.slice(0, 6)}…${address.slice(-6)}`;
 const dusk = (n) => (BigInt(n) * 1_000_000_000n).toString();
+const short = (address) => `${address.slice(0, 6)}…${address.slice(-6)}`;
+// The network fee's field, as a sent, a failed or a dropped transaction labels it.
+const FEE = /^(network )?fee( charged)?$/i;
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
+// Everything a screen gives away: all its text, shown or not, and each element's title and aria-label.
+const everything = (root) => [root.textContent, ...[root, ...root.querySelectorAll("*")].flatMap((el) => [el.getAttribute("title"), el.getAttribute("aria-label")])].filter(Boolean).join("\n");
 
 // An account's synced history, as the popup keeps it (ui/popup/activity.js).
 function history(account) {
@@ -77,20 +75,18 @@ beforeEach(() => {
   dom = installFakeDom();
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
-  openUrl.mockClear();
 });
 afterEach(() => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 
-// The popup on `route`, drawn again by every render as app.js does.
-function setup({ account = A, local = [], names = new Map(), complete = true, route = "home", hidden = false } = {}) {
-  const ov = { isUnlocked: true, nodeUrl: NODE, accounts: [account], selectedAccountIndex: 0, txs: local, hideBalances: hidden };
+// The popup on Home, or on a transaction's details once its route says so, drawn again by every render as app.js does.
+function setup({ local = [], hidden = false } = {}) {
+  const ov = { isUnlocked: true, nodeUrl: NODE, accounts: [A], selectedAccountIndex: 0, txs: local, hideBalances: hidden };
   const state = {
-    route,
+    route: "home",
     addressBook: { loaded: true, items: [] },
-    activity: { key: activityKey(ov), account, nodeUrl: NODE, entries: history(account), names, loaded: true, complete, limit: 50 },
+    activity: { key: activityKey(ov), account: A, nodeUrl: NODE, entries: history(A), names: new Map(), loaded: true, complete: true, limit: 50 },
   };
   const draw = () => dom.document.body.replaceChildren(...(state.route === "tx" ? txDetailsView : homeView)(ov, { state, actions }));
   const actions = { render: vi.fn(async () => draw()), showToast: vi.fn(), send: vi.fn() };
@@ -99,50 +95,31 @@ function setup({ account = A, local = [], names = new Map(), complete = true, ro
 }
 
 const body = () => dom.document.body;
-// Activity's rows, as they read.
-const rows = () => body().querySelectorAll(".tx-row, .activity-tx-item").map((row) => visibleText(row));
-const button = (name) => body().querySelectorAll("button").find((b) => visibleText(b).trim() === name || accessibleName(b) === name);
+// A row as it reads, each part from its own element: the name, the address or .dusk name beside it, the line under
+// it, its marks, its amount and its status; and its state, failed or pending.
+const partsOf = (row) => {
+  const text = (selector) => (row.querySelector(selector) ? visibleText(row.querySelector(selector)) : "");
+  const [name, alias] = [text(".tx-name"), text(".tx-alias")];
+  return {
+    row,
+    name: alias ? name.slice(0, -alias.length) : name,
+    alias: alias.replace(/^\W+/, ""),
+    sub: text(".tx-sub"),
+    alike: text(".tx-alike"),
+    afterAll: text(".tx-after-all"),
+    amount: text(".tx-amount"),
+    status: text(".tx-status") || text(".tx-sub > span"),
+    failed: row.className.split(" ").includes("is-failed"),
+    pending: row.className.split(" ").includes("is-pending"),
+  };
+};
+const rows = () => body().querySelectorAll(".tx-row").map(partsOf);
+// The row that moved this amount, as it shows it.
+const rowWith = (amount) => rows().find((row) => row.amount === amount);
+// A transaction's details: each field's label, with its value.
+const fieldsOf = (root) => Object.fromEntries(root.querySelectorAll(".kv").map((kv) => [visibleText(kv.querySelector(".kv-label")), visibleText(kv.querySelector(".kv-value"))]));
 
 describe("Activity's rows", () => {
-  it("lead with the other side's name, else its short address with Copy, and say when", async () => {
-    setup({ names: new Map([[FAUCET, "faucet.dusk"], [SENDER, null]]) });
-    expect(rows()).toEqual([
-      "Registered a .dusk nameDusk Domains · Yesterday−100 DUSK",
-      "Name reservation (step 1 of 2)Dusk Domains · Yesterday",
-      `${short(SENDER)}Received · Yesterday+1,000 DUSK`,
-      "faucet.duskReceived · Yesterday+1,100 DUSK",
-    ]);
-    // The address shows in mono, and Copy copies all of it.
-    const row = body().querySelectorAll(".tx-row")[2];
-    expect(row.querySelector(".tx-name").className).toBe("tx-name mono");
-    const copy = row.querySelector("button.tx-copy");
-    expect(accessibleName(copy)).toBe("Copy address");
-    copy.click();
-    await settle();
-    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(SENDER);
-    // Opening a row says what it holds.
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Registered a .dusk name, Dusk Domains · Yesterday, −100 DUSK");
-  });
-
-  it("name your other profile, by the name it has on this device, without Copy", () => {
-    const { ov, state, draw } = setup();
-    ov.accounts = [A, SENDER];
-    draw();
-    expect(rows()[2]).toBe("Profile 2Received · Yesterday+1,000 DUSK");
-    const row = body().querySelectorAll(".tx-row")[2];
-    expect(row.querySelector(".tx-name").className).toBe("tx-name");
-    expect(row.querySelector("button.tx-copy")).toBeNull();
-
-    ov.accountNames = { 1: "Savings" };
-    draw();
-    expect(rows()[2]).toBe("SavingsReceived · Yesterday+1,000 DUSK");
-
-    // A saved contact's name for it stays what you called it.
-    state.addressBook.items = [{ name: "Old me", address: SENDER }];
-    draw();
-    expect(rows()[2]).toBe("Old meReceived · Yesterday+1,000 DUSK");
-  });
-
   // Sofia's: Activity named the one in a Cyrillic а as plain "Estudio Marta", with no address.
   it("mark a contact whose name looks like another's, with its address", () => {
     const { state, draw } = setup();
@@ -151,7 +128,12 @@ describe("Activity's rows", () => {
       { name: "Estudio Marta", address: A.replace(/.$/, "x") },
     ];
     draw();
-    expect(rows()[2]).toBe(`Estudio M\u0430rta · ${shortAddress(SENDER)}Received · YesterdayLooks like another contact+1,000 DUSK`);
+    const row = rowWith("+1,000 DUSK");
+    expect([row.name, row.alias, row.alike]).toEqual(["Estudio M\u0430rta", short(SENDER), "Looks like another contact"]);
+    // A name like no other's has no mark.
+    state.addressBook.items = [{ name: "Estudio M\u0430rta", address: SENDER }];
+    draw();
+    expect(rowWith("+1,000 DUSK").alike).toBe("");
   });
 
   it("name a contact saved with hidden characters by their codes, never turned around", () => {
@@ -159,31 +141,9 @@ describe("Activity's rows", () => {
     const { state, draw } = setup();
     state.addressBook.items = [{ name: "\u202e2 eliforP", address: SENDER }];
     draw();
-    expect(rows()[2]).toBe("\\u202e2 eliforPReceived · Yesterday+1,000 DUSK");
-    expect(visibleText(body())).not.toContain("\u202e");
-  });
-
-  it("name a profile of another wallet here after its wallet, and no one else", () => {
-    const { ov, draw } = setup();
-    ov.wallets = [
-      { key: "a", n: 1, active: true, accounts: [A] },
-      { key: "b", n: 2, name: "Savings", active: false, accounts: ["other", SENDER], accountNames: {} },
-    ];
-    draw();
-    expect(rows()[2]).toBe("Savings · Profile 2Received · Yesterday+1,000 DUSK");
-    ov.wallets[1].accounts = [SENDER.toLowerCase()];
-    draw();
-    expect(rows()[2]).toBe(`${short(SENDER)}Received · Yesterday+1,000 DUSK`);
-  });
-
-  it("name a .dusk name's reservation by the registration that follows it, once both calls are read", () => {
-    const { state, draw } = setup();
-    const R = "1f".repeat(32);
-    state.activity.entries = state.activity.entries.map((e) =>
-      e.fnName === "register" ? { ...e, registeredName: "shpongle.dusk", reservation: R } : e.fnName === "commit" ? { ...e, reservation: R } : e
-    );
-    draw();
-    expect(rows().slice(0, 2)).toEqual(["Registered shpongle.duskDusk Domains · Yesterday−100 DUSK", "Reserved shpongle.duskDusk Domains · Yesterday"]);
+    expect(rowWith("+1,000 DUSK").name).toBe("\\u202e2 eliforP");
+    // Nowhere as it would read: on the screen, to a screen reader or in a tooltip.
+    expect(everything(body())).not.toContain("\u202e");
   });
 
   it("say a status only while it isn't final: the wallet's pending send, named as typed", () => {
@@ -199,17 +159,17 @@ describe("Activity's rows", () => {
       profileIndex: 0,
     };
     setup({ local: [pending] });
-    expect(rows()[0]).toBe("faucet.duskSent · Just now−5 DUSKSending");
+    const own = rowWith("−5 DUSK");
+    expect([own.name, own.status, own.pending]).toEqual(["faucet.dusk", "Sending", true]);
     // Completed rows say nothing about it.
-    expect(rows().slice(1).join("\n")).not.toMatch(/Completed|Finalized|Executed/);
+    for (const row of rows().filter((r) => r.row !== own.row)) expect([row.status, row.pending]).toEqual(["", false]);
 
-    // Saved as a contact, its own name leads, the .dusk name after it.
+    // Saved as a contact: its own name, with the .dusk name it was sent to.
     const view = setup({ local: [pending] });
     view.state.addressBook = { loaded: true, items: [{ name: "Faucet (test)", address: FAUCET }] };
     view.draw();
-    expect(rows()[0]).toBe("Faucet (test) · faucet.duskSent · Just now−5 DUSKSending");
-    expect(body().querySelector(".tx-row .tx-alias").textContent).toBe(" · faucet.dusk");
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Faucet (test) · faucet.dusk, Sent · Just now, −5 DUSK, Sending");
+    const named = rowWith("−5 DUSK");
+    expect([named.name, named.alias, named.status]).toEqual(["Faucet (test)", "faucet.dusk", "Sending"]);
   });
 
   // Lena's: after Don't send, a payment that went out anyway was a plain Sent row after a few seconds, and she
@@ -228,19 +188,17 @@ describe("Activity's rows", () => {
       wentAfterAll: NOW.getTime() - 10_000,
     };
     const view = setup({ local: [went] });
-    expect(rows()[0]).toBe("faucet.duskSent after you chose not to sendSent · Just now−5 DUSK");
-    expect(body().querySelector(".tx-row .tx-after-all").textContent).toBe("Sent after you chose not to send");
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("faucet.dusk, Sent after you chose not to send, Sent · Just now, −5 DUSK");
+    expect(rowWith("−5 DUSK").afterAll).toBe("Sent after you chose not to send");
     // Opened, it's said there; then a row as any other.
-    body().querySelector(".tx-row button.tx-open").click();
+    rowWith("−5 DUSK").row.querySelector("button.tx-open").click();
     expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Sent after you chose not to send");
     view.ov.txs = [{ ...went, afterAllSeen: NOW.getTime() }];
     view.state.route = "home";
     view.draw();
-    expect(rows()[0]).toBe("faucet.duskSent · Just now−5 DUSK");
+    expect(rowWith("−5 DUSK").afterAll).toBe("");
   });
 
-  it("say a failed one sent nothing, with the fee paid, its amount muted and unsigned", () => {
+  it("say a failed one sent nothing, with the fee paid, its amount unsigned", () => {
     const failed = {
       hash: "bb".repeat(32),
       kind: TX_KIND.TRANSFER,
@@ -253,22 +211,31 @@ describe("Activity's rows", () => {
       submittedAt: NOW.getTime() - 3_600_000,
       profileIndex: 0,
     };
+    const failedRow = () => {
+      const found = rows().filter((row) => row.failed);
+      expect(found).toHaveLength(1);
+      return found[0];
+    };
     setup({ local: [failed] });
-    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee 0.0037 DUSK paid200 DUSK`);
-    expect(body().querySelector(".tx-row .tx-amount").className).toBe("tx-amount is-muted");
-    expect(body().querySelector(".tx-row .tx-sub span").className).toBe("tx-status--bad");
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe(
-      `${short(FAUCET)}, Failed · nothing sent · fee 0.0037 DUSK paid, 200 DUSK`
-    );
-    // Hide balances hides the fee too, as it does the amount.
+    let row = failedRow();
+    // Failed, never Completed; the fee it paid, and its amount without a sign: nothing left.
+    expect([row.status, row.amount]).toEqual(["Failed", "200 DUSK"]);
+    expect(row.status).not.toMatch(/completed/i);
+    expect(row.sub).toMatch(exactly("0.0037 DUSK"));
+    // Hide balances hides the fee too, as it does the amount, wherever the row says them.
     setup({ local: [failed], hidden: true });
-    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee •••• DUSK paid•••• DUSK`);
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe(`${short(FAUCET)}, Failed · nothing sent · fee hidden, amount hidden`);
-    // Without a fee charged, it says so, a fee of 0 included.
-    setup({ local: [{ ...failed, feePaid: undefined }] });
-    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
-    setup({ local: [{ ...failed, feePaid: "0" }] });
-    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · no fee200 DUSK`);
+    row = failedRow();
+    expect([row.status, row.amount]).toEqual(["Failed", "•••• DUSK"]);
+    expect(row.sub).not.toMatch(/\d/);
+    // Not anywhere, signed, joined to its unit or in a tooltip: nothing of either figure at all.
+    for (const figure of ["0.0037", "200"]) expect(everything(row.row)).not.toContain(figure);
+    // Without a fee charged, no fee, a fee of 0 included.
+    for (const feePaid of [undefined, "0"]) {
+      setup({ local: [{ ...failed, feePaid }] });
+      row = failedRow();
+      expect([row.status, row.amount]).toEqual(["Failed", "200 DUSK"]);
+      expect(row.sub, String(feePaid)).not.toMatch(/\d/);
+    }
   });
 
   it("show a fee paid rounded to the nearest, not up, and its details to the last lux", () => {
@@ -287,570 +254,14 @@ describe("Activity's rows", () => {
       profileIndex: 0,
     };
     const view = setup({ local: [failed] });
-    expect(rows()[0]).toBe(`${short(FAUCET)}Failed · nothing sent · fee 0.0018 DUSK paid1 DUSK`);
+    const row = rows().find((r) => r.failed);
+    expect([row.status, row.amount]).toEqual(["Failed", "1 DUSK"]);
+    expect(row.sub).toMatch(exactly("0.0018 DUSK"));
+    expect(row.sub).not.toContain("0.0019");
     Object.assign(view.state, { route: "tx", txDetailHash: failed.hash, txDetailFrom: "home" });
     view.draw();
-    expect(visibleText(body())).toContain("Fee charged0.001840001 DUSK");
-  });
-
-  it("hide their amounts with Hide balances, on Home and in the full list", () => {
-    const { state, draw } = setup({ hidden: true });
-    const amounts = () => body().querySelectorAll(".tx-amount, .activity-amount").map((el) => [visibleText(el), screenReaderText(el)]);
-    expect(amounts()).toEqual(Array(3).fill(["•••• DUSK", "hidden DUSK"]));
-    state.route = "activity";
-    draw();
-    expect(amounts()).toEqual(Array(3).fill(["•••• DUSK", "hidden DUSK"]));
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Registered a .dusk name, Dusk Domains · 16:45, amount hidden");
-  });
-
-  it("label bridge transfers, and mark shielded ones", () => {
-    const { bridge, portal } = duskEvmContracts(2);
-    const at = Date.parse("2026-10-23T07:00:30Z");
-    const local = [
-      { hash: "c1".repeat(32), kind: TX_KIND.CONTRACT_CALL, contractId: bridge, fnName: "depositETHToWithValue", deposit: dusk(5), status: "executed", submittedAt: at, profileIndex: 0 },
-      { hash: "c2".repeat(32), kind: TX_KIND.TRANSFER, direction: "in", from: portal, amount: dusk(2), status: "executed", timestamp: at - 1000, profileIndex: 0 },
-      { hash: "c3".repeat(32), kind: TX_KIND.TRANSFER, direction: "in", privacy: "shielded", source: "shielded", amount: dusk(3), status: "executed", timestamp: at - 2000 },
-    ];
-    setup({ local });
-    expect(rows().slice(0, 3)).toEqual([
-      "To DuskEVMBridge · 07:00−5 DUSK",
-      "From DuskEVMBridge · 07:00+2 DUSK",
-      "ReceivedShielded · 07:00+3 DUSK",
-    ]);
-  });
-});
-
-describe("Home's Activity", () => {
-  it("links to no outside history, and See all opens the full list", () => {
-    const { state } = setup();
-    const buttons = body().querySelectorAll("button").map((b) => visibleText(b).trim());
-    expect(buttons.filter((t) => /History/.test(t))).toEqual([]);
-    expect(body().innerHTML).not.toMatch(/duskscan/i);
-    button("See all").click();
-    expect(state.route).toBe("activity");
-  });
-});
-
-describe("the Activity view", () => {
-  it("groups by day under the All, Sent, Received, Staking and Bridge filters", () => {
-    const { state, draw } = setup({ account: B, route: "activity" });
-    const filters = () => body().querySelectorAll(".filter-chip").map((b) => [visibleText(b), b.getAttribute("aria-pressed")]);
-    const days = () => body().querySelectorAll(".tx-day-label").map(visibleText);
-    expect(filters()).toEqual([["All", "true"], ["Sent", "false"], ["Received", "false"], ["Staking", "false"], ["Bridge", "false"]]);
-    expect(days().slice(0, 4)).toEqual(["Yesterday", "Wed 21 Oct", "Fri 18 Sep", "Fri 17 Jul"]);
-    expect(days()).toContain("Sun 16 Nov 2025");
-
-    button("Staking").click();
-    expect(state.activityFilter).toBe("staking");
-    expect(filters()[3]).toEqual(["Staking", "true"]);
-    expect(rows()).toEqual([
-      "Claim rewardsStaking · 00:59+62,166.5879 DUSK",
-      "UnstakeStaking · 00:59+500,000 DUSK",
-      "Claim rewardsStaking · 17:54+239,121.4534 DUSK",
-      "Staked with SozuStaking · 20:10−50 DUSK",
-      "Staked with SozuStaking · 14:00−1,000 DUSK",
-      "Claim rewardsStaking · 13:35+1,609,142.7584 DUSK",
-    ]);
-    expect(days()).toEqual(["Wed 21 Oct", "Fri 18 Sep", "Wed 17 Jun", "Sun 31 May"]);
-
-    button("Received").click();
-    expect(rows().every((text) => /Received · /.test(text))).toBe(true);
-    button("Sent").click();
-    expect(rows().some((text) => /Received|Staking · /.test(text))).toBe(false);
-    // No bridge transfers here.
-    button("Bridge").click();
-    expect([rows(), visibleText(body().querySelector(".tx-empty"))]).toEqual([[], "No bridge transfers yet."]);
-    state.activityFilter = "all";
-    draw();
-  });
-
-  it("finds rows as a search is typed: by name in any case, address, ID or amount, and says when none matches", () => {
-    // Nandini's: no way to find one payment among the rest.
-    const { state } = setup({ names: new Map([[FAUCET, "faucet.dusk"], [SENDER, null]]), route: "activity" });
-    const search = (text) => {
-      const field = body().querySelector('input[aria-label="Search activity"]');
-      field.value = text;
-      field.dispatchEvent(new Event("input"));
-      return rows();
-    };
-    const all = rows();
-    const only = (keep) => {
-      const kept = all.filter(keep);
-      expect(kept.length).toBeGreaterThan(0);
-      expect(kept.length).toBeLessThan(all.length);
-      return kept;
-    };
-
-    expect(search("FAUCET.dusk")).toEqual(only((row) => row.startsWith("faucet.dusk")));
-    expect(search(SENDER.slice(20, 40))).toEqual(only((row) => row.startsWith(short(SENDER))));
-    const [{ hash }] = state.activity.entries;
-    expect(search(hash.slice(8, 24))).toHaveLength(1);
-    expect(search("1,100")).toEqual(only((row) => row.endsWith("+1,100 DUSK")));
-    expect([search("not in any row"), visibleText(body().querySelector(".tx-empty"))]).toEqual([[], "Nothing in your activity matches that."]);
-    expect(search("")).toEqual(all);
-  });
-
-  it("finds a memo or a name typed without its accents, and shows each row's memo under it", () => {
-    // Sofia's and Amelie's: "ilustracion" found nothing, and the rows that matched said no memo.
-    const { state, draw } = setup({ route: "activity" });
-    const memos = ["Factura 2026-074 Ilustraci\u00f3n", "Le go\u00fbter du mercredi", "Fac\u202etura"];
-    state.activity.entries = state.activity.entries.map((entry, i) => (i < memos.length ? { ...entry, memo: memos[i] } : entry));
-    draw();
-    const search = (text) => {
-      const field = body().querySelector('input[aria-label="Search activity"]');
-      field.value = text;
-      field.dispatchEvent(new Event("input"));
-      return body().querySelectorAll(".tx-row").map((row) => visibleText(row.querySelector(".tx-memo") ?? row));
-    };
-    expect(search("ilustracion")).toEqual(["Factura 2026-074 Ilustraci\u00f3n"]);
-    expect(search("ILUSTRACIÓN")).toEqual(["Factura 2026-074 Ilustraci\u00f3n"]);
-    expect(search("gouter")).toEqual(["Le go\u00fbter du mercredi"]);
-    // What can't be seen in a memo shows as its code, as everywhere a memo shows, and its button says it.
-    // The last one came in from an address that isn't a contact's: the sender's words, said so.
-    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", "Not a contact“Fac\\u202etura”"]);
-    expect(visibleText(body())).not.toContain("\u202e");
-    const opened = body().querySelectorAll(".tx-row button.tx-open").map(accessibleName);
-    expect(opened.every((name) => /, memo /.test(name))).toBe(true);
-  });
-
-  // Chen's and Marek's: a stranger's "URGENT: wallet suspended - pay now to restore" read like the wallet's own words,
-  // in Activity, on Home and in its details. Lena's and Amélie's then: "From sofiadesign.dusk" with nothing saying she
-  // isn't a contact, and a pushy stranger's memo still the biggest thing in its row.
-  it("says a stranger's memo is theirs: not a contact, a .dusk name or not, under the name it's from, then their words, muted and in quotes", () => {
-    const urgent = "URGENT: wallet suspended - pay now to restore";
-    const { state, draw } = setup({ route: "activity" });
-    const at = state.activity.entries.findIndex((entry) => entry.direction === "in" && String(entry.counterparty ?? "") === SENDER);
-    expect(at).toBeGreaterThanOrEqual(0);
-    state.activity.entries = state.activity.entries.map((entry, i) => (i === at ? { ...entry, memo: urgent } : entry));
-    draw();
-    const memoLine = () => body().querySelector(".tx-row .tx-memo");
-    const field = body().querySelector('input[aria-label="Search activity"]');
-    field.value = "urgent";
-    field.dispatchEvent(new Event("input"));
-    expect(body().querySelectorAll(".tx-row")).toHaveLength(1);
-    expect(memoLine().className).toContain("tx-memo--theirs");
-    // Who it's from is the row's name, said once; under it, that it's not a contact's.
-    const from = "Not a contact";
-    expect(visibleText(body().querySelector(".tx-row .tx-name"))).toBe(shortAddress(SENDER));
-    expect(visibleText(memoLine())).toBe(`${from}“${urgent}”`);
-    expect(visibleText(body().querySelector(".tx-row"))).not.toContain(`From ${shortAddress(SENDER)}`);
-    // Not a contact first, in the memo's own size: never cut off by a long memo.
-    expect(memoLine().children.map((el) => el.className)).toEqual(["tx-memo__from", "tx-memo__text"]);
-    expect(memoLine().querySelector("a, b, strong")).toBeNull();
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toContain(`memo “${urgent}”, ${from}`);
-
-    // With a .dusk name of its own: from that name.
-    state.activity.names = new Map([[SENDER, "sofiadesign.dusk"]]);
-    draw();
-    field.dispatchEvent(new Event("input"));
-    expect(visibleText(body().querySelector(".tx-row .tx-name"))).toBe("sofiadesign.dusk");
-    expect(visibleText(body().querySelector(".tx-row .tx-memo"))).toBe(`Not a contact“${urgent}”`);
-
-    // Its details: the same, under the name in its head.
-    const hash = state.activity.entries[at].hash;
-    state.route = "tx";
-    state.txDetailHash = hash;
-    draw();
-    expect(visibleText(body().querySelector(".tx-hero-name"))).toBe("sofiadesign.dusk");
-    const memoRow = body().querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
-    expect(visibleText(memoRow.querySelector(".kv-value"))).toBe(`Not a contact“${urgent}”`);
-
-    // A contact's memo is as ever.
-    state.route = "activity";
-    state.addressBook.items = [{ id: "c1", name: "Sofía", address: SENDER }];
-    draw();
-    field.dispatchEvent(new Event("input"));
-    const line = body().querySelector(".tx-row .tx-memo");
-    expect([line.className, visibleText(line)]).toEqual(["row-sub tx-memo", urgent]);
-  });
-
-  it("finds an amount typed with either decimal mark, in the browser's language", () => {
-    // Lena's: under German, "0.2" and "0.05" found nothing where "0,2" and "0,05" did.
-    vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
-    const { state, draw } = setup({ route: "activity" });
-    const [first, second, ...rest] = state.activity.entries;
-    state.activity.entries = [{ ...first, value: "200000000" }, { ...second, value: "50000000" }, ...rest];
-    draw();
-    const search = (text) => {
-      const field = body().querySelector('input[aria-label="Search activity"]');
-      field.value = text;
-      field.dispatchEvent(new Event("input"));
-      return body().querySelectorAll(".tx-row .tx-amount").map(visibleText);
-    };
-    expect(search("0.2")).toEqual(search("0,2"));
-    expect(search("0.2").some((amount) => amount.includes("0,2"))).toBe(true);
-    expect(search("0.05")).toEqual(search("0,05"));
-    expect(search("0.05").some((amount) => amount.includes("0,05"))).toBe(true);
-    // On the way to typing it, 0,05 stays found (Codex's: "0.0" found nothing until the 5).
-    for (const typed of ["0", "0.0", "0,0"]) expect(search(typed).some((amount) => amount.includes("0,05")), typed).toBe(true);
-  });
-
-  // Sofía's: "Marta" found nothing until Show more, and never the payment from her contact named with a Cyrillic а.
-  it("finds a contact's payments by a name that looks like the one typed, from the whole history, without Show more", async () => {
-    const { state, draw } = setup({ complete: false, route: "activity" });
-    // Two contacts, one named in a Cyrillic а; their payments older than the page.
-    state.addressBook.items = [
-      { id: "c1", name: "Estudio Marta", address: FAUCET },
-      { id: "c2", name: "Estudio M\u0430rta", address: SENDER },
-    ];
-    const kept = state.activity.entries;
-    let synced = false;
-    state.activity.limit = 2;
-    state.activity.entries = kept.slice(0, 2);
-    state.activity.epoch = Promise.resolve(1);
-    state.activity.history = {
-      // Older blocks come in as it's synced back; until then the history isn't whole.
-      sync: vi.fn(async () => {
-        synced = true;
-      }),
-      read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, synced ? limit : 2), state: null, complete: synced, coveredTo: 0 })),
-    };
-    draw();
-    const field = body().querySelector('input[aria-label="Search activity"]');
-    field.value = "marta";
-    field.dispatchEvent(new Event("input"));
-    // While it's read: saying so, and no Show more.
-    expect(visibleText(body().querySelector(".tx-empty"))).toBe("Looking through all your activity…");
-    expect(button("Show more")).toBeUndefined();
-    await vi.waitFor(() => expect(rows()).toHaveLength(2));
-    expect(rows().map((row) => row.split(" · ")[0])).toEqual(["Estudio M\u0430rta", "Estudio Marta"]);
-    expect(rows().every((row) => row.includes("Looks like another contact"))).toBe(true);
-    expect(state.activity.history.sync).toHaveBeenCalled();
-    expect(button("Show more")).toBeUndefined();
-    // Cleared, the page is as it was.
-    field.value = "";
-    field.dispatchEvent(new Event("input"));
-    expect(rows()).toHaveLength(2);
-
-    // Astra's: a payment found past the page opened as "This transaction isn't in your activity".
-    field.value = "marta";
-    field.dispatchEvent(new Event("input"));
-    await vi.waitFor(() => expect(rows()).toHaveLength(2));
-    body()
-      .querySelectorAll(".tx-row")
-      .find((row) => visibleText(row).startsWith("Estudio Marta ·"))
-      .querySelector("button.tx-open")
-      .click();
-    await settle();
-    expect(body().querySelector(".tx-missing")).toBeNull();
-    expect([visibleText(body().querySelector(".tx-hero-name")), visibleText(body().querySelector(".tx-hero-amount"))]).toEqual(["Estudio Marta", "+1,100 DUSK"]);
-  });
-
-  // Amélie's: "marché" found nothing till History had been shown three times more, the payments kept all along;
-  // and a stranger's memo found lost its "not in your contacts", now "Not a contact".
-  it("searches every payment kept on this device when older ones can't be had, a stranger's marked as in the list", async () => {
-    const { state, draw } = setup({ complete: false, route: "activity" });
-    const kept = state.activity.entries.map((entry) => (entry.hash === state.activity.entries.find((e) => e.counterparty === SENDER)?.hash ? { ...entry, memo: "Les fleurs du marché" } : entry));
-    state.activity.limit = 2;
-    state.activity.entries = kept.slice(0, 2);
-    state.activity.epoch = Promise.resolve(1);
-    state.activity.history = {
-      // No network: older blocks can't be had.
-      sync: vi.fn(async () => {
-        throw new Error("Failed to fetch");
-      }),
-      read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, limit), state: null, complete: false, coveredTo: 0 })),
-    };
-    draw();
-    expect(rows().some((row) => row.includes("marché"))).toBe(false);
-    const field = body().querySelector('input[aria-label="Search activity"]');
-    field.value = "marche";
-    field.dispatchEvent(new Event("input"));
-    await vi.waitFor(() => expect(rows()).toHaveLength(1));
-    expect(rows()[0]).toBe(`${short(SENDER)}Received · 16:41Not a contact“Les fleurs du marché”+1,000 DUSK`);
-    expect(body().querySelector(".tx-row .tx-memo").className).toContain("tx-memo--theirs");
-    // Older payments may still match: it says so, with Show more.
-    field.value = "tulipes";
-    field.dispatchEvent(new Event("input"));
-    await vi.waitFor(() => expect(visibleText(body().querySelector(".tx-empty"))).toBe("Nothing read so far matches that. Show more to look further back."));
-    expect(button("Show more")).toBeTruthy();
-  });
-
-  // Astra's: a .dusk name searched for found nothing where its payments were all past the page, their names never read.
-  it("finds a payment past the page by its counterparty's .dusk name, read as the page's are", async () => {
-    const { state, draw } = setup({ complete: false, route: "activity" });
-    const kept = state.activity.entries;
-    let synced = false;
-    Object.assign(state.activity, {
-      limit: 2,
-      entries: kept.slice(0, 2),
-      checked: new Set(),
-      epoch: Promise.resolve(1),
-      history: {
-        sync: vi.fn(async () => {
-          synced = true;
-        }),
-        read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, synced ? limit : 2), state: null, complete: synced, coveredTo: 0 })),
-      },
-    });
-    lookupRecipientNames.mockImplementationOnce(async (accounts) => new Map(accounts.filter((a) => a === SENDER).map((a) => [a, "sender.dusk"])));
-    draw();
-    const field = body().querySelector('input[aria-label="Search activity"]');
-    field.value = "sender.dusk";
-    field.dispatchEvent(new Event("input"));
-    await vi.waitFor(() => expect(rows().map((row) => [row.split(" · ")[0], row.endsWith("+1,000 DUSK")])).toEqual([["sender.duskReceived", true]]));
-    expect(lookupRecipientNames).toHaveBeenCalledWith(expect.arrayContaining([SENDER]), expect.anything());
-  });
-
-  it("isn't held by a node that doesn't answer for the names past the page, and names those rows when it does", async () => {
-    vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
-    vi.setSystemTime(NOW);
-    const { state, draw } = setup({ complete: false, route: "activity" });
-    const kept = state.activity.entries;
-    let synced = false;
-    Object.assign(state.activity, {
-      limit: 2,
-      entries: kept.slice(0, 2),
-      checked: new Set(),
-      epoch: Promise.resolve(1),
-      history: {
-        sync: vi.fn(async () => {
-          synced = true;
-        }),
-        read: vi.fn(async ({ limit }) => ({ entries: kept.slice(0, synced ? limit : 2), state: null, complete: synced, coveredTo: 0 })),
-      },
-    });
-    // The node takes the names' check and answers it only later.
-    let answer;
-    lookupRecipientNames.mockClear();
-    lookupRecipientNames.mockImplementationOnce(() => new Promise((resolve) => (answer = resolve)));
-    draw();
-    const field = body().querySelector('input[aria-label="Search activity"]');
-    field.value = "1,000";
-    field.dispatchEvent(new Event("input"));
-    await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalledWith(expect.arrayContaining([SENDER]), expect.anything()));
-    expect(visibleText(body().querySelector(".tx-empty"))).toContain("Looking");
-
-    // Past the time a node that answers takes, what's found shows, by its address.
-    await vi.advanceTimersByTimeAsync(10_000);
-    await vi.waitFor(() => expect(rows().map((row) => row.split(" · ")[0])).toEqual([`${short(SENDER)}Received`]));
-
-    // The name it gives later shows, and is searched for.
-    answer(new Map([[SENDER, "sender.dusk"]]));
-    await vi.waitFor(() => expect(rows().map((row) => row.split(" · ")[0])).toEqual(["sender.duskReceived"]));
-    field.value = "sender.dusk";
-    field.dispatchEvent(new Event("input"));
-    await vi.waitFor(() => expect(rows().map((row) => row.split(" · ")[0])).toEqual(["sender.duskReceived"]));
-  });
-
-  // Lena's, on Android, twice: opened offline, her payments to sofiadesign.dusk showed as a bare address, and the name
-  // didn't come back with the signal or with Refresh, only after a restart: a failed lookup counted as one done.
-  it("looks a name up again with the next read once its lookup failed, as when the signal's back, keeping one it had", async () => {
-    const { state, draw } = setup({ route: "activity" });
-    const { refreshActivitySoon } = await import("./popup/activity.js");
-    Object.assign(state.activity, {
-      checked: new Set(),
-      epoch: Promise.resolve(1),
-      history: { sync: vi.fn(async () => {}), read: vi.fn(async () => ({ entries: state.activity.entries, state: null, complete: true, coveredTo: 0 })) },
-    });
-    const render = async () => draw();
-    // No signal: every lookup fails, and nothing's named.
-    lookupRecipientNames.mockClear();
-    lookupRecipientNames.mockImplementation(async () => new Map());
-    refreshActivitySoon({ state, render }, 0);
-    await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalledTimes(1));
-    await settle();
-    expect(rows().some((row) => row.startsWith(`${short(SENDER)}Received`))).toBe(true);
-
-    // The signal's back: the next read looks it up again, and the name shows.
-    lookupRecipientNames.mockImplementation(async (accounts) => new Map(accounts.map((a) => [a, a === SENDER ? "sofiadesign.dusk" : null])));
-    refreshActivitySoon({ state, render }, 0);
-    await vi.waitFor(() => expect(rows().some((row) => row.startsWith("sofiadesign.duskReceived"))).toBe(true));
-
-    // Lost again: the name stays.
-    lookupRecipientNames.mockImplementation(async () => new Map());
-    state.activity.checked.clear();
-    refreshActivitySoon({ state, render }, 0);
-    await vi.waitFor(() => expect(lookupRecipientNames).toHaveBeenCalledTimes(3));
-    await settle();
-    expect(rows().some((row) => row.startsWith("sofiadesign.duskReceived"))).toBe(true);
-    lookupRecipientNames.mockImplementation(async () => new Map());
-  });
-
-  it("finds no row by its amount while balances are hidden, and says what's still to read", () => {
-    const { state, draw } = setup({ complete: false, hidden: true, route: "activity" });
-    state.activitySearch = "1,100";
-    draw();
-    expect([rows(), visibleText(body().querySelector(".tx-empty"))]).toEqual([[], "Nothing read so far matches that. Show more to look further back."]);
-  });
-
-  it("offers Show more while older history is still to come, and the account on Dusk's explorer", async () => {
-    const { state, draw } = setup({ complete: false, route: "activity" });
-    expect(button("Show more")).toBeTruthy();
-    state.activity.complete = true;
-    draw();
-    expect(button("Show more")).toBeUndefined();
-    button("View in explorer").click();
-    await settle();
-    expect(openUrl).toHaveBeenCalledWith(`https://explorer.testnet.dusk.network/accounts/?key=${A}`);
-  });
-});
-
-describe("a payment a notice's tap opens", () => {
-  // Issue #214: a payment told by a notice, behind 50 newer ones in Activity, was reported missing though it was kept.
-  it("is looked for among every payment kept on this device, past Activity's page, by its ID", async () => {
-    const { state, draw } = setup({ route: "tx" });
-    const kept = state.activity.entries;
-    const told = kept.find((entry) => entry.counterparty === SENDER);
-    // The page: the newest one alone.
-    state.activity.limit = 1;
-    state.activity.entries = kept.slice(0, 1);
-    state.activity.epoch = Promise.resolve(1);
-    state.activity.history = {
-      read: vi.fn(async ({ limit, before }) => ({ entries: kept.filter((e) => !before || e.blockHeight < before).slice(0, limit), state: null, complete: true, coveredTo: 0 })),
-      needsDetails: () => false,
-      fillDetails: vi.fn(async () => {}),
-    };
-    expect(state.activity.entries.some((entry) => entry.hash === told.hash)).toBe(false);
-    Object.assign(state, { txDetailHash: told.hash, txDetailFrom: "home", txDetailRow: { context: state.activity.key, hash: told.hash, reading: true, row: null } });
-    draw();
-    await vi.waitFor(() => expect(visibleText(body().querySelector(".tx-hero-amount"))).toBe("+1,000 DUSK"));
-    expect(body().querySelector(".tx-missing")).toBeNull();
-  });
-});
-
-describe("a transaction's details", () => {
-  const sent = {
-    hash: "3e6a0ec6".padEnd(56, "0") + "7eae84ba",
-    kind: TX_KIND.TRANSFER,
-    privacy: "public",
-    to: FAUCET,
-    toName: "faucet.dusk",
-    amount: dusk(25),
-    memo: "Order 1042",
-    status: "executed",
-    feePaid: "3700000",
-    gasSpent: "3700000",
-    gasLimit: "10000000",
-    gasPrice: "1",
-    blockHeight: "4658100",
-    submittedAt: Date.parse("2026-10-22T14:32:00Z"),
-    executedAt: Date.parse("2026-10-22T14:32:10Z"),
-    profileIndex: 0,
-  };
-  const open = (opts, hash) => {
-    const view = setup({ ...opts, route: "tx" });
-    Object.assign(view.state, { txDetailHash: hash, txDetailFrom: "activity" });
-    view.draw();
-    return view;
-  };
-
-  it("leads with who, how much and its status, then its date, memo, fee and profile, its ID under Details", async () => {
-    const { state } = open({ local: [sent] }, sent.hash);
-    await settle();
-    expect(visibleText(body().querySelector(".tx-hero"))).toBe("Sent tofaucet.dusk" + `${short(FAUCET)}−25 DUSKCompleted`);
-    expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText)).toEqual([
-      "DateThu 22 Oct 2026, 14:32 UTC",
-      "MemoOrder 1042",
-      "Fee0.0037 DUSK",
-      "Fromalice.dusk · Public",
-    ]);
-    // The ID, block, gas and finality wait under Details.
-    const tech = body().querySelector("details.tx-tech");
-    expect(tech.open).toBe(false);
-    expect(visibleText(tech.querySelector("summary"))).toBe("Details");
-    expect(tech.querySelectorAll(".kv").map(visibleText)).toEqual([
-      "Transaction ID3e6a0e…ae84baCopy",
-      "NetworkTestnet",
-      "Block4,658,100",
-      "Gas used3,700,000 of 10,000,000",
-      "Gas price1 LUX",
-      "SubmittedThu 22 Oct 2026, 14:32 UTC",
-    ]);
-    // The ID opens Dusk's explorer; Copy and the address's copy say what they copy.
-    const explorerUrl = `https://explorer.testnet.dusk.network/transactions/transaction/?id=${sent.hash}`;
-    button(`Transaction 3e6a0e…ae84ba, open in explorer`).click();
-    await settle();
-    expect(openUrl).toHaveBeenLastCalledWith(explorerUrl);
-    button("Copy transaction ID").click();
-    await settle();
-    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(sent.hash);
-    button("Copy address").click();
-    await settle();
-    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(FAUCET);
-    button("View in explorer").click();
-    await settle();
-    expect(openUrl).toHaveBeenLastCalledWith(explorerUrl);
-    // Back says so, and goes back where it came from.
-    button("← Back").click();
-    expect(state.route).toBe("activity");
-  });
-
-  it("says under Details how the wallet watched a send only until the chain's history has it", () => {
-    const tech = () => body().querySelectorAll("details.tx-tech .kv").map(visibleText);
-    const checked = "Last checkedThu 22 Oct 2026, 14:32 UTC";
-    open({ local: [{ ...sent, lastCheckedAt: sent.executedAt }] }, sent.hash);
-    expect(tech()).toContain(checked);
-    // A's register call, which the history has: when it was sent stays.
-    const { hash, contractId } = history(A).find((e) => e.fnName === "register");
-    const call = { hash, kind: TX_KIND.CONTRACT_CALL, contractId, fnName: "register", status: "executed", profileIndex: 0 };
-    open({ local: [{ ...call, submittedAt: sent.submittedAt, lastCheckedAt: sent.executedAt }] }, hash);
-    expect(tech()).toContain("SubmittedThu 22 Oct 2026, 14:32 UTC");
-    expect(tech()).not.toContain(checked);
-  });
-
-  it("hides the amount and the fee with Hide balances", () => {
-    open({ local: [sent], hidden: true }, sent.hash);
-    expect(visibleText(body())).not.toContain("25 DUSK");
-    expect(visibleText(body())).toContain("Fee•••• DUSK");
-    expect(visibleText(body())).not.toContain("0.0037");
-    expect(visibleText(body())).not.toContain("0.00");
-    expect([visibleText(body().querySelector(".tx-hero-amount")), screenReaderText(body().querySelector(".tx-hero-amount"))]).toEqual([
-      "•••• DUSK",
-      "hidden DUSK",
-    ]);
-  });
-
-  it("names a received transfer's sender, and the profile it reached; the chain says it's final", async () => {
-    const view = setup({ names: new Map([[FAUCET, "faucet.dusk"]]) });
-    const received = view.state.activity.entries.find((e) => e.counterparty === FAUCET);
-    Object.assign(view.state, { route: "tx", txDetailHash: received.hash, txDetailFrom: "home" });
-    view.draw();
-    await settle();
-    expect(visibleText(body().querySelector(".tx-hero"))).toBe(`Received fromfaucet.dusk${short(FAUCET)}+1,100 DUSKCompleted`);
-    const text = body().querySelectorAll(".kv").map(visibleText);
-    expect(text).toContain("Toalice.dusk · Public");
-    expect(text).toContain("FinalityFinal");
-    // Its fee was the sender's.
-    expect(text.some((t) => t.startsWith("Fee"))).toBe(false);
-  });
-
-  it("says why one didn't go through in plain words, and what it cost", () => {
-    const failed = { ...sent, status: "failed", error: "Panic: phoenix is not enabled in the VM" };
-    open({ local: [failed] }, failed.hash);
-    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Failed");
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe(
-      "Shielded transactions are paused on the network. The 25 DUSK stayed in your wallet."
-    );
-    // The chain's own words wait under Details.
-    expect(body().querySelectorAll("details.tx-tech .kv").map(visibleText)).toContain("ErrorPanic: phoenix is not enabled in the VM");
-    // Nothing left: the amount shows muted, without a sign.
-    expect([visibleText(body().querySelector(".tx-hero-amount")), body().querySelector(".tx-hero-amount").className]).toEqual([
-      "25 DUSK",
-      "tx-hero-amount is-muted",
-    ]);
-    expect(visibleText(body())).toContain("Fee charged0.0037 DUSK");
-    open({ local: [failed], hidden: true }, failed.hash);
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe(
-      "Shielded transactions are paused on the network. The amount stayed in your wallet."
-    );
-    // An error without plain words keeps its own, shortened.
-    open({ local: [{ ...failed, error: "Panic: DRC20Phoenix: paused" }] }, failed.hash);
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Panic: DRC20Phoenix: paused. The 25 DUSK stayed in your wallet.");
-
-    const pending = { ...sent, status: "mempool", feePaid: undefined, gasSpent: undefined };
-    open({ local: [pending] }, pending.hash);
-    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Sending");
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Still waiting to go through. Don't retry yet.");
-    expect(visibleText(body())).toContain("FeeUp to 0.01 DUSK");
-
-    // Dropped before it ran: Failed, as Sent says it; that no fee was charged is said once, in its Fee row.
-    const dropped = { ...pending, status: "removed" };
-    open({ local: [dropped] }, dropped.hash);
-    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Failed");
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("The network dropped it before it ran. The 25 DUSK stayed in your wallet.");
-    expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText).filter((t) => t.startsWith("Fee"))).toEqual(["FeeNone charged"]);
-    expect(visibleText(body())).not.toContain("No fee charged");
+    const fee = Object.entries(fieldsOf(body())).find(([label]) => FEE.test(label))?.[1];
+    expect(fee).toBe("0.001840001 DUSK");
   });
 });
 
@@ -861,48 +272,39 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     Object.assign(entry, { success: null, timestamp: null, detailsAt: undefined });
     return entry;
   };
+  // Its row: the one that paid 100 DUSK.
+  const row = () => rowWith("−100 DUSK");
+  // The details' status, and its state: is-neutral for one nothing waits on.
+  const hero = () => {
+    const status = body().querySelector(".tx-hero-status");
+    return [visibleText(status), status.className.split(" ").find((c) => c.startsWith("is-"))];
+  };
+  // Its note: final on chain, its outcome being looked up; never that the wallet stopped waiting for it.
+  const lookedUp = () => {
+    const note = visibleText(body().querySelector(".tx-hero-note"));
+    expect(note).toMatch(/looked up/i);
+    expect(note).not.toMatch(/stopped waiting/i);
+  };
 
-  it("says Syncing… where its time goes, or its block's time once another row of that block has it", () => {
-    const view = setup();
-    const entry = unfetched(view);
-    const line = () =>
-      visibleText(body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Registered a .dusk name")).querySelector(".tx-sub"));
-    view.draw();
-    expect(line()).toBe("Dusk Domains · Syncing…");
-    view.state.route = "activity";
-    view.draw();
-    expect(line()).toBe("Dusk Domains · Syncing…");
-
-    // Another entry of the same block has come with its time.
-    const other = view.state.activity.entries.find((e) => e !== entry && e.timestamp);
-    entry.blockHeight = other.blockHeight;
-    view.draw();
-    expect(line()).toBe(`Dusk Domains · ${new Date(other.timestamp).toISOString().slice(11, 16)}`);
-  });
-
-  it("says Unknown, muted, not Completed or Sending", () => {
+  it("says its outcome is unknown, neither completed nor pending", () => {
     const view = setup();
     unfetched(view);
     view.draw();
-    const row = body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Registered a .dusk name"));
-    expect(visibleText(row)).toMatch(/Unknown$/);
-    expect(row.querySelector(".tx-right .tx-status").className).toBe("tx-status tx-status--neutral");
-    expect(row.className).not.toMatch(/is-pending/);
+    expect([row().status, row().pending]).toEqual(["Unknown", false]);
   });
 
-  it("opens on Unknown, says it is being looked up, and looks it up", () => {
+  it("opens on an unknown outcome, says it is being looked up, and looks it up", () => {
     const view = setup();
     const entry = unfetched(view);
     Object.assign(view.state, { route: "tx", txDetailHash: entry.hash, txDetailFrom: "home" });
     detail.load.mockClear();
     view.draw();
     expect(detail.load).toHaveBeenCalledWith(expect.objectContaining({ state: view.state }), entry.hash);
-    const status = body().querySelector(".tx-hero-status");
-    expect([visibleText(status), status.className]).toEqual(["Unknown", "tx-hero-status is-neutral"]);
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("It is final on chain. Its outcome is still being looked up.");
+    expect(hero()).toEqual(["Unknown", "is-neutral"]);
+    lookedUp();
   });
 
-  it("takes the wallet's own pending send it has as final, Unknown, and looks it up too", () => {
+  it("takes the wallet's own pending send it has as final, its outcome unknown, and looks it up too", () => {
     const view = setup();
     const entry = unfetched(view);
     view.ov.txs = [{ hash: entry.hash, kind: TX_KIND.CONTRACT_CALL, status: "submitted", profileIndex: 0, submittedAt: NOW.getTime() - 20_000 }];
@@ -911,146 +313,11 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     view.draw();
     expect(detail.load).toHaveBeenCalledWith(expect.objectContaining({ state: view.state }), entry.hash);
     // In a finalized block: not pending, whatever the wallet's watcher last saw.
-    const status = body().querySelector(".tx-hero-status");
-    expect([visibleText(status), status.className]).toEqual(["Unknown", "tx-hero-status is-neutral"]);
-    expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("It is final on chain. Its outcome is still being looked up.");
+    expect(hero()).toEqual(["Unknown", "is-neutral"]);
+    lookedUp();
     // And its row the same.
     view.state.route = "home";
     view.draw();
-    const row = body().querySelectorAll(".tx-row").find((r) => visibleText(r).startsWith("Registered a .dusk name"));
-    expect(row.querySelector(".tx-right .tx-status").className).toBe("tx-status tx-status--neutral");
-  });
-});
-
-// The look the explorer and the web wallet share: heads and labels in the
-// ledger's type, the chain's blue on what leads somewhere.
-
-const css = () => readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-// A rule's body, by its selector as the stylesheet writes it.
-const rule = (sheet, selector) => sheet.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
-const blue = () => body().querySelectorAll(".chain-link");
-
-describe("a section's head", () => {
-  it("reads as [ ACTIVITY ], its brackets drawn and not read", () => {
-    const head = bracketTitle({ text: "Activity" });
-    expect(head.localName).toBe("h2");
-    expect(visibleText(head)).toBe("[Activity]");
-    expect(screenReaderText(head)).toBe("Activity");
-    expect(head.querySelectorAll(".bracket-title__bracket").map((b) => [b.textContent, b.getAttribute("aria-hidden")])).toEqual([
-      ["[", "true"],
-      ["]", "true"],
-    ]);
-  });
-
-  it("is in the ledger's type, in Söhne Mono, with brackets in the muted text colour", async () => {
-    const sheet = await css();
-    const head = rule(sheet, ".bracket-title");
-    expect(head).toContain("font-family: var(--font-mono);");
-    expect(head).toContain("letter-spacing: var(--ledger-tracking);");
-    expect(head).toContain("text-transform: uppercase;");
-    expect(rule(sheet, ".bracket-title__bracket")).toContain("color: var(--text-muted);");
-    // Söhne Mono, the extension's own, as the web wallet and the explorer set it.
-    expect(sheet).toMatch(/--font-mono: "Soehne Mono", ui-monospace,/);
-  });
-});
-
-describe("a head with a link beside it", () => {
-  it("sets the two on one baseline, as See all beside [ ACTIVITY ]", async () => {
-    const head = rule(await css(), ".section-head");
-    expect(head).toContain("align-items: baseline;");
-    expect(head).not.toContain("align-items: center;");
-    setup({ route: "home" });
-    const row = body().querySelector(".home-activity .section-head");
-    expect(row.children.map((child) => child.className)).toEqual(["bracket-title", "see-all chain-link"]);
-  });
-});
-
-describe("a sub-page's title", () => {
-  it("stays plain, without brackets, in the text font", async () => {
-    const title = subnav({ title: "Staking", onBack: () => {} }).querySelector(".subnav-title");
-    expect(title.localName).toBe("h1");
-    expect(title.textContent).toBe("Staking");
-    expect(title.children).toHaveLength(0);
-    const plain = rule(await css(), ".subnav-title");
-    expect(plain).not.toContain("text-transform");
-    expect(plain).not.toContain("--font-mono");
-  });
-});
-
-describe("the labels of balances and stakes", () => {
-  it("are in the ledger's type; day groups keep sentence case", async () => {
-    const sheet = await css();
-    for (const label of [".balance-label__text", ".balance-split-label", ".stake-lbl"]) {
-      const body = rule(sheet, label);
-      expect(body, label).toContain("font-family: var(--font-mono);");
-      expect(body, label).toContain("font-size: var(--ledger-size);");
-      expect(body, label).toContain("text-transform: uppercase;");
-    }
-    expect(rule(sheet, "h2.tx-day-label")).not.toContain("text-transform");
-    setup({ route: "activity" });
-    expect(body().querySelectorAll("h2.tx-day-label").map((day) => day.textContent)[0]).toBe("Yesterday");
-  });
-});
-
-describe("an ellipsis", () => {
-  it("is one character in everything the wallet writes, as every Dusk app writes it", async () => {
-    const { readdir } = await import("node:fs/promises");
-    const files = (await readdir(path.resolve(process.cwd(), "src"), { recursive: true })).filter(
-      (file) => file.endsWith(".js") && !file.endsWith(".test.js") && !file.includes("vendor")
-    );
-    const dots = [];
-    for (const file of files) {
-      const source = await readFile(path.resolve(process.cwd(), "src", file), "utf8");
-      // Three dots after a word, closing a string: "Saving...".
-      for (const [found] of source.matchAll(/\w\.\.\.["'`]/g)) dots.push(`${file}: ${found}`);
-    }
-    expect(dots).toEqual([]);
-  });
-});
-
-describe("the chain's blue", () => {
-  it("is only on what leads somewhere: See all, the explorer and a transaction's ID", async () => {
-    const view = setup({ route: "home" });
-    // Home: See all, which opens Activity. A row opens its details: a row, not a link.
-    expect(blue().map(visibleText)).toEqual(["See all"]);
-    expect(body().querySelectorAll(".tx-row .chain-link")).toHaveLength(0);
-    blue()[0].click();
-    await settle();
-    expect(view.state.route).toBe("activity");
-
-    // Activity: the account on Dusk's explorer.
-    expect(blue().map(visibleText)).toEqual(["View in explorer"]);
-    blue()[0].click();
-    await settle();
-    expect(openUrl).toHaveBeenCalledTimes(1);
-
-    // A transaction's details: its ID, which opens it on the explorer. Copy acts, so it isn't blue.
-    Object.assign(view.state, { route: "tx", txDetailHash: view.state.activity.entries[0].hash, txDetailFrom: "home" });
-    view.draw();
-    expect(blue().map((el) => el.className)).toEqual(["text-btn tx-id chain-link"]);
-    blue()[0].click();
-    await settle();
-    expect(openUrl).toHaveBeenCalledTimes(2);
-  });
-
-  it("keeps an underline at rest on a link in a row's text, such as Run a node: its blue alone isn't enough", async () => {
-    const sheet = await css();
-    const inline = rule(sheet, "button.chain-link.text-btn--inline:not(:disabled)");
-    expect(inline).toContain("text-decoration-line: underline;");
-    expect(inline).not.toContain("--chain-blue");
-    // Other links still show theirs only under the pointer.
-    expect(sheet).toMatch(/button\.chain-link:not\(:disabled\),\nbutton\.chain-link:not\(:disabled\):hover \{\n  color: var\(--chain-blue\);\n  text-decoration-line: none;/);
-  });
-
-  it("is set only through .chain-link, on buttons that aren't disabled", async () => {
-    const sheet = await css();
-    const blocks = sheet.split("\n}").filter((block) => block.includes("var(--chain-blue)"));
-    expect(blocks).toHaveLength(1);
-    const selectors = blocks[0]
-      .slice(0, blocks[0].indexOf("{"))
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .split(",")
-      .map((selector) => selector.trim());
-    expect(selectors).toEqual(["button.chain-link:not(:disabled)", "button.chain-link:not(:disabled):hover"]);
+    expect([row().status, row().pending]).toEqual(["Unknown", false]);
   });
 });

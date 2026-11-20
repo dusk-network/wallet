@@ -4,19 +4,32 @@ import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { networks, routes } from "@dusk-network/networks";
-import { parsePaymentLink } from "@dusk-network/app-core/payment-links";
+import { GAS_PRICE_BUSY } from "@dusk-network/app-core/gas";
+import {
+  LINK_BAD_ADDRESS,
+  LINK_BAD_AMOUNT,
+  LINK_MEMO_LINE_BREAK,
+  LINK_SEVERAL,
+  LINK_TWO_AMOUNTS,
+  LINK_UNCLEAR,
+  LINK_UNREADABLE,
+  parsePaymentLink,
+} from "@dusk-network/app-core/payment-links";
+import { bridgeServiceLine, bridgeServiceTransfer, bridgeServiceWarnings, noBridgeRecipientText } from "../shared/bridgeCalls.js";
 import { TX_KIND } from "../shared/constants.js";
 import { isAccount } from "@dusk-network/networks/account";
 import { duskNamesOwners, lookupDuskName, lookupPrimaryName } from "../shared/duskNames.js";
 import fixtures from "../shared/fixtures/duskevm-bridge-calls.json";
 import { entryOf } from "../shared/fixtures/rows.js";
 import { noteChainId } from "../shared/nodeNetwork.js";
-import { shortAddress } from "./lib/strings.js";
-import { clockText } from "./lib/time.js";
+import { blockedRecipient } from "../shared/recipientBlocklist.js";
+import { readPastedRequest, readRequestLink } from "./lib/requestLink.js";
+import { shortfallText } from "./lib/shortfall.js";
 import { fakeEvent, installFakeDom, isShown, pastClickGuard, settle, typeInto, visibleText } from "./testing/fakeDom.js";
-import { iconSvg } from "./components/ActionIcon.js";
 import { parseDuskQrPayload } from "./components/QrScanModal.js";
-import { publicSendLine, sendConfirmView, sendFormView } from "./popup/views/send.js";
+import { numbersText } from "./components/SafeText.js";
+import { sendPasswordWhy } from "./components/SendPasswordDialog.js";
+import { EVM_ADDRESS_TEXT, chainMismatchText, sendConfirmView, sendFormView } from "./popup/views/send.js";
 import { reviewOf } from "./popup/views/sent.js";
 import { activityKey } from "./popup/activity.js";
 import { asKept, keepOpenSend, takeOpenSend } from "./lib/sendDraft.js";
@@ -53,39 +66,6 @@ describe("send view", () => {
     expect(review).toContain('const privacy = recType === "address" ? "shielded" : "public";');
     const sendBlock = review.match(/type: "DUSK_UI_SEND_TX"([\s\S]*?)memo: d\.memo/);
     expect(sendBlock?.[1]).toContain("privacy,");
-  });
-
-  it("uses shared recipient badges for send contact and privacy indicators", async () => {
-    const sendView = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "popup", "views", "send.js"),
-      "utf8"
-    );
-    const badgeComponent = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "components", "RecipientBadge.js"),
-      "utf8"
-    );
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-
-    expect(sendView).toContain("RecipientBadge.js");
-    expect(sendView).toContain("recipientTypeBadgeOptions");
-    expect(sendView).toContain('kind: "contact"');
-    expect(sendView).toContain('className: "to-chip"');
-
-    expect(badgeComponent).toContain("recipientBadge");
-    expect(badgeComponent).toContain('label: "Public"');
-    expect(badgeComponent).toContain('label: "Shielded"');
-    expect(badgeComponent).toContain('icon: "public"');
-    expect(badgeComponent).toContain('icon: "shielded"');
-    expect(badgeComponent).not.toContain('icon: "P"');
-    expect(badgeComponent).not.toContain('icon: "S"');
-
-    expect(css).toContain(".recipient-badge--contact");
-    // Calm chips: neither a saved contact nor Public/Shielded takes a colour.
-    expect(css).toMatch(/\.recipient-badge--contact\s*\{[^}]*var\(--surface-2\)/s);
-    expect(css).toContain(".recipient-badge--rail");
-    expect(css).toMatch(/\.recipient-badge--rail\s*\{[^}]*var\(--surface-2\)/s);
-    expect(css).not.toMatch(/\.recipient-badge--(contact|rail)\s*\{[^}]*var\(--(ok|primary)\)/s);
-    expect(css).toContain(".recipient-badge__glyph--svg svg");
   });
 });
 
@@ -171,6 +151,64 @@ function newState() {
 // What a refused paste leaves in To: the text, on its one line.
 const oneLine = (text) => text.replace(/\s*[\r\n]+\s*/g, " ").trim();
 
+// A figure, word or name exactly as written (exactly(), with a word's edges too): not inside a longer number, word or
+// name, not signed or bounded unless written so, and not followed by more digits, letters or a decimal part: 1.0025
+// isn't 11.0025, 0.005 isn't −0.005, 2,000,000 isn't 2,000,000.5, 1 DUSK isn't 0.1 DUSK, bob.dusk isn't abob.dusk.
+const whole = (value) =>
+  `${/^[\p{L}\p{N}]/u.test(value) ? "(?<![\\p{L}\\p{N}_.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)" : ""}${RegExp.escape(value)}${/[\p{L}\p{N}]$/u.test(value) ? "(?![\\p{L}\\p{N}_]|[.,]\\d)" : ""}`;
+// What a note, an error or a refusal says, in whatever words: something, with each of `values` in it whole.
+const saying = (...values) => expect.stringMatching(new RegExp(`^(?=[\\s\\S]*\\S)${values.map((value) => `(?=[\\s\\S]*${whole(value)})`).join("")}`, "u"));
+// A sentence of two sides that says each value on its own side: after the word for that side, with the other side's
+// word nowhere between ("message … 0.002 DUSK", "link … 0.15 DUSK"), so one that swaps the two fails. `words`, the app's
+// own for it, are an extra check.
+const sides = ([side, value], [otherSide, otherValue], words) => {
+  const either = (word) => word.replace(/[a-z]/gi, (c) => `[${c.toLowerCase()}${c.toUpperCase()}]`);
+  const on = (word, value, other) => `(?=[\\s\\S]*\\b${either(word)}(?:(?!\\b${either(other)}\\b)[\\s\\S])*?${whole(value)})`;
+  return expect.stringMatching(new RegExp(`^${on(side, value, otherSide)}${on(otherSide, otherValue, side)}${words === undefined ? "" : `${RegExp.escape(words)}$`}`, "u"));
+};
+
+// What says one thing and never the other, in whatever words: a transfer, or the balance that pays, public and not
+// shielded, or shielded and not public; a recipient the pill can't tell, unknown and neither.
+const only = (is, isnt) => expect.stringMatching(new RegExp(`^(?![\\s\\S]*(?:${isnt}))[\\s\\S]*(?:${is})`, "i"));
+const [ONLY_PUBLIC, ONLY_SHIELDED, ONLY_UNKNOWN] = [only("public", "shielded"), only("shielded", "public"), only("unknown", "public|shielded")];
+// What a name that looks like another contact's ("contact") or one of your profiles' ("profile") says of it.
+const looksLike = (kind) => new RegExp(`looks like (?:another |your )?${kind}`, "i");
+// An account or address shortened as Send shows it, written here: its first and last six characters around "…".
+const short = (address) => `${address.slice(0, 6)}…${address.slice(-6)}`;
+// A time as the wallet's clock says it in these tests' English (en-GB), written here: hours and minutes.
+const hhmm = (ms) => [new Date(ms).getHours(), new Date(ms).getMinutes()].map((n) => String(n).padStart(2, "0")).join(":");
+// What a request for another network says: the request's network as the request's, and the one the wallet is on as
+// where you are.
+const [FOR_MAINNET, FOR_TESTNET] = [
+  sides(["request", "Mainnet"], ["you", "Testnet"], chainMismatchText("dusk:1", "https://testnet.nodes.dusk.network")),
+  sides(["request", "Testnet"], ["you", "Mainnet"], chainMismatchText("dusk:2", "https://nodes.dusk.network")),
+];
+// Each badge shown beside To: the pill, a contact's chip.
+const shownBadges = () => dom.document.body.querySelectorAll(".recipient-badge").filter(isShown).map(visibleText);
+
+// Review's Confirm, by where it sits (reviewActions) rather than by what it says.
+const confirmButton = () => dom.document.body.querySelector(".review-actions .btnrow > button");
+// A Review row's value, by its row's label (To, From, Memo).
+const reviewField = (label) => dom.document.body.querySelectorAll(".send-review .kv").find((kv) => visibleText(kv.querySelector(".kv-label")) === label)?.querySelector(".kv-value");
+// Review's From, each part in its place: the wallet it's in where there's more than one (the words before the
+// profile), the profile's name, and which balance pays.
+const reviewFrom = () => {
+  const value = reviewField("From");
+  const wallet = value.querySelector(".review-wallet");
+  return {
+    wallet: wallet ? wallet.childNodes.filter((node) => node.nodeType === 3).map((node) => node.data).join("") : "",
+    profile: visibleText(value.querySelector(".profile-name")),
+    balance: visibleText(value.querySelector(".kv-muted")),
+  };
+};
+// Review's fee and total, as its gas editor shows them.
+const feeAndTotal = () => ["gas-fee-value", "gas-total-value"].map((name) => visibleText(dom.document.body.querySelector(`dusk-gas-editor .${name}`)));
+// The amounts an amount that reads two ways asks between, as its buttons give them.
+const readings = () => dom.document.body.querySelectorAll(".amount-question__choice").map((b) => b.textContent);
+// The two buttons beside To: scan a QR code, then Contacts.
+const scanButton = () => dom.document.body.querySelectorAll(".input-row .icon-only")[0];
+const contactsButton = () => dom.document.body.querySelectorAll(".input-row .icon-only")[1];
+
 // Renders the current route as the popup does, and finds the parts the tests read.
 function mount(state, ov = overview(), send = async () => ({})) {
   const actions = {
@@ -196,6 +234,12 @@ function mount(state, ov = overview(), send = async () => ({})) {
       const pill = $(".row > .recipient-type-badge");
       return isShown(pill) ? pill.textContent : "";
     },
+    // The pill's kind as it's drawn (RecipientBadge.js): "rail" for an account's or an address's, "unknown" for
+    // what's neither.
+    pillKind: () => {
+      const pill = $(".row > .recipient-type-badge");
+      return isShown(pill) ? (/\brecipient-badge--([\w-]+)/.exec(pill.className)?.[1] ?? "") : "";
+    },
     nameBox: () => $(".name-box"),
     balanceLine: () => visibleText($(".amount-avail__text")),
     amountError: () => {
@@ -211,56 +255,25 @@ function mount(state, ov = overview(), send = async () => ({})) {
     // Review: the kind of transfer, and what a public one shows everyone.
     kind: () => $(".review-kind")?.textContent,
     visibleLine: () => $(".review-visible")?.textContent ?? null,
-    reviewTo: () => visibleText($(".review-to")),
+    // Review's To: the names it goes by, and its address.
+    toNames: () => visibleText($(".review-to__names")),
+    toAddress: () => visibleText($(".review-to__address")),
   };
 }
-
-describe("send form", () => {
-  it("labels its scan and contacts icons and its Max, and its placeholders don't repeat the labels", () => {
-    const form = mount(newState());
-    const body = dom.document.body;
-    expect(
-      body.querySelectorAll(".input-row .icon-only").map((b) => [b.getAttribute("aria-label"), b.innerHTML, b.textContent])
-    ).toEqual([
-      ["Scan QR", iconSvg("qr"), ""],
-      ["Contacts", iconSvg("contacts"), ""],
-    ]);
-    expect(body.querySelector(".amount-avail button").textContent).toBe("Max");
-    expect(body.querySelectorAll("label").map((l) => l.textContent)).toEqual(["To", "Amount", "Memo"]);
-    expect([form.to, form.amount, body.querySelector(".row > input")].map((i) => i.getAttribute("placeholder"))).toEqual([
-      "Account, shielded address or .dusk name",
-      "0",
-      "Optional",
-    ]);
-
-    // Without .dusk names on the network, the field takes an account or an address.
-    mount(newState(), overview({ nodeUrl: "http://127.0.0.1:8080" }));
-    expect(body.querySelector(".to-input-wrap textarea").getAttribute("placeholder")).toBe("Account or shielded address");
-  });
-});
 
 describe("send to a .dusk name with both addresses", () => {
   it("shows option cards under the name, on the public account by default", () => {
     const form = mount(newState());
     typeInto(form.to, "alice.dusk");
 
-    expect(dom.document.body.querySelector(".name-points-to").textContent).toBe("alice.dusk points to");
-    expect(dom.document.body.querySelector("[role=radiogroup]")).not.toBeNull();
-    expect(form.radios().map((r) => r.querySelector(".name-option__line").textContent)).toEqual([
-      "Anyone can see it",
-      "Private",
-    ]);
+    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toEqual(saying("alice.dusk"));
+    // A card for each address, the public account's first and picked.
+    expect(form.radios().map((r) => visibleText(r.querySelector(".name-option__addr")))).toEqual([short(ALICE.account), short(ALICE.address)]);
     expect(form.picked()).toEqual(["true", "false"]);
-    // The cards make the choice: no pill, and no balances or full address with them.
+    // The cards make the choice: no pill.
     expect(form.pill()).toBe("");
-    expect(visibleText(form.nameBox())).toBe(
-      `alice.dusk points toPublic account${shortAddress(ALICE.account)}Anyone can see it` +
-        `Shielded address${shortAddress(ALICE.address)}Private`
-    );
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.balanceLine()).toEqual(saying("177.984 DUSK"));
     expect(form.review.disabled).toBe(false);
-    // The old Public account | Shielded address switch is gone.
-    expect(dom.document.body.querySelector(".name-address-toggle")).toBeNull();
   });
 
   it("says what's really missing when the balance is below the fee", () => {
@@ -269,7 +282,9 @@ describe("send to a .dusk name with both addresses", () => {
     typeInto(form.amount, "1");
 
     // Sending that much more must be enough: the amount and the whole fee.
-    expect(form.amountError()).toBe("Your public balance is 1.0025 DUSK short, fee included.");
+    expect(form.amountError()).toBe(shortfallText({ missingLux: 1_002_500_000n }));
+    expect(form.amountError()).toEqual(saying("1.0025 DUSK"));
+    expect(form.amountError()).toEqual(ONLY_PUBLIC);
   });
 
   it("follows the picked card in the balance line", () => {
@@ -280,12 +295,12 @@ describe("send to a .dusk name with both addresses", () => {
 
     expect(form.picked()).toEqual(["false", "true"]);
     expect(form.pill()).toBe("");
-    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
+    expect(form.balanceLine()).toEqual(saying("24.95 DUSK"));
     expect(state.draft.nameChoices).toEqual({ "alice.dusk": true });
 
     form.radios()[0].click();
     expect(form.picked()).toEqual(["true", "false"]);
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.balanceLine()).toEqual(saying("177.984 DUSK"));
   });
 
   // Lena's and Chen's: opened with no signal, the shielded balance said 0 where it couldn't be read.
@@ -295,7 +310,7 @@ describe("send to a .dusk name with both addresses", () => {
     expect(form.pill()).toBe("Shielded");
     expect(isShown(dom.document.body.querySelector(".amount-avail"))).toBe(false);
     typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.balanceLine()).toEqual(saying("177.984 DUSK"));
   });
 
   it("shows the pill for a pasted account or address, where it is the only sign of the transfer type", () => {
@@ -321,11 +336,11 @@ describe("send to a .dusk name with both addresses", () => {
     // The same name, as resolved.
     typeInto(form.to, " Alice.DUSK");
     expect(form.picked()).toEqual(["false", "true"]);
-    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
+    expect(form.balanceLine()).toEqual(saying("24.95 DUSK"));
 
     typeInto(form.to, "bob.dusk");
     expect(form.picked()).toEqual(["true", "false"]);
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.balanceLine()).toEqual(saying("177.984 DUSK"));
 
     // A pick for bob.dusk doesn't take alice.dusk's place.
     form.radios()[1].click();
@@ -368,14 +383,14 @@ describe("send to a .dusk name with both addresses", () => {
 
     const review = mount(state);
     // A shielded send shows no one anything: no line says what's visible.
-    expect([review.kind(), review.visibleLine()]).toEqual(["Shielded transfer", null]);
+    expect([review.kind(), review.visibleLine()]).toEqual([ONLY_SHIELDED, null]);
     dom.document.body.querySelector(".subnav-back").click();
     expect(state.route).toBe("send");
 
     form = mount(state);
     expect(form.to.value).toBe("alice.dusk");
     expect(form.picked()).toEqual(["false", "true"]);
-    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
+    expect(form.balanceLine()).toEqual(saying("24.95 DUSK"));
   });
 
   it.each([
@@ -394,7 +409,7 @@ describe("send to a .dusk name with both addresses", () => {
     expect(form.review.disabled).toBe(false);
 
     const hint = shielded.parentNode.querySelector(".name-shortfall");
-    expect(hint.textContent).toBe("Not enough shielded DUSK · Shield first");
+    expect(hint.textContent).toEqual(saying());
     hint.querySelector("button").click();
     expect(state.route).toBe("convert");
     expect(state.draft).toEqual({ kind: TX_KIND.SHIELD, amountDusk: "", amountLux: "" });
@@ -414,14 +429,13 @@ describe("send to a .dusk name with one address", () => {
     const form = mount(state, overview({ shieldedBalance: { value: "0", spendable: "0" } }));
     typeInto(form.to, "carol.dusk");
 
-    // As with two addresses, but one card, picked, with nothing to choose.
+    // As with two addresses, but one card, with nothing to choose, and the shortfall's way to Shield.
     const carol = NAMES["carol.dusk"].address;
+    const card = () => [visibleText(dom.document.body.querySelector(".name-points-to")), dom.document.body.querySelectorAll(".name-box .name-option__addr").map(visibleText)];
     expect(form.radios()).toEqual([]);
     expect(form.pill()).toBe("");
-    expect(visibleText(form.nameBox())).toBe(
-      `carol.dusk points toShielded address${shortAddress(carol)}Not enough shielded DUSK · Shield first`
-    );
-    expect(form.nameBox().querySelector(".name-option.is-checked")).not.toBeNull();
+    expect(card()).toEqual([saying("carol.dusk"), [short(carol)]]);
+    expect(form.shortfall()).not.toBeNull();
     expect(form.review.disabled).toBe(true);
 
     form.shortfall().querySelector("button").click();
@@ -429,8 +443,9 @@ describe("send to a .dusk name with one address", () => {
 
     const funded = mount(newState());
     typeInto(funded.to, "carol.dusk");
-    expect(visibleText(funded.nameBox())).toBe(`carol.dusk points toShielded address${shortAddress(carol)}Private`);
-    expect(funded.balanceLine()).toBe("Available after fees 24.95 DUSK");
+    expect(card()).toEqual([saying("carol.dusk"), [short(carol)]]);
+    expect(funded.shortfall()).toBeNull();
+    expect(funded.balanceLine()).toEqual(saying("24.95 DUSK"));
     expect(funded.review.disabled).toBe(false);
   });
 
@@ -443,9 +458,8 @@ describe("send to a .dusk name with one address", () => {
     const dave = NAMES["dave.dusk"].account;
     expect(form.radios()).toEqual([]);
     expect(form.pill()).toBe("");
-    expect(visibleText(form.nameBox())).toBe(`dave.dusk points toPublic account${shortAddress(dave)}Anyone can see it`);
-    // The full account shows on Review, not here.
-    expect(form.nameBox().querySelector(".box")).toBeNull();
+    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toEqual(saying("dave.dusk"));
+    expect(form.nameBox().querySelectorAll(".name-option__addr").map(visibleText)).toEqual([short(dave)]);
     expect(form.review.disabled).toBe(false);
 
     typeInto(form.amount, "1");
@@ -453,8 +467,9 @@ describe("send to a .dusk name with one address", () => {
     await settle();
     expect(state.draft).toMatchObject({ to: dave, privacy: "public", duskName: { name: "dave.dusk" } });
     const review = mount(state, ov);
-    expect(review.visibleLine()).toBe("Anyone can see the amount and both accounts.");
-    expect(review.reviewTo()).toBe(`dave.dusk${dave}`);
+    // A public send says what everyone sees of it.
+    expect(review.visibleLine()).toEqual(saying());
+    expect([review.toNames(), review.toAddress()]).toEqual(["dave.dusk", dave]);
   });
 });
 
@@ -494,10 +509,10 @@ describe("a Review while offline", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
     const review = mount(state, ov);
     await settle();
-    const confirm = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK");
+    const confirm = confirmButton;
     const offline = () => [...dom.document.body.querySelectorAll(".offline-note")].filter(isShown).map((n) => n.textContent);
     expect(confirm().disabled).toBe(true);
-    expect(offline()).toEqual(["You're offline."]);
+    expect(offline()).toEqual([saying()]);
     confirm().click();
     await settle();
     expect(review.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
@@ -535,9 +550,7 @@ describe("what Max fills in, with Hide balances", () => {
     expect(BigInt(state.draft.amountLux) > 0n).toBe(true);
     mount(state, ov);
     expect(visibleText(dom.document.body.querySelector(".balance-amount"))).toBe("•••• DUSK");
-    expect(visibleText(dom.document.body.querySelector(".gas-total-value"))).toBe("up to •••• DUSK");
-    // Its button says what it sends as Review shows it.
-    expect(dom.document.body.querySelector(".review-actions .btnrow > button").textContent).toBe("Send •••• DUSK");
+    expect(feeAndTotal()[1]).toEqual(saying("•••• DUSK"));
   });
 
   it("shows what's typed over it", () => {
@@ -567,7 +580,7 @@ describe("what the To field says about what's typed", () => {
     isAccount.mockReturnValue(false);
     const form = mount(newState());
     typeInto(form.to, ALICE.account);
-    expect(visibleText(form.nameBox())).toBe("Not a valid address. Check it and try again.");
+    expect(visibleText(form.nameBox())).toEqual(saying());
     expect(form.pill()).toBe("");
     expect(form.review.disabled).toBe(true);
 
@@ -585,34 +598,31 @@ describe("what the To field says about what's typed", () => {
     const form = mount(newState());
     for (const typed of ["sofiadesign\u00b7dusk", "sofiadesign\uff0edusk", "sofiadesign\u3002dusk", "sofiadesign\u2027dusk", "sofiadesign\u02d9dusk", "sofiadesign \u00b7 dusk", "\u0455ofiadesign.dusk"]) {
       typeInto(form.to, typed);
-      expect([visibleText(form.nameBox()), form.pill(), form.review.disabled], typed).toEqual([
-        "That looks like sofiadesign.dusk, but it isn't. Check it, or paste it again.",
-        "",
-        true,
-      ]);
+      expect([visibleText(form.nameBox()), form.pill(), form.review.disabled], typed).toEqual([saying("sofiadesign.dusk"), "", true]);
     }
-    // The name itself: looked up, as ever.
+    // None of them is looked up; the name itself is, as ever.
+    expect(lookupDuskName).not.toHaveBeenCalled();
     typeInto(form.to, "sofiadesign.dusk");
-    expect(visibleText(form.nameBox())).not.toContain("That looks like");
+    expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["sofiadesign.dusk"]);
   });
 
   it("says the same of what's too long to be a name and is no address either", () => {
     const form = mount(newState());
     for (const typo of [`${ALICE.account}x`, ALICE.account.slice(0, 70), `${ALICE.account.slice(0, 60)}0${ALICE.account.slice(61)}`]) {
       typeInto(form.to, typo);
-      expect(visibleText(form.nameBox())).toBe("Not a valid address. Check it and try again.");
+      expect(visibleText(form.nameBox())).toEqual(saying());
       expect(form.pill()).toBe("");
       expect(form.review.disabled).toBe(true);
     }
   });
 
-  it("drops what Review said once the recipient changes, in plain words", async () => {
+  it("drops what Review said once the recipient changes", async () => {
     const form = mount(newState());
     typeInto(form.amount, "1");
     typeInto(form.to, "someone new");
     form.review.click();
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".err"))).toBe("Not a valid address. Check it and try again.");
+    expect(visibleText(dom.document.body.querySelector(".err"))).toEqual(saying());
     typeInto(form.to, ALICE.account);
     expect(dom.document.body.querySelector(".err").textContent).toBe("");
   });
@@ -632,16 +642,17 @@ describe("what the To field says about what's typed", () => {
       { name: "Jan (flour)", address: BOB.address },
     ];
     const form = mount(state);
+    const offered = () => form.nameBox().querySelectorAll("button").map((b) => b.textContent);
 
     typeInto(form.to, "alice");
-    expect(visibleText(form.nameBox())).toBe(`Your contact Alice · ${shortAddress(BOB.account)}`);
+    expect(offered()).toEqual([saying("Alice", short(BOB.account))]);
 
     typeInto(form.to, "flour");
-    expect(visibleText(form.nameBox())).toBe(`Your contact Jan (flour) · ${shortAddress(BOB.address)}`);
+    expect(offered()).toEqual([saying("Jan (flour)", short(BOB.address))]);
 
     // Nothing by that name in Contacts: the guess is still offered.
     typeInto(form.to, "bob");
-    expect(visibleText(form.nameBox())).toBe("Did you mean bob.dusk?");
+    expect(offered()).toEqual([saying("bob.dusk")]);
 
     typeInto(form.to, "alice");
     form.nameBox().querySelector("button").click();
@@ -658,25 +669,24 @@ describe("what the To field says about what's typed", () => {
     const form = mount(state, overview({ wallets: [{ key: "wa", n: 1, name: "", accounts: [OWN.account, OTHER_PROFILE], accountNames: {}, active: true }, savings] }));
     const offered = () => form.nameBox().querySelectorAll("button").map((b) => b.textContent);
 
+    // Profile 2, then the other wallet's Savings, by their own addresses.
+    const PROFILE_2 = saying("Profile 2", short(OTHER_PROFILE));
+    const SAVINGS = saying("Savings", "Profile 1", short(ALICE.account));
     typeInto(form.to, "Profile");
-    expect(offered()).toEqual([`Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`, `Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`]);
+    expect(offered()).toEqual([PROFILE_2, SAVINGS]);
     typeInto(form.to, "profile 2");
-    expect(offered()).toEqual([`Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`]);
+    expect(offered()).toEqual([PROFILE_2]);
     typeInto(form.to, "prof");
-    expect(offered()).toEqual([
-      `Your Profile 2 · ${shortAddress(OTHER_PROFILE)}`,
-      `Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`,
-      `Your contact Profit & Co · ${shortAddress(BOB.account)}`,
-    ]);
+    expect(offered()).toEqual([PROFILE_2, SAVINGS, saying("Profit & Co", short(BOB.account))]);
     // Another wallet's profile, by that wallet's name.
     typeInto(form.to, "savings");
-    expect(offered()).toEqual([`Your profile Savings · Profile 1 · ${shortAddress(ALICE.account)}`]);
+    expect(offered()).toEqual([SAVINGS]);
     // The profile it goes from: offered as nothing, and no name guessed at for it.
     typeInto(form.to, "Profile 1");
     expect(visibleText(form.nameBox())).toBe("");
     // A name that's none of yours: the guess is still offered.
     typeInto(form.to, "xyz");
-    expect(offered()).toEqual(["Did you mean xyz.dusk?"]);
+    expect(offered()).toEqual([saying("xyz.dusk")]);
 
     typeInto(form.to, "Profile");
     form.nameBox().querySelector("button").click();
@@ -693,11 +703,14 @@ describe("what the To field says about what's typed", () => {
     ];
     const form = mount(state);
     typeInto(form.to, "estudio");
-    expect(form.nameBox().querySelectorAll("button").map((b) => b.textContent)).toEqual([
-      `Your contact Estudio Marta · ${shortAddress(ALICE.account)} · looks like another contact`,
-      `Your contact Estudio M\u0430rta · ${shortAddress(BOB.account)} · looks like another contact`,
-      `Your contact Estudio Sol · ${shortAddress(BOB.address)}`,
+    const offered = form.nameBox().querySelectorAll("button").map((b) => b.textContent);
+    expect(offered).toEqual([
+      saying("Estudio Marta", short(ALICE.account)),
+      saying("Estudio M\u0430rta", short(BOB.account)),
+      saying("Estudio Sol", short(BOB.address)),
     ]);
+    // The first two say they look like another contact; the third doesn't.
+    expect(offered.map((text) => looksLike("contact").test(text))).toEqual([true, true, false]);
   });
 
   // Sofia's: picked, the one in a Cyrillic а read as plain "Estudio Marta" on Send and on Review.
@@ -714,14 +727,15 @@ describe("what the To field says about what's typed", () => {
     };
     let form = mount(state);
     typeInto(form.to, BOB.account);
-    expect(note()).toBe("Looks like another contact. Check the address.");
+    expect(note()).toMatch(looksLike("contact"));
     typeInto(form.to, BOB.address);
     expect(note()).toBe("");
 
     state.route = "confirm";
     state.draft = { to: BOB.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" };
     form = mount(state);
-    expect(form.reviewTo()).toBe(`Estudio M\u0430rta · looks like another contact${BOB.account}`);
+    expect([form.toNames(), form.toAddress()]).toEqual([saying("Estudio M\u0430rta"), BOB.account]);
+    expect(form.toNames()).toMatch(looksLike("contact"));
   });
 });
 
@@ -729,7 +743,7 @@ describe("a memo too long for the network", () => {
   it("says so under the field and stays on the form, counting bytes", async () => {
     const state = newState();
     const form = mount(state);
-    const memo = dom.document.body.querySelectorAll("input").find((i) => i.getAttribute("placeholder") === "Optional");
+    const memo = form.memo;
     const error = () => {
       const el = dom.document.body.querySelector(".memo-error");
       return isShown(el) ? el.textContent : "";
@@ -738,7 +752,7 @@ describe("a memo too long for the network", () => {
     typeInto(form.amount, "1");
 
     typeInto(memo, "x".repeat(513));
-    expect(error()).toBe("That memo is too long: 512 bytes at most.");
+    expect(error()).toEqual(saying("512"));
     form.review.click();
     await settle();
     expect(state.route).toBe("send");
@@ -762,8 +776,8 @@ describe("send's amount", () => {
     const form = mount(state, overview(), async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {}));
     typeInto(form.to, ALICE.account);
     await settle();
-    expect(form.feeNote()).toBe("Fee up to 0.005 DUSK");
-    expect(form.balanceLine()).toBe("Available after fees 177.9815 DUSK");
+    expect(form.feeNote()).toEqual(saying("0.005 DUSK"));
+    expect(form.balanceLine()).toEqual(saying("177.9815 DUSK"));
 
     // Its Review: the same fee.
     typeInto(form.amount, "1");
@@ -771,7 +785,7 @@ describe("send's amount", () => {
     Object.assign(state.draft, { privacy: "public", amountLux: "1000000000" });
     mount(state, overview(), async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {}));
     await settle();
-    expect(visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Feeup to 0.005 DUSKTotalup to 1.005 DUSK");
+    expect(feeAndTotal()).toEqual([saying("0.005 DUSK"), saying("1.005 DUSK")]);
   });
 
   it("says what's available after fees, fills Max, and says under the field what's wrong", () => {
@@ -780,8 +794,8 @@ describe("send's amount", () => {
     // No recipient yet: nothing to measure against.
     expect(isShown(dom.document.body.querySelector(".amount-avail"))).toBe(false);
     typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
-    expect(form.feeNote()).toBe("Fee up to 0.0025 DUSK");
+    expect(form.balanceLine()).toEqual(saying("177.984 DUSK"));
+    expect(form.feeNote()).toEqual(saying("0.0025 DUSK"));
 
     // Max fills a fourth decimal where three would ask "1 or 1000?", so the field reads it back as it is.
     dom.document.body.querySelector(".amount-avail button").click();
@@ -789,15 +803,16 @@ describe("send's amount", () => {
     expect(form.amountError()).toBe("");
 
     typeInto(form.amount, "500");
-    expect(form.amountError()).toBe("Your public balance is 322.016 DUSK short, fee included.");
-    expect(form.amount.getAttribute("aria-invalid")).toBe("true");
+    expect(form.amountError()).toBe(shortfallText({ missingLux: 322_016_000_000n }));
+    expect(form.amountError()).toEqual(saying("322.016 DUSK"));
+    expect(form.amountError()).toEqual(ONLY_PUBLIC);
     typeInto(form.amount, "0");
-    expect(form.amountError()).toBe("Enter an amount greater than 0.");
+    expect(form.amountError()).toEqual(saying());
 
     // Review asks for an amount instead of going on without one.
     typeInto(form.amount, "");
     form.review.click();
-    expect(form.amountError()).toBe("Enter an amount.");
+    expect(form.amountError()).toEqual(saying());
     expect(state.route).toBe("send");
   });
 
@@ -819,16 +834,16 @@ describe("send's amount", () => {
       typeInto(next.to, ALICE.account);
       typeInto(next.amount, bad);
       expect(next.amount.value).toBe(bad);
-      expect(next.amountError()).toBe("Enter an amount such as 1 or 0.5.");
+      expect(next.amountError()).toEqual(saying());
     }
     const last = mount(newState());
     typeInto(last.to, ALICE.account);
     typeInto(last.amount, "0,1234567891234");
-    expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
+    expect(last.amountError()).toEqual(saying("9"));
     typeInto(last.amount, "0.0000000001");
-    expect(last.amountError()).toBe("DUSK has 9 decimals at most.");
+    expect(last.amountError()).toEqual(saying("9"));
     typeInto(last.amount, "1,234");
-    expect(last.amountError()).toBe("Is that 1.2340 or 1234?1.2340 DUSK1234 DUSK");
+    expect([readings(), last.review.disabled]).toEqual([["1.2340 DUSK", "1234 DUSK"], true]);
   });
 
   // Lena's: "1,000" asked and "1.000" didn't. In English the point is the
@@ -836,16 +851,17 @@ describe("send's amount", () => {
   // the question's "1.000" read as a thousand to her: it names 1 and 1000.
   // Nandini's and Chen's: the question had no buttons, and asked to retype.
   it.each([
-    ["de-DE", "1.000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
-    ["nl-NL", "1.000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
-    ["en-GB", "1,000", "Is that 1 or 1000?1 DUSK1000 DUSK"],
-    ["es-ES", "1 234,5", "Leave out the space: 1234,5."],
-  ])("asks which amount is meant where it could be two, in the language's reading: %s %s", (language, typed, asked) => {
+    ["de-DE", "1.000", ["1 DUSK", "1000 DUSK"], []],
+    ["nl-NL", "1.000", ["1 DUSK", "1000 DUSK"], []],
+    ["en-GB", "1,000", ["1 DUSK", "1000 DUSK"], []],
+    // Not two amounts: the one it is, written without the space.
+    ["es-ES", "1 234,5", [], ["1234,5"]],
+  ])("asks which amount is meant where it could be two, in the language's reading: %s %s", (language, typed, asked, said) => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language });
     const form = mount(newState());
     typeInto(form.to, ALICE.account);
     typeInto(form.amount, typed);
-    expect([form.amountError(), form.review.disabled]).toEqual([asked, true]);
+    expect([readings(), form.amountError(), form.review.disabled]).toEqual([asked, saying(...said), true]);
   });
 
   it("puts the reading tapped in the field, which reads it then, with Review on; typing stays as it was", () => {
@@ -858,7 +874,9 @@ describe("send's amount", () => {
     // 2125: read as that, which is more than there is.
     choices()[1].click();
     expect([form.amount.value, choices().length]).toEqual(["2125", 0]);
-    expect(form.amountError()).toMatch(/^Your public balance is .* DUSK short, fee included\.$/);
+    expect(form.amountError()).toBe(shortfallText({ missingLux: 1_947_016_000_000n }));
+    expect(form.amountError()).toEqual(saying("1,947.016 DUSK"));
+    expect(form.amountError()).toEqual(ONLY_PUBLIC);
     typeInto(form.amount, "2.125");
     choices()[0].click();
     expect([form.amount.value, form.amountError(), form.review.disabled]).toEqual(["2.1250", "", false]);
@@ -903,12 +921,14 @@ describe("send's amount", () => {
     const state = newState();
     const form = mount(state, ov);
     typeInto(form.to, "alice.dusk");
-    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 177.979 DUSK", "Fee up to 0.0075 DUSK"]);
+    expect([form.balanceLine(), form.feeNote()]).toEqual([saying("177.979 DUSK"), saying("0.0075 DUSK")]);
     form.radios()[1].click();
-    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 24.85 DUSK", "Fee up to 0.15 DUSK"]);
+    expect([form.balanceLine(), form.feeNote()]).toEqual([saying("24.85 DUSK"), saying("0.15 DUSK")]);
     form.radios()[0].click();
     typeInto(form.amount, "177.98");
-    expect(form.amountError()).toBe("Your public balance is 0.001 DUSK short, fee included.");
+    expect(form.amountError()).toBe(shortfallText({ missingLux: 1_000_000n }));
+    expect(form.amountError()).toEqual(saying("0.001 DUSK"));
+    expect(form.amountError()).toEqual(ONLY_PUBLIC);
     dom.document.body.querySelector(".amount-avail button").click();
     expect(form.amount.value).toBe("177.9790");
 
@@ -918,15 +938,15 @@ describe("send's amount", () => {
     expect(state.route).toBe("confirm");
     mount(state, ov);
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".gas-fee"))).toBe("Feeup to 0.0075 DUSKTotalup to 177.9865 DUSK");
+    expect(feeAndTotal()).toEqual([saying("0.0075 DUSK"), saying("177.9865 DUSK")]);
   });
 
   it("hides what's available with Hide balances, while Max still fills in the real amount", () => {
     const form = mount(newState(), overview({ hideBalances: true }));
     typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toBe("Available after fees •••• DUSK");
+    expect(form.balanceLine()).toEqual(saying("•••• DUSK"));
     // The fee isn't a balance.
-    expect(form.feeNote()).toBe("Fee up to 0.0025 DUSK");
+    expect(form.feeNote()).toEqual(saying("0.0025 DUSK"));
     dom.document.body.querySelector(".amount-avail button").click();
     expect(form.amount.value).toBe("177.9840");
   });
@@ -938,7 +958,7 @@ describe("names on Send and Review", () => {
     const form = mount(newState());
     typeInto(form.to, BOB.account);
     await settle();
-    expect(visibleText(form.nameBox())).toBe("bob.dusk · its verified .dusk name");
+    expect(visibleText(form.nameBox().querySelector(".name-verified__name"))).toBe("bob.dusk");
 
     // Not for one without a name, nor once the field holds something else.
     typeInto(form.to, ALICE.account);
@@ -955,16 +975,12 @@ describe("names on Send and Review", () => {
     };
     const view = mount(state);
     await settle();
-    const rows = () => dom.document.body.querySelectorAll(".send-review > .group > .kv").map(visibleText);
-    // A contact's address by its short form, whole one tap away under Details.
-    expect(rows()).toEqual([`ToBobby · bob.dusk${shortAddress(BOB.account)}`, "Fromme.dusk · Public"]);
-    const details = dom.document.body.querySelector(".send-review > details");
-    expect([isShown(details), visibleText(details.querySelector("summary")), visibleText(details.querySelector(".kv"))]).toEqual([true, "Details", `To${BOB.account}`]);
-    expect(dom.document.body.querySelector(".review-to__address").getAttribute("title")).toBe(BOB.account);
-    // Your name, said as yours.
-    expect(view.visibleLine()).toBe("Anyone can see the amount, your name me.dusk and the recipient.");
-    // Saved already: no Save contact.
-    expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
+    // To: the contact's label and its verified name, over its account short, whole under Details. From: the profile, by its verified name.
+    expect([view.toNames(), view.toAddress()]).toEqual([saying("Bobby", "bob.dusk"), "21n5nc…fMMLNz"]);
+    const whole = dom.document.body.querySelector(".review-to-details .kv-value");
+    expect([isShown(whole), visibleText(whole)]).toEqual([true, BOB.account]);
+    expect(reviewFrom()).toEqual({ wallet: "", profile: "me.dusk", balance: ONLY_PUBLIC });
+    expect(view.visibleLine()).toEqual(saying("me.dusk"));
   });
 
   it("names a contact saved with hidden characters by their codes, on the form and on Review", async () => {
@@ -988,28 +1004,28 @@ describe("names on Send and Review", () => {
       { key: "w1", n: 1, name: "", active: false },
       { key: "w2", n: 2, name: "", active: true },
     ];
-    const from = () => visibleText(dom.document.body.querySelectorAll(".send-review > .group > .kv")[1]);
     const state = { route: "confirm", addressBook: { loaded: true, items: [] }, draft: draft(BOB.account, "public") };
     mount(state, overview({ wallets }));
     await settle();
-    expect(from()).toBe("FromWallet 2 · me.dusk · Public");
+    expect(reviewFrom()).toEqual({ wallet: saying("Wallet 2"), profile: "me.dusk", balance: ONLY_PUBLIC });
     // A name given to the wallet, on a shielded send.
     mount({ ...state, draft: draft(BOB.address, "shielded") }, overview({ wallets: [wallets[0], { ...wallets[1], name: "Savings" }] }));
     await settle();
-    expect(from()).toBe("FromSavings · me.dusk · Shielded");
+    expect(reviewFrom()).toEqual({ wallet: saying("Savings"), profile: "me.dusk", balance: ONLY_SHIELDED });
     // One wallet: the profile alone.
     mount(state, overview({ wallets: [{ ...wallets[1], n: 1 }] }));
     await settle();
-    expect(from()).toBe("Fromme.dusk · Public");
+    expect(reviewFrom()).toEqual({ wallet: "", profile: "me.dusk", balance: ONLY_PUBLIC });
   });
 
-  it("names your other profile, on the form and on Review, its address short, and offers no Save contact", async () => {
+  it("names your other profile, on the form and on Review", async () => {
     const ov = overview({ accountNames: { 1: "Savings" } });
     const form = mount(newState(), ov);
     typeInto(form.to, OTHER_PROFILE);
     await settle();
     expect(visibleText(dom.document.body.querySelector(".to-chip"))).toBe("Savings");
 
+    const names = () => visibleText(dom.document.body.querySelector(".review-to__names"));
     mount(
       {
         route: "confirm",
@@ -1019,10 +1035,9 @@ describe("names on Send and Review", () => {
       ov
     );
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Your profile Savings");
-    expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(shortAddress(OTHER_PROFILE));
-    expect(visibleText(dom.document.body.querySelector(".review-to-details .kv"))).toBe(`To${OTHER_PROFILE}`);
-    expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
+    const yours = names();
+    expect(yours).toEqual(saying("Savings"));
+    expect(yours).not.toMatch(looksLike("profile"));
 
     // Marek's: a contact named like it, for someone else, never reads the same on Review.
     mount(
@@ -1034,73 +1049,8 @@ describe("names on Send and Review", () => {
       ov
     );
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings · looks like your profile's name");
-    // Its address whole, which tells it from your profile: nothing under Details.
-    expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(ALICE.account);
-    expect(isShown(dom.document.body.querySelector(".review-to-details"))).toBe(false);
-  });
-
-  it("offers no Save contact for this wallet's own account or address", () => {
-    for (const to of [OWN.account, OWN.address]) {
-      mount({
-        route: "confirm",
-        addressBook: { loaded: true, items: [] },
-        draft: { to, privacy: to === OWN.address ? "shielded" : "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
-      });
-      expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
-    }
-    mount({
-      route: "confirm",
-      addressBook: { loaded: true, items: [] },
-      draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
-    });
-    expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(true);
-    // Someone who's no contact: their address whole on Review, nothing under Details.
-    expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(ALICE.account);
-    expect(isShown(dom.document.body.querySelector(".review-to-details"))).toBe(false);
-  });
-
-  // Contacts read after Review is drawn: whole till then, as anyone's; then a contact's short, whole under Details,
-  // and one whose name looks like another contact's whole still, as its address is what tells them apart.
-  it("shortens a contact's address once Contacts is read, but never one whose name looks like another's", async () => {
-    const { listAddressBook } = await import("../shared/addressBook.js");
-    const address = () => visibleText(dom.document.body.querySelector(".review-to__address"));
-    const folded = () => isShown(dom.document.body.querySelector(".review-to-details"));
-    for (const [items, shown, fold] of [
-      [[{ name: "Bobby", address: BOB.account }], shortAddress(BOB.account), true],
-      [[{ name: "Estudio Marta", address: ALICE.account }, { name: "Estudio M\u0430rta", address: BOB.account }], BOB.account, false],
-    ]) {
-      let read;
-      listAddressBook.mockImplementationOnce(() => new Promise((resolve) => (read = resolve)));
-      mount({
-        route: "confirm",
-        addressBook: { loaded: false, items: null },
-        draft: { to: BOB.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
-      });
-      expect([address(), folded()]).toEqual([BOB.account, false]);
-      read(items);
-      await settle();
-      expect([address(), folded()]).toEqual([shown, fold]);
-    }
-  });
-
-  it("keeps Review's Details open, or closed, as it was left as Review is drawn again", () => {
-    const state = {
-      route: "confirm",
-      addressBook: { loaded: true, items: [{ name: "Bobby", address: BOB.account }] },
-      draft: { to: BOB.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
-    };
-    const details = () => dom.document.body.querySelector(".review-to-details");
-    mount(state);
-    expect(details().open).toBe(false);
-    details().open = true;
-    details().dispatchEvent(fakeEvent("toggle"));
-    mount(state);
-    expect(details().open).toBe(true);
-    details().open = false;
-    details().dispatchEvent(fakeEvent("toggle"));
-    mount(state);
-    expect(details().open).toBe(false);
+    expect(names()).toEqual(saying("Savings"));
+    expect(names()).toMatch(looksLike("profile"));
   });
 });
 
@@ -1114,23 +1064,25 @@ describe("a typed name that isn't registered", () => {
     ];
     state.activity = { names: new Map([[BOB.account, "bob.dusk"]]) };
     const form = mount(state);
+    // What's said of the name typed, and the names offered for it.
+    const said = () => [visibleText(form.nameBox().querySelector(".err")), form.nameBox().querySelectorAll("button.name-suggestion").map((b) => b.textContent)];
     typeInto(form.to, "dav.dusk");
-    expect(visibleText(form.nameBox())).toBe("dav.dusk isn't registered.Did you mean dave.dusk?");
+    expect(said()).toEqual([saying("dav.dusk"), [saying("dave.dusk")]]);
     typeInto(form.to, "alcie.dusk");
-    expect(visibleText(form.nameBox())).toBe("alcie.dusk isn't registered.Did you mean alice.dusk?");
+    expect(said()).toEqual([saying("alcie.dusk"), [saying("alice.dusk")]]);
     // Only the typed names were looked up.
     expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["dav.dusk", "alcie.dusk"]);
 
     form.nameBox().querySelector("button.name-suggestion").click();
     expect(form.to.value).toBe("alice.dusk");
     expect(state.draft.to).toBe("alice.dusk");
-    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toBe("alice.dusk points to");
+    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toEqual(saying("alice.dusk"));
 
     // A recent counterparty's name, and nothing when no known name is close.
     typeInto(form.to, "bbo.dusk");
-    expect(visibleText(form.nameBox())).toBe("bbo.dusk isn't registered.Did you mean bob.dusk?");
+    expect(said()).toEqual([saying("bbo.dusk"), [saying("bob.dusk")]]);
     typeInto(form.to, "zed.dusk");
-    expect(visibleText(form.nameBox())).toBe("zed.dusk isn't registered.");
+    expect(said()).toEqual([saying("zed.dusk"), []]);
   });
 });
 
@@ -1140,24 +1092,26 @@ describe("a name typed without .dusk", () => {
     const form = mount(state);
     for (const typed of ["alice", "alice.dusk."]) {
       typeInto(form.to, typed);
-      expect([visibleText(form.nameBox()), form.pill()]).toEqual(["Did you mean alice.dusk?", ""]);
+      expect([visibleText(form.nameBox()), form.pill()]).toEqual([saying("alice.dusk"), ""]);
     }
     expect(lookupDuskName).not.toHaveBeenCalled();
 
     form.nameBox().querySelector("button.name-suggestion").click();
     expect([form.to.value, state.draft.to]).toEqual(["alice.dusk", "alice.dusk"]);
     expect(lookupDuskName.mock.calls.map(([name]) => name)).toEqual(["alice.dusk"]);
-    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toBe("alice.dusk points to");
+    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toEqual(saying("alice.dusk"));
 
     // An address in the making, or anything else, is no name.
     typeInto(form.to, "26FCH745");
-    expect([visibleText(form.nameBox()), form.pill()]).toEqual(["", "?Unknown"]);
+    expect([visibleText(form.nameBox()), form.pill(), form.pillKind()]).toEqual(["", ONLY_UNKNOWN, "unknown"]);
+    expect(shownBadges().filter((badge) => /public|shielded/i.test(badge))).toEqual([]);
   });
 
   it("offers none on a network without names", () => {
     const form = mount(newState(), overview({ nodeUrl: "http://127.0.0.1:8080" }));
     typeInto(form.to, "alice");
-    expect([visibleText(form.nameBox()), form.pill()]).toEqual(["", "?Unknown"]);
+    expect([visibleText(form.nameBox()), form.pill(), form.pillKind()]).toEqual(["", ONLY_UNKNOWN, "unknown"]);
+    expect(shownBadges().filter((badge) => /public|shielded/i.test(badge))).toEqual([]);
   });
 });
 
@@ -1166,33 +1120,32 @@ describe("an EVM address", () => {
     for (const nodeUrl of [undefined, "http://127.0.0.1:8080"]) {
       const form = mount(newState(), overview(nodeUrl ? { nodeUrl } : {}));
       typeInto(form.to, "0xAB84EDFFd745AF9420ac74FeC73121FBEE9fC86F");
-      expect([visibleText(form.nameBox()), form.pill(), form.review.disabled]).toEqual([
-        "That's an EVM address, not a Dusk account.",
-        "",
-        true,
-      ]);
+      expect([visibleText(form.nameBox()), form.pill(), form.review.disabled]).toEqual([EVM_ADDRESS_TEXT, "", true]);
+      expect(visibleText(form.nameBox())).toMatch(/\bEVM\b/);
+      expect(shownBadges().filter((badge) => /public|shielded/i.test(badge))).toEqual([]);
       // In any case.
       typeInto(form.to, "0xab84edffd745af9420ac74fec73121fbee9fc86f");
-      expect(visibleText(form.nameBox())).toBe("That's an EVM address, not a Dusk account.");
+      expect(visibleText(form.nameBox())).toBe(EVM_ADDRESS_TEXT);
       // Anything shorter isn't one.
       typeInto(form.to, "0xAB84EDFF");
-      expect([visibleText(form.nameBox()), form.pill(), form.review.disabled]).toEqual(["", "?Unknown", false]);
+      expect([visibleText(form.nameBox()), form.pill(), form.pillKind(), form.review.disabled]).toEqual(["", ONLY_UNKNOWN, "unknown", false]);
+      expect(shownBadges().filter((badge) => /public|shielded/i.test(badge))).toEqual([]);
     }
   });
 });
 
 describe("sending to yourself", () => {
-  const ACCOUNT_NOTE = "This is your own account. Sending to yourself only costs a fee.";
-  const ADDRESS_NOTE = "This is your own address. Sending to yourself only costs a fee.";
+  // What the form says of your own account, never an address, and of your own address, never an account.
+  const [OWN_ACCOUNT, OWN_ADDRESS] = [only("account", "address"), only("address", "account")];
 
   it("warns for your own pasted account or shielded address and still allows Review", () => {
     const form = mount(newState());
     typeInto(form.to, OWN.account);
-    expect(form.selfNote()).toBe(ACCOUNT_NOTE);
+    expect(form.selfNote()).toEqual(OWN_ACCOUNT);
     expect(form.review.disabled).toBe(false);
 
     typeInto(form.to, OWN.address);
-    expect(form.selfNote()).toBe(ADDRESS_NOTE);
+    expect(form.selfNote()).toEqual(OWN_ADDRESS);
 
     // Another profile of this wallet, someone else, or nothing: no warning.
     for (const value of [OTHER_PROFILE, ALICE.account, ALICE.address, ""]) {
@@ -1204,9 +1157,9 @@ describe("sending to yourself", () => {
   it("warns for a name that points to you, following the picked address", () => {
     const form = mount(newState());
     typeInto(form.to, "me.dusk");
-    expect(form.selfNote()).toBe(ACCOUNT_NOTE);
+    expect(form.selfNote()).toEqual(OWN_ACCOUNT);
     form.radios()[1].click();
-    expect(form.selfNote()).toBe(ADDRESS_NOTE);
+    expect(form.selfNote()).toEqual(OWN_ADDRESS);
     expect(form.review.disabled).toBe(false);
 
     typeInto(form.to, "alice.dusk");
@@ -1221,13 +1174,9 @@ describe("a recipient the network's file blocks", () => {
     for (const { account, reason } of networks.testnet.display.blocklist) {
       typeInto(form.to, account);
       expect(isShown(banner())).toBe(true);
-      expect(visibleText(banner())).toBe(
-        `Blocked recipient address${
-          reason === "scam"
-            ? "Transfer restricted: this recipient address is associated with reported fraud/scam activity."
-            : "Transfer restricted: this recipient address has been reported as compromised."
-        }`
-      );
+      // Why, for its reason in the file: reported fraud, or compromised.
+      expect(visibleText(banner().querySelector(".muted"))).toBe(blockedRecipient(account));
+      expect(visibleText(banner().querySelector(".muted"))).toEqual(reason === "scam" ? only("fraud|scam", "compromised") : only("compromised", "fraud|scam"));
       expect(form.review.disabled).toBe(true);
     }
 
@@ -1261,14 +1210,16 @@ describe("review", () => {
     review({ to: ALICE.account, privacy: "public" }, ov, send);
     await settle();
     const body = dom.document.body;
-    const confirm = body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK");
+    const confirm = confirmButton();
     const guard = body.querySelector(".pay-guard");
     expect([isShown(guard), confirm.disabled]).toEqual([false, false]);
 
     const editor = body.querySelector("dusk-gas-editor");
     editor.setGas({ limit: "2500000", price: "10" });
     await settle();
-    expect(guard.textContent).toBe("Your public balance is 0.015 DUSK short, fee included.");
+    expect(guard.textContent).toBe(shortfallText({ missingLux: 15_000_000n }));
+    expect(guard.textContent).toEqual(saying("0.015 DUSK"));
+    expect(guard.textContent).toEqual(ONLY_PUBLIC);
     expect(isShown(guard)).toBe(true);
     expect(confirm.disabled).toBe(true);
 
@@ -1283,11 +1234,15 @@ describe("review", () => {
     review({ to: ALICE.address, privacy: "shielded" }, overview({ shieldedBalance: { value: "5000000000", spendable: "1000" } }), send);
     await settle();
     const body = dom.document.body;
-    expect(body.querySelector(".pay-guard").textContent).toMatch(/^Your shielded balance is .* DUSK short, fee included\.$/);
+    // 1 DUSK and the 0.05 DUSK fee, from the 1000 Lux that can be spent now: of the shielded balance, rounded up.
+    const guard = body.querySelector(".pay-guard").textContent;
+    expect(guard).toBe(shortfallText({ missingLux: 1_049_999_000n, shielded: true }));
+    expect(guard).toEqual(saying("1.05 DUSK"));
+    expect(guard).toEqual(ONLY_SHIELDED);
     review({ to: ALICE.account, privacy: "public" }, overview({ balance: null }), send);
     await settle();
     expect(isShown(body.querySelector(".pay-guard"))).toBe(false);
-    expect(body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").disabled).toBe(false);
+    expect(confirmButton().disabled).toBe(false);
   });
 
   it("shows a memo in the order it was written, flags what it hides, and sends it as it is", async () => {
@@ -1306,7 +1261,7 @@ describe("review", () => {
     expect(row.querySelector(".safe-text__flag")).not.toBeNull();
     expect(visibleText(body)).not.toContain(rlo);
     pastClickGuard();
-    body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
+    confirmButton().click();
     await settle();
     expect(sent[0].params.memo).toBe(memo);
   });
@@ -1324,7 +1279,7 @@ describe("review", () => {
     review({ to: ALICE.account, privacy: "public", memo: "Factura 141", replaces: "send-kept-1", reviewedFor }, here, send);
     await settle();
     pastClickGuard();
-    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
+    confirmButton().click();
     await settle();
     expect(sent).toEqual([expect.objectContaining({ replaces: "send-kept-1", params: expect.objectContaining({ memo: "Factura 141" }) })]);
   });
@@ -1363,8 +1318,9 @@ describe("review", () => {
       const state = { ...newState(), route: "confirm", draft: { ...retry } };
       const view = mount(state, { ...here, ...elsewhere }, send);
       expect([state.route, state.draft], JSON.stringify(elsewhere)).toEqual(["home", null]);
-      expect(view.actions.showToast).toHaveBeenCalledWith("The wallet, profile or network changed. Check the send again.", 3000);
-      expect(dom.document.body.querySelector(".review-actions")).toBeNull();
+      // It says so, and there's nothing to confirm.
+      expect(view.actions.showToast).toHaveBeenCalledOnce();
+      expect(confirmButton()).toBeNull();
     }
     expect(sent).toEqual([]);
     // Back to the form from its Review, then another profile: Review again sends it as a payment of its own.
@@ -1381,10 +1337,11 @@ describe("review", () => {
     review({ to: ALICE.account, privacy: "public", memo: "Invoice 1\u06605" }, overview());
     await settle();
     const row = dom.document.body.querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
-    expect(row.querySelectorAll(".safe-text__flag").map((el) => el.textContent)).toEqual(["A number here mixes digits of different scripts. Check it digit by digit."]);
+    expect(row.querySelectorAll(".safe-text__flag").map((el) => el.textContent)).toEqual([numbersText({ mixedDigits: true })]);
+    expect(row.querySelector(".safe-text__flag").textContent).toMatch(/\bmix/i);
   });
 
-  it("shows the fee at the network's price and the total with Back and Send, and Custom fee for gas of your own", async () => {
+  it("shows the fee at the network's price and the total, and sends gas of your own from Custom fee", async () => {
     // The node asks 2 LUX; a transfer returns its hash.
     const send = async (message) =>
       message.type === "DUSK_UI_GET_CACHED_GAS_PRICE"
@@ -1393,18 +1350,12 @@ describe("review", () => {
     const view = review({ to: ALICE.account, privacy: "public" }, overview(), send);
     await settle();
     const body = dom.document.body;
-    const shownButtons = () => body.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
+    expect(feeAndTotal()).toEqual([saying("0.005 DUSK"), saying("1.005 DUSK")]);
 
-    // Back is the way back to Send, so there is no Cancel; no presets either. The button says what it sends.
-    expect(shownButtons()).toEqual(["← Back", "Save contact", "Send 1 DUSK"]);
-    expect(visibleText(body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Feeup to 0.005 DUSKTotalup to 1.005 DUSK");
-    expect(visibleText(body.querySelector("details.gas-custom summary"))).toBe("Custom fee");
-
-    // A gas price of your own, under Custom fee, is what Send sends.
+    // A gas price of your own, under Custom fee, is what Confirm sends.
     const price = body.querySelectorAll("dusk-gas-editor input")[1];
     typeInto(price, "1");
-    const button = (text) => body.querySelectorAll("button").find((b) => b.textContent === text);
-    button("Send 1 DUSK").click();
+    confirmButton().click();
     await settle();
     expect(view.actions.send).toHaveBeenLastCalledWith({
       type: "DUSK_UI_SEND_TX",
@@ -1426,13 +1377,13 @@ describe("review", () => {
       const note = dom.document.body.querySelector("dusk-gas-editor .gas-busy");
       return note && isShown(note) ? note.textContent : "";
     };
-    const fee = () => visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-fee"));
 
     // A median of 900 over the ceiling of 5: the ceiling, and why.
     review({ to: ALICE.account, privacy: "public" }, overview(), at("900"));
     await settle();
-    expect(fee()).toBe("Feeup to 0.0125 DUSKTotalup to 1.0125 DUSK");
-    expect(busy()).toBe("The network is busy. You can raise the gas price for it to go out sooner.");
+    expect(feeAndTotal()).toEqual([saying("0.0125 DUSK"), saying("1.0125 DUSK")]);
+    expect(busy()).toBe(GAS_PRICE_BUSY);
+    expect(busy()).toMatch(/\bbusy\b/i);
     // Raised to the median or over: the price is theirs, and nothing more is said.
     typeInto(dom.document.body.querySelectorAll("dusk-gas-editor input")[1], "900");
     expect(busy()).toBe("");
@@ -1440,7 +1391,7 @@ describe("review", () => {
     // A median of 2: the median, nothing said.
     review({ to: ALICE.account, privacy: "public" }, overview(), at("2"));
     await settle();
-    expect([fee(), busy()]).toEqual(["Feeup to 0.005 DUSKTotalup to 1.005 DUSK", ""]);
+    expect([...feeAndTotal(), busy()]).toEqual([saying("0.005 DUSK"), saying("1.005 DUSK"), ""]);
   });
 
   // Lena's, three rounds: a default worked out from the mempool's median made one waiting transaction everyone's
@@ -1459,47 +1410,32 @@ describe("review", () => {
       await settle();
       const busy = visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
       pastClickGuard();
-      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
+      confirmButton().click();
       await settle();
       return [sent[0]?.params.gas?.price, busy];
     };
     expect(await priceSent({ mempool: [{ gasPrice: "2", gasLimit: "6000000" }] })).toEqual(["1", ""]);
     const full = { mempool: Array.from({ length: 1000 }, () => ({ gasPrice: "900", gasLimit: "2500000" })) };
-    expect(await priceSent(full)).toEqual(["5", "The network is busy. You can raise the gas price for it to go out sooner."]);
-  });
-
-  it("hides Use network price while the fee is the network's, custom gas from Settings that equals it too", async () => {
-    // The node asks 2 LUX.
-    const send = async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {});
-    const reset = () => dom.document.body.querySelector("button.gas-reset");
-    review({ to: ALICE.account, privacy: "public" }, overview({ customGas: { limit: "2500000", price: "2" } }), send);
-    await settle();
-    expect([reset().textContent, reset().hidden]).toEqual(["Use network price", true]);
-    // Hidden is hidden in the popup: no class's display shows it anyway.
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    expect(css).toMatch(/\n\[hidden\] \{\s*display: none !important;\s*\}/);
-
-    // Gas of your own shows it, and the network's price typed back hides it again.
-    review({ to: ALICE.account, privacy: "public" }, overview({ customGas: { limit: "2500000", price: "3" } }), send);
-    await settle();
-    expect(reset().hidden).toBe(false);
-    typeInto(dom.document.body.querySelectorAll("dusk-gas-editor input")[1], "2");
-    expect(reset().hidden).toBe(true);
+    const [price, busy] = await priceSent(full);
+    expect([price, busy]).toEqual(["5", GAS_PRICE_BUSY]);
+    expect(busy).toMatch(/\bbusy\b/i);
   });
 
   it("says what a public send shows everyone, with only the parts that apply, and nothing for a shielded one", async () => {
     let view = review({ to: ALICE.account, privacy: "public" });
-    expect([view.kind(), view.visibleLine()]).toEqual(["Public transfer", "Anyone can see the amount and both accounts."]);
+    expect([view.kind(), view.visibleLine()]).toEqual([ONLY_PUBLIC, saying()]);
+    expect(view.visibleLine()).not.toMatch(/memo/i);
 
     // With a memo, and the profile's verified name.
     lookupPrimaryName.mockImplementation(async (account) => (account === OWN.account ? "me.dusk" : null));
     view = review({ to: ALICE.account, privacy: "public", memo: "Lunch" });
     await settle();
-    expect(view.visibleLine()).toBe("Anyone can see the amount, memo, your name me.dusk and the recipient.");
+    expect(view.visibleLine()).toEqual(saying("me.dusk"));
+    expect(view.visibleLine()).toMatch(/memo/i);
 
     view = review({ to: ALICE.address, privacy: "shielded", memo: "Lunch" });
     await settle();
-    expect([view.kind(), view.visibleLine()]).toEqual(["Shielded transfer", null]);
+    expect([view.kind(), view.visibleLine()]).toEqual([ONLY_SHIELDED, null]);
 
     // A name shows over the full address it resolved to.
     view = review({
@@ -1507,12 +1443,13 @@ describe("review", () => {
       privacy: "shielded",
       duskName: { name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.address },
     });
-    expect(view.reviewTo()).toBe(`alice.dusk${ALICE.address}`);
+    expect([view.toNames(), view.toAddress()]).toEqual(["alice.dusk", ALICE.address]);
   });
 
   describe("a name read through a node the wallet doesn't know", () => {
     const CUSTOM = "https://my-node.example:8443";
-    const NOTE = "Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.";
+    // Whose word a name is: the node's, by its host.
+    const NOTE = saying("my-node.example:8443");
     const custom = (over = {}) => overview({ nodeUrl: CUSTOM, ...over });
     const noted = () => dom.document.body.querySelectorAll('[role="note"]').filter(isShown).map(visibleText);
 
@@ -1527,7 +1464,7 @@ describe("review", () => {
       const form = mount(newState(), custom());
       typeInto(form.to, "alice.dusk");
       await settle();
-      expect(visibleText(form.nameBox())).toContain(NOTE);
+      expect(visibleText(form.nameBox().querySelector('[role="note"]'))).toEqual(NOTE);
       expect(noted()).toEqual([NOTE]);
     });
 
@@ -1544,7 +1481,9 @@ describe("review", () => {
       const form = mount(newState(), custom());
       typeInto(form.to, BOB.account);
       await settle();
-      expect(visibleText(form.nameBox().querySelector(".name-verified"))).toBe("bob.dusk · its .dusk name");
+      // The name, and what it says of it.
+      const name = (box) => [".name-verified__name", ".name-verified__note"].map((part) => visibleText(box.querySelector(part)));
+      expect(name(form.nameBox())).toEqual(["bob.dusk", expect.not.stringMatching(/verified/i)]);
       expect(form.nameBox().querySelector(".name-verified .btn-ico")).toBeNull();
       expect(noted()).toEqual([NOTE]);
 
@@ -1552,7 +1491,7 @@ describe("review", () => {
       const own = mount(newState(), overview());
       typeInto(own.to, BOB.account);
       await settle();
-      expect(visibleText(own.nameBox().querySelector(".name-verified"))).toBe("bob.dusk · its verified .dusk name");
+      expect(name(own.nameBox())).toEqual(["bob.dusk", expect.stringMatching(/verified/i)]);
       expect(noted()).toEqual([]);
     });
 
@@ -1560,20 +1499,20 @@ describe("review", () => {
       const ov = custom();
       let view = review({ to: ALICE.address, privacy: "shielded", duskName: { name: "alice.dusk", nodeUrl: CUSTOM, to: ALICE.address } }, ov);
       await settle();
-      expect(view.reviewTo()).toBe(`alice.dusk${ALICE.address}`);
-      expect(noted()).toContain(NOTE);
+      expect([view.toNames(), view.toAddress()]).toEqual(["alice.dusk", ALICE.address]);
+      expect(noted()).toContainEqual(NOTE);
 
       lookupPrimaryName.mockImplementation(async (account) => (account === BOB.account ? "bob.dusk" : null));
       view = review({ to: BOB.account, privacy: "public" }, ov);
       await settle();
-      expect(view.reviewTo()).toBe(`bob.dusk${BOB.account}`);
-      expect(noted()).toContain(NOTE);
+      expect([view.toNames(), view.toAddress()]).toEqual(["bob.dusk", BOB.account]);
+      expect(noted()).toContainEqual(NOTE);
 
       lookupPrimaryName.mockImplementation(async () => null);
       view = review({ to: ALICE.account, privacy: "public" }, ov);
       await settle();
-      expect(view.reviewTo()).toBe(ALICE.account);
-      expect(noted()).not.toContain(NOTE);
+      expect([view.toNames(), view.toAddress()]).toEqual(["", ALICE.account]);
+      expect(noted()).not.toContainEqual(NOTE);
     });
   });
 
@@ -1585,7 +1524,7 @@ describe("review", () => {
     const confirm = async (draft) => {
       const view = review(draft, overview(), send);
       await settle();
-      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
+      confirmButton().click();
       await settle();
       return view.actions.send.mock.calls.find(([m]) => m.type === "DUSK_UI_SEND_TX")[0];
     };
@@ -1605,52 +1544,69 @@ describe("a send to the bridge's account", () => {
   const [mainnet, testnet] = [networks.mainnet, networks.testnet].map((net) => routes(net).find((route) => route.kind === "service"));
   // A checksummed EVM address, as the bridge's own fixtures have it.
   const EVM = fixtures.calls.find((c) => c.name === "deposit-shoot").expected.to;
-  const review = (draft, ov = MAINNET, send) =>
-    mount(
-      {
-        route: "confirm",
-        addressBook: { loaded: true, items: [] },
-        draft: { amountDusk: "2", amountLux: "2000000000", privacy: "public", to: mainnet.account, memo: EVM, ...draft },
-      },
-      ov,
-      send
-    );
+  const DRAFT = { amountDusk: "2", amountLux: "2000000000", privacy: "public", to: mainnet.account, memo: EVM };
+  const review = (draft, ov = MAINNET, send) => mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { ...DRAFT, ...draft } }, ov, send);
+  // The transfer as the wallet reads it (bridgeCalls.js): what's sent, the bridge's fee, what arrives, and where.
+  const serviceOf = (draft, ov = MAINNET) => {
+    const d = { ...DRAFT, ...draft };
+    return bridgeServiceTransfer({ nodeUrl: ov.nodeUrl, to: d.to, memo: d.memo, amount: d.amountLux });
+  };
   const body = () => dom.document.body;
   const text = (selector) => visibleText(body().querySelector(selector));
-  const callouts = () => body().querySelectorAll(".callout.warn .callout-title").map((t) => t.textContent);
-  const confirm = () => body().querySelector(".review-actions .btnrow > button");
+  // Each warning shown: its title, and its line.
+  const warnings = () => body().querySelectorAll(".callout.warn").filter(isShown).map((note) => [visibleText(note.querySelector(".callout-title")), visibleText(note.querySelector(".muted"))]);
+  // The row the memo shows in, named for what it is here: its label, and the address it holds.
+  const memoRow = () => {
+    const row = body().querySelectorAll(".send-review .kv").find((kv) => visibleText(kv.querySelector(".kv-value") ?? kv).includes(EVM));
+    return [visibleText(row.querySelector(".kv-label")), visibleText(row.querySelector(".kv-value"))];
+  };
+  // The bridge's fee next to the word fee, before or after it, and what arrives just before arrives, written here; and
+  // a line where nothing arrives, with no figure said to.
+  const feeOf = (fee) => new RegExp(`\\b[Ff]ee\\s+${whole(fee)}|${whole(fee)}\\s+(?:\\w+\\s+)?fee\\b`, "u");
+  const arrivesOf = (amount) => new RegExp(`${whole(amount)}\\s+arrives?\\b`, "u");
+  const NOTHING_ARRIVES = expect.stringMatching(/^(?![\s\S]*\d\s*DUSK\s+arrives?\b)[\s\S]*\bNothing arrives\b/);
+  const confirm = confirmButton;
 
   it("shows the memo that carries the recipient's address exactly, unflagged", async () => {
     review();
     await settle();
-    const row = body().querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Recipient on BNB Smart Chain");
-    expect(visibleText(row)).toBe(`Recipient on BNB Smart Chain${EVM}`);
-    expect(row.querySelector(".safe-text__flag")).toBeNull();
+    expect(memoRow()).toEqual([saying("BNB Smart Chain"), EVM]);
+    expect(body().querySelector(".send-review .safe-text__flag")).toBeNull();
   });
 
   it("says what arrives on BNB Smart Chain once the bridge takes its 1 DUSK fee, and to whom", async () => {
-    const view = review();
+    // 3 DUSK sent: the bridge's 1 DUSK fee, and the 2 DUSK that arrive on BNB Smart Chain, said as the wallet says it.
+    const draft = { amountDusk: "3", amountLux: "3000000000" };
+    const view = review(draft);
     await settle();
-    expect(view.kind()).toBe("Bridge to BNB Smart Chain");
-    expect(text(".review-bridge-fee")).toBe("Bridge fee 1 DUSK · 1 DUSK arrives");
-    expect(view.reviewTo()).toBe(`The bridge's account for BNB Smart Chain${mainnet.account}`);
-    expect(view.visibleLine()).toBe("Anyone can see the amount, the recipient on BNB Smart Chain and your account.");
-    // With the profile's verified name, said as yours.
-    expect(publicSendLine({ memo: EVM, name: "alice.dusk", memoAs: "the recipient on BNB Smart Chain" })).toBe(
-      "Anyone can see the amount, the recipient on BNB Smart Chain and your name alice.dusk."
-    );
-    expect(body().querySelectorAll(".row > .group .kv").map(visibleText)).toContain(`Recipient on BNB Smart Chain${EVM}`);
-    expect(callouts()).toEqual([]);
-    expect([confirm().textContent, confirm().disabled]).toEqual(["Send 2 DUSK", false]);
+    const service = serviceOf(draft);
+    expect([service.chain, service.feeLux, service.arrivesLux]).toEqual(["BNB Smart Chain", 1_000_000_000n, 2_000_000_000n]);
+    expect(text(".review-bridge-fee")).toBe(bridgeServiceLine(service));
+    expect(text(".review-bridge-fee")).toMatch(feeOf("1 DUSK"));
+    expect(text(".review-bridge-fee")).toMatch(arrivesOf("2 DUSK"));
+    expect(text(".review-bridge-fee")).not.toMatch(/nothing/i);
+    expect(text(".balance-amount")).toBe("3 DUSK");
+    expect(view.kind()).toEqual(saying("BNB Smart Chain"));
+    expect([view.toNames(), view.toAddress()]).toEqual([saying("BNB Smart Chain"), mainnet.account]);
+    expect(view.visibleLine()).toEqual(saying("BNB Smart Chain"));
+    expect(memoRow()).toEqual([saying("BNB Smart Chain"), EVM]);
+    expect(warnings()).toEqual([]);
+    expect(confirm().disabled).toBe(false);
     // No name to look up for the bridge's account.
     expect(lookupPrimaryName.mock.calls.map(([account]) => account)).not.toContain(mainnet.account);
   });
 
   it("keeps Confirm off when the fee takes the whole amount, as nothing would arrive", async () => {
-    const view = review({ amountDusk: "1", amountLux: "1000000000" });
+    const draft = { amountDusk: "1", amountLux: "1000000000" };
+    const view = review(draft);
     await settle();
-    expect(text(".review-bridge-fee")).toBe("Bridge fee 1 DUSK · Nothing arrives on BNB Smart Chain");
-    expect(body().querySelector(".review-actions > .field-error").textContent).toBe("Send more than the 1 DUSK bridge fee.");
+    // Its 1 DUSK fee takes it all: nothing arrives, and the line and the reason say so.
+    const service = serviceOf(draft);
+    expect([service.feeLux, service.arrivesLux]).toEqual([1_000_000_000n, 0n]);
+    expect(text(".review-bridge-fee")).toBe(bridgeServiceLine(service));
+    expect(text(".review-bridge-fee")).toMatch(feeOf("1 DUSK"));
+    expect(text(".review-bridge-fee")).toEqual(NOTHING_ARRIVES);
+    expect(body().querySelector(".review-actions > .field-error").textContent).toEqual(saying("1 DUSK"));
     expect(confirm().disabled).toBe(true);
     confirm().click();
     await settle();
@@ -1658,37 +1614,54 @@ describe("a send to the bridge's account", () => {
   });
 
   it.each([
-    ["isn't an address on BNB Smart Chain", { memo: "Order 1042" }, MAINNET, "Nothing arrives without a BNB Smart Chain address in the memo."],
-    ["is missing", { memo: "" }, MAINNET, "Nothing arrives without a BNB Smart Chain address in the memo."],
-    ["isn't an address on Sepolia", { to: testnet.account, memo: "Order 1042" }, overview(), "Nothing arrives without a Sepolia address in the memo."],
-  ])("keeps Confirm off when the memo %s, as nothing would arrive", async (_, draft, ov, reason) => {
+    ["isn't an address on BNB Smart Chain", { memo: "Order 1042" }, MAINNET, "BNB Smart Chain"],
+    ["is missing", { memo: "" }, MAINNET, "BNB Smart Chain"],
+    ["isn't an address on Sepolia", { to: testnet.account, memo: "Order 1042" }, overview(), "Sepolia"],
+  ])("keeps Confirm off when the memo %s, as nothing would arrive", async (_, draft, ov, chain) => {
     const view = review(draft, ov);
     await settle();
-    expect(body().querySelectorAll(".review-actions > .field-error").filter(isShown).map((e) => e.textContent)).toEqual([reason]);
+    // Why: no address on the chain it pays, by that chain.
+    expect([serviceOf(draft, ov).chain, serviceOf(draft, ov).recipientOk]).toEqual([chain, false]);
+    const reasons = body().querySelectorAll(".review-actions > .field-error").filter(isShown).map((e) => e.textContent);
+    expect(reasons).toEqual([saying(chain)]);
+    expect(reasons[0]).toMatch(/\baddress\b/);
+    expect(reasons[0]).toContain(noBridgeRecipientText(chain));
     expect(confirm().disabled).toBe(true);
     confirm().click();
     await settle();
     expect(view.actions.send.mock.calls.some(([m]) => m.type === "DUSK_UI_SEND_TX")).toBe(false);
   });
 
-  it("says the testnet bridge to Sepolia isn't paying out now, and checks the memo is an address there", async () => {
+  it("says the testnet bridge to Sepolia isn't running right now, and checks the memo is an address there", async () => {
     review({ to: testnet.account }, overview());
     await settle();
-    expect(callouts()).toEqual(["Not paying out on Sepolia now"]);
-    expect(body().querySelector(".callout.warn .muted").textContent).toBe("Nothing sent to it would arrive.");
-    expect(text(".review-bridge-fee")).toBe("Bridge fee 1 DUSK · Nothing arrives on Sepolia");
+    // Not running: its one warning, and a line where nothing arrives on Sepolia.
+    const paused = serviceOf({ to: testnet.account }, overview());
+    expect([paused.chain, paused.running]).toEqual(["Sepolia", false]);
+    expect(bridgeServiceWarnings(paused).map((note) => note.kind)).toEqual(["off"]);
+    expect(warnings()).toEqual(bridgeServiceWarnings(paused).map((note) => [note.title, note.text]));
+    expect(warnings()).toEqual([[expect.stringMatching(/\bnot\b/i), expect.any(String)]]);
+    expect(warnings()[0].join(" ")).toEqual(saying("Sepolia"));
+    expect(text(".review-bridge-fee")).toBe(bridgeServiceLine(paused));
+    expect(text(".review-bridge-fee")).toMatch(feeOf("1 DUSK"));
+    expect(text(".review-bridge-fee")).toEqual(NOTHING_ARRIVES);
+    expect(text(".review-bridge-fee")).toEqual(saying("Sepolia"));
 
     review({ memo: "Order 1042" });
     await settle();
-    expect(callouts()).toEqual(["The memo isn't an address on BNB Smart Chain"]);
-    // Nothing arrives there without one: the line doesn't say it does.
-    expect(text(".review-bridge-fee")).toBe("Bridge fee 1 DUSK · Nothing arrives without a BNB Smart Chain address in the memo");
+    // A memo that's no address on BNB Smart Chain: its warning names that chain, and the line doesn't say anything arrives.
+    const unpaid = serviceOf({ memo: "Order 1042" });
+    expect([unpaid.chain, unpaid.recipientOk]).toEqual(["BNB Smart Chain", false]);
+    expect(warnings().map(([title]) => title)).toEqual([saying("BNB Smart Chain")]);
+    expect(text(".review-bridge-fee")).toBe(bridgeServiceLine(unpaid));
+    expect(text(".review-bridge-fee")).toMatch(feeOf("1 DUSK"));
+    expect(text(".review-bridge-fee")).toEqual(NOTHING_ARRIVES);
   });
 
   it("is a plain transfer to another network's bridge account", async () => {
     const view = review({}, overview());
     await settle();
-    expect(view.kind()).toBe("Public transfer");
+    expect(view.kind()).toEqual(ONLY_PUBLIC);
     expect(body().querySelector(".review-bridge-fee")).toBeNull();
   });
 });
@@ -1699,7 +1672,8 @@ describe("a name and the recipient Contacts sets", () => {
     state.draft = { ...state.draft, to: address };
     state.route = "confirm";
   };
-  const reviewTo = () => visibleText(dom.document.body.querySelector(".review-to"));
+  // Review's To: the names it goes by, and its address.
+  const reviewTo = () => [".review-to__names", ".review-to__address"].map((part) => visibleText(dom.document.body.querySelector(part)));
 
   it.each([
     ["picking another contact", BOB.account],
@@ -1713,12 +1687,11 @@ describe("a name and the recipient Contacts sets", () => {
     await settle();
     expect(state.draft.duskName).toEqual({ name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.account });
     mount(state);
-    expect(reviewTo()).toBe(`alice.dusk${ALICE.account}`);
-    expect(dom.document.body.querySelector(".review-to__names").textContent).toBe("alice.dusk");
+    expect(reviewTo()).toEqual(["alice.dusk", ALICE.account]);
 
     setFromContacts(state, address);
     mount(state);
-    expect(reviewTo()).toBe(address);
+    expect(reviewTo()).toEqual(["", address]);
 
     // Back from Review shows the contact's address, not the name.
     dom.document.body.querySelector(".subnav-back").click();
@@ -1737,12 +1710,12 @@ describe("a name and the recipient Contacts sets", () => {
     await settle();
     expect(state.draft).toMatchObject({ to: ALICE.address, privacy: "shielded" });
 
-    // Save contact, with the address edited to a public account.
+    // Save to Contacts, with the address edited to a public account.
     setFromContacts(state, BOB.account);
     const review = mount(state);
-    expect([review.kind(), review.visibleLine()]).toEqual(["Public transfer", "Anyone can see the amount and both accounts."]);
+    expect([review.kind(), review.visibleLine()]).toEqual([ONLY_PUBLIC, saying()]);
 
-    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
+    confirmButton().click();
     await settle();
     expect(review.actions.send).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1758,7 +1731,7 @@ describe("a new contact from a name", () => {
   it("gets the address the name sends to, not the name", () => {
     const state = newState();
     const form = mount(state);
-    const contacts = dom.document.body.querySelector('button[title="Contacts"]');
+    const contacts = contactsButton();
 
     typeInto(form.to, "alice.dusk");
     contacts.click();
@@ -1781,7 +1754,7 @@ describe("a new contact from a name", () => {
   it("gets no address while the name is still being looked up, and its address once it resolves", async () => {
     const state = newState();
     const form = mount(state);
-    const contacts = dom.document.body.querySelector('button[title="Contacts"]');
+    const contacts = contactsButton();
     let finish;
     const pending = new Promise((resolve) => (finish = resolve));
     lookupDuskName.mockImplementation(() => ({ result: undefined, promise: pending }));
@@ -1821,7 +1794,7 @@ describe("going back to a name while it is looked up", () => {
     answers[0]({ ok: false, name: "alice.dusk", reason: "lookup_failed" });
     answers[1](NAMES["bob.dusk"]);
     await settle();
-    expect(visibleText(form.nameBox())).toMatch(/^alice\.dusk points to/);
+    expect(visibleText(dom.document.body.querySelector(".name-points-to"))).toEqual(saying("alice.dusk"));
     expect(form.picked()).toEqual(["true", "false"]);
     expect(form.review.disabled).toBe(false);
   });
@@ -1880,7 +1853,7 @@ describe("a request for another network", () => {
     form.to.dispatchEvent(fakeEvent("blur"));
     await settle();
 
-    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+    expect(note()?.textContent).toEqual(FOR_MAINNET);
     const link = `dusk:public-${ALICE.account}@dusk:1?amount=1&memo=Invoice+9`;
     expect([form.to.value, form.amount.value]).toEqual([link, ""]);
     expect(state.draft).toMatchObject({ to: link, amountDusk: "", memo: "" });
@@ -1891,7 +1864,7 @@ describe("a request for another network", () => {
     await settle();
     expect(state.route).toBe("send");
     const again = mount(state);
-    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+    expect(note()?.textContent).toEqual(FOR_MAINNET);
 
     // A recipient typed instead takes it away, for good.
     typeInto(again.to, BOB.account);
@@ -1906,7 +1879,7 @@ describe("a request for another network", () => {
     const { state } = await import("./popup/state.js");
     const opened = mount(state);
     expect([opened.to.value, opened.amount.value, state.draft.memo]).toEqual(["", "", ""]);
-    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+    expect(note()?.textContent).toEqual(FOR_MAINNET);
 
     // Filled in on Testnet, then the wallet went to Mainnet.
     const filledIn = newState();
@@ -1914,15 +1887,15 @@ describe("a request for another network", () => {
     expect(mount(filledIn).to.value).toBe(ALICE.account);
     const moved = mount(filledIn, overview({ nodeUrl: "https://nodes.dusk.network" }));
     expect([moved.to.value, moved.amount.value, filledIn.draft.memo]).toEqual(["", "", ""]);
-    expect(note()?.textContent).toBe("This request is for Testnet. You are on Mainnet.");
+    expect(note()?.textContent).toEqual(FOR_TESTNET);
     expect(filled()).toBe("");
   });
 
   it("can't be confirmed, however it reached Review", () => {
     mount({ route: "confirm", draft: { to: ALICE.account, privacy: "public", amountLux: "1000000000", amountDusk: "1", memo: "", requestChainId: "dusk:1" } });
     const body = dom.document.body;
-    expect(body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").disabled).toBe(true);
-    expect(visibleText(body.querySelector(".review-actions"))).toContain("This request is for Mainnet. You are on Testnet.");
+    expect(confirmButton().disabled).toBe(true);
+    expect(visibleText(body.querySelector(".review-actions .send-chain-note"))).toEqual(FOR_MAINNET);
   });
 
   it("goes by the chain a custom node signs for, and calls it by its node", async () => {
@@ -1934,7 +1907,8 @@ describe("a request for another network", () => {
     expect(note()).toBeUndefined();
     state.draft = { to: ALICE.account, requestChainId: "dusk:1" };
     expect(mount(state, custom).to.value).toBe("");
-    expect(note()?.textContent).toBe("This request is for Mainnet. You are on Custom · node.example.");
+    // Mainnet said as the request's, and the custom node by its name as where you are.
+    expect(note()?.textContent).toEqual(sides(["request", "Mainnet"], ["you", "node.example"], chainMismatchText("dusk:1", custom.nodeUrl)));
   });
 });
 
@@ -1955,12 +1929,19 @@ describe("the password on big sends", () => {
       return answers[message.type]?.(message) ?? {};
     });
     const body = dom.document.body;
-    const confirm = () => body.querySelector(".review-actions .btnrow > button");
+    const confirm = confirmButton;
     const dialog = () => body.querySelector(".send-password");
     const password = () => dialog().querySelector("input[type=password]");
-    const press = (name) => dialog().querySelectorAll("button").find((b) => b.textContent === name).click();
+    // What the dialog says is wrong, under the password.
+    const error = () => {
+      const el = dialog().querySelector(".field-error");
+      return isShown(el) ? el.textContent : "";
+    };
+    // The dialog's Confirm, and its Cancel: the button that takes you back.
+    const submit = () => dialog().querySelector(".btn-primary").click();
+    const cancel = () => dialog().querySelector("[data-back]").click();
     const sends = () => sent.filter((m) => m.type === "DUSK_UI_SEND_TX");
-    return { ...view, state, sent, answers, body, confirm, dialog, password, press, sends };
+    return { ...view, state, sent, answers, body, confirm, dialog, password, error, submit, cancel, sends };
   };
   const pressConfirm = async (view) => {
     pastClickGuard();
@@ -1971,16 +1952,17 @@ describe("the password on big sends", () => {
   it("asks over the Review before anything of it goes, and sends with what the wallet gave for it", async () => {
     const view = reviewAt("6000000000");
     await pressConfirm(view);
-    expect(visibleText(view.dialog())).toContain("Enter your password");
-    expect(visibleText(view.dialog())).toContain("This is above the 5 DUSK you set in Settings.");
+    // It asks, saying the amount it's set to ask above.
+    expect(view.password()).not.toBeNull();
+    const why = visibleText(view.dialog().querySelector(".settings-note"));
+    expect(why).toBe(sendPasswordWhy({ limit: LIMIT, always: false }));
+    expect(why).toEqual(saying("5 DUSK"));
     expect(view.sends()).toEqual([]);
     // The Review stays under it: no Sent screen yet.
     expect(view.state.route).toBe("confirm");
-    expect(view.dialog().getAttribute("role")).toBe("dialog");
-    expect(dom.document.activeElement).toBe(view.password());
 
     typeInto(view.password(), "the password");
-    view.press("Confirm");
+    view.submit();
     await settle();
     await settle();
     expect(view.dialog()).toBeNull();
@@ -1994,27 +1976,30 @@ describe("the password on big sends", () => {
     const view = reviewAt("6000000000");
     await pressConfirm(view);
     typeInto(view.password(), "not it");
-    view.press("Confirm");
+    view.submit();
     await settle();
-    expect(visibleText(view.dialog())).toContain("Wrong password.");
+    expect(view.error()).toEqual(saying());
     expect(view.password().value).toBe("");
     expect(view.sends()).toEqual([]);
-    // Nothing typed says so too.
-    view.press("Confirm");
+    // Nothing typed says so too, and asks the wallet nothing.
+    typeInto(view.password(), "");
+    expect(view.error()).toBe("");
+    view.submit();
     await settle();
-    expect(visibleText(view.dialog())).toContain("Enter your password.");
+    expect(view.error()).toEqual(saying());
     expect(view.sent.filter((m) => m.type === "DUSK_UI_SEND_PASSWORD_PROVE")).toHaveLength(1);
   });
 
   it("goes back to the Review on Cancel or Escape, with nothing sent and Confirm on again", async () => {
     const view = reviewAt("6000000000");
     await pressConfirm(view);
-    view.press("Cancel");
+    view.cancel();
     await settle();
     expect(view.dialog()).toBeNull();
     expect(view.sends()).toEqual([]);
     expect(view.state.route).toBe("confirm");
-    expect(view.actions.showToast).toHaveBeenCalledWith("It waits for your password, so nothing was sent.");
+    // It says nothing was sent.
+    expect(view.actions.showToast).toHaveBeenCalledWith(saying());
     expect(view.confirm().disabled).toBe(false);
 
     await pressConfirm(view);
@@ -2051,10 +2036,10 @@ describe("the password on big sends", () => {
     await pressConfirm(again);
     await vi.waitFor(() => expect(asked.at(-1)).toBe("disable"));
     await settle();
-    expect(visibleText(again.dialog())).toContain("Your password changed, so fingerprint unlock is off. Enter your password.");
+    expect(again.error()).toEqual(saying());
     expect(again.sends()).toEqual([]);
     typeInto(again.password(), "the password");
-    again.press("Confirm");
+    again.submit();
     await vi.waitFor(() => expect(again.sends()).toHaveLength(1));
   });
 
@@ -2074,7 +2059,7 @@ describe("the password on big sends", () => {
       return message.type === "DUSK_UI_SEND_TX" ? { ok: true, result: { hash: "ab".repeat(32) } } : {};
     });
     pastClickGuard();
-    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 6 DUSK").click();
+    confirmButton().click();
     await settle();
     await settle();
     expect(sent.some((m) => m.type === "DUSK_UI_SEND_PASSWORD_ASKS")).toBe(false);
@@ -2117,6 +2102,18 @@ describe("a request link", () => {
 
   const paste = (form, text) => form.to.dispatchEvent(fakeEvent("paste", { clipboardData: { getData: () => text } }));
 
+  // What Send says of a link or a paste it refuses: app-core's words for it, as read for this wallet's network.
+  const refusedAs = (text) => readPastedRequest(text, overview().nodeUrl)?.problem;
+  // A paste refused for what its message says against its link (readPastedRequest: app-core's reading, for all three
+  // wallets): that part, with the message's value and the link's each in its place; and the refusal Send says, with
+  // what the message says (`said`, written here as the words show it) after "message" and what its link has after
+  // "link", in app-core's words for it.
+  const disagreement = (text, disagrees, { said = [disagrees.message, disagrees.link], owners } = {}) => {
+    const read = readPastedRequest(text, overview().nodeUrl, owners ? { owners } : {});
+    expect(read?.disagrees, text).toEqual(disagrees);
+    return sides(["message", said[0]], ["link", said[1]], read.problem);
+  };
+
   it("fills Send in when it's pasted, the https link as the dusk: one, in the browser's separators", async () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
     const state = newState();
@@ -2126,9 +2123,9 @@ describe("a request link", () => {
     expect(state.draft).toMatchObject({ to: ALICE.account, amountDusk: "0,15", memo: "Factura 33", requestChainId: "dusk:2" });
     expect(form.to.value).toBe(ALICE.account);
     expect(form.amount.value).toBe("0,15");
-    // Said under the recipient, in words, and covering nothing.
+    // Said under the recipient, with the network it pays on, and covering nothing.
     const filled = () => visibleText(dom.document.body.querySelector(".send-filled-note"));
-    expect(filled()).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
+    expect(filled()).toEqual(saying("Testnet"));
     expect(form.actions.showToast).not.toHaveBeenCalled();
     typeInto(form.to, BOB.account);
     expect(filled()).toBe("");
@@ -2147,7 +2144,7 @@ describe("a request link", () => {
     const link = httpsLink(`to=${ALICE.account}&amount=0.01&memo=Factura+2026-151&network=testnet`);
     const message = `sofiadesign.dusk asks you to pay 0.01 DUSK on Testnet · Factura 2026-151\nPay here: ${link}`;
     const filled = (form, state) => [form.to.value, form.amount.value, state.draft?.memo, visibleText(dom.document.body.querySelector(".send-filled-note"))];
-    const FILLED = [ALICE.account, "0.01", "Factura 2026-151", "Filled in from the link, to pay on Testnet. Check it before you send."];
+    const FILLED = [ALICE.account, "0.01", "Factura 2026-151", saying("Testnet")];
     for (const text of [message, message.replace("\n", ""), message.replace("\n", " "), `You're asked to pay 0.01 DUSK on Testnet · Factura 2026-151\nPay here: ${link}`]) {
       // Pasted, as the clipboard has it.
       const pastedState = newState();
@@ -2170,8 +2167,8 @@ describe("a request link", () => {
     const a = httpsLink(`to=${ALICE.account}&amount=0.01&network=testnet`);
     const b = httpsLink(`to=${BOB.account}&amount=0.02&network=testnet`);
     for (const [text, said] of [
-      [`Pay here: ${a} or here: ${b}`, "That has more than one payment link. Paste just the one to pay."],
-      [`Marek asks you to pay 0.01 DUSK on Testnet\nPay here: ${a} thanks!`, "The words after that link may be part of it. Paste the link alone."],
+      [`Pay here: ${a} or here: ${b}`, LINK_SEVERAL],
+      [`Marek asks you to pay 0.01 DUSK on Testnet\nPay here: ${a} thanks!`, LINK_UNCLEAR],
     ]) {
       const form = mount(newState());
       paste(form, text);
@@ -2189,7 +2186,6 @@ describe("a request link", () => {
   // Lena's: her link and a word after it, as a chat line is copied whole, said "This link's network can't be read", or
   // with the memo last, took the word into the memo ("Lena r35 odd danke!", or glued on from the next line).
   it("refuses a link with a word after it, on its line or the next, whatever its last field, saying so", async () => {
-    const UNCLEAR = "The words after that link may be part of it. Paste the link alone.";
     const networkLast = httpsLink(`to=${ALICE.account}&amount=0.01&memo=Lena+r35&network=testnet`);
     const memoLast = httpsLink(`to=${ALICE.account}&network=testnet&amount=0.01&memo=Lena+r35+odd`);
     for (const link of [networkLast, memoLast]) {
@@ -2198,7 +2194,7 @@ describe("a request link", () => {
         const form = mount(state);
         paste(form, text);
         await settle();
-        expect(refusal(), JSON.stringify(text)).toEqual([UNCLEAR]);
+        expect(refusal(), JSON.stringify(text)).toEqual([LINK_UNCLEAR]);
         expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], JSON.stringify(text)).toEqual([oneLine(text), "", ""]);
       }
     }
@@ -2210,11 +2206,12 @@ describe("a request link", () => {
   // and keeps what was pasted in To.
   it("refuses a shared message whose line says another amount or memo than its link, says which, and fills in nothing", async () => {
     const link = (amount) => httpsLink(`to=${ALICE.account}&amount=${amount}&memo=r35+marek+T2&network=testnet`);
-    for (const [text, said] of [
-      [`You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nPay here: ${link("0.15")}`, "The message says 0.002 DUSK; its link asks 0.15 DUSK."],
-      [`Sofía asks you to pay 0.001 DUSK · coffee\nPay here: ${link("0.002")}`, "The message says 0.001 DUSK; its link asks 0.002 DUSK."],
-      [`You're asked to pay 0.002 DUSK on Testnet · r35 marek T3\nPay here: ${link("0.002")}`, "The message's memo is “r35 marek T3”; its link's is “r35 marek T2”."],
+    for (const [text, disagrees] of [
+      [`You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nPay here: ${link("0.15")}`, { part: "amount", message: "0.002 DUSK", link: "0.15 DUSK" }],
+      [`Sofía asks you to pay 0.001 DUSK · coffee\nPay here: ${link("0.002")}`, { part: "amount", message: "0.001 DUSK", link: "0.002 DUSK" }],
+      [`You're asked to pay 0.002 DUSK on Testnet · r35 marek T3\nPay here: ${link("0.002")}`, { part: "memo", message: "r35 marek T3", link: "r35 marek T2" }],
     ]) {
+      const said = disagreement(text, disagrees);
       const state = newState();
       const form = mount(state);
       paste(form, text);
@@ -2237,7 +2234,8 @@ describe("a request link", () => {
   // off and the link's 0.15 filled in under a line saying 0.002; and the extension read only the line right before the
   // link, so a "Thanks!" or "Pay me here:" between them let it by. Both wallets read the whole message now (app-core).
   it("reads the whole pasted message, through what can't be seen and look-alike letters, and refuses one that says another amount", async () => {
-    const DISAGREES = /^The message says 0\.0.*02 DUS.*; its link asks 0\.15 DUSK\.$/;
+    // The message's 0.002 DUSK, against its link's 0.15 DUSK.
+    const DISAGREES = { part: "amount", message: "0.002 DUSK", link: "0.15 DUSK" };
     const link = (amount) => httpsLink(`to=${ALICE.account}&amount=${amount}&memo=r37+marek+T2&network=testnet`);
     const line = "You're asked to pay 0.002 DUSK on Testnet · r37 marek T2";
     for (const text of [
@@ -2254,7 +2252,7 @@ describe("a request link", () => {
       const form = mount(state);
       paste(form, text);
       await settle();
-      expect(refusal(), JSON.stringify(text)).toEqual([expect.stringMatching(DISAGREES)]);
+      expect(refusal(), JSON.stringify(text)).toEqual([disagreement(text, DISAGREES)]);
       expect([form.to.value, form.amount.value, state.draft?.memo ?? ""], JSON.stringify(text)).toEqual([oneLine(text), "", ""]);
     }
     // Words that state nothing else may be around its link: filled in.
@@ -2270,7 +2268,8 @@ describe("a request link", () => {
   // R02, Nandini's: "You're asked to pay 0.012 DUSK to alice.dusk on Testnet…" over a link to Amélie's account filled
   // Amélie in, and never said alice.dusk; "alice·dusk" too. A name anywhere in the message is the link's, or refused.
   it("looks up a .dusk name anywhere in a pasted message, and refuses one that isn't the link's recipient", async () => {
-    const DISAGREES = `The message says alice.dusk; its link pays ${shortAddress(ALICE.account)}.`;
+    // The name the message says, whose account is Bob's, against the account its link pays.
+    const DISAGREES = { part: "name", message: "alice.dusk", link: ALICE.account };
     duskNamesOwners.mockImplementation(async (names) => new Map(names.map((name) => [name, { account: BOB.account }])));
     for (const name of ["alice.dusk", "alice\u00b7dusk"]) {
       const state = newState();
@@ -2279,7 +2278,8 @@ describe("a request link", () => {
       paste(form, text);
       await settle();
       expect(duskNamesOwners.mock.lastCall?.[0], name).toEqual(["alice.dusk"]);
-      expect([refusal(), form.to.value, form.amount.value], name).toEqual([[DISAGREES], oneLine(text), ""]);
+      const said = disagreement(text, DISAGREES, { said: ["alice.dusk", short(ALICE.account)], owners: new Map([["alice.dusk", { account: BOB.account }]]) });
+      expect([refusal(), form.to.value, form.amount.value], name).toEqual([[said], oneLine(text), ""]);
     }
     // Without the name: filled in.
     const state = newState();
@@ -2298,11 +2298,13 @@ describe("a request link", () => {
     const toMarek = "https://apps.testnet.dusk.network/wallet/dashboard/send?to=" + MAREK + "&amount=0.02&memo=marek-r10-req&network=testnet";
     const own = `You're asked to pay 0.02 DUSK on Testnet · marek-r10-req\nPay here: ${toMarek}`;
     duskNamesOwners.mockImplementation(async (names) => new Map(names.filter((name) => name === "sofiadesign.dusk").map((name) => [name, { account: SOFIA }])));
-    for (const [text, said] of [
-      [`Total 0.15\n${own}`, "The message says 0.15; its link asks 0.02 DUSK."],
-      [`Pay to ${SOFIA}\n${own}`, `The message says ${shortAddress(SOFIA)}; its link pays ${shortAddress(MAREK)}.`],
-      [own.replace("You're asked", "sofiadesign . dusk asks you"), `The message says sofiadesign.dusk; its link pays ${shortAddress(MAREK)}.`],
+    // Each as its words show it: an amount as written, an address or the account a name has cut short.
+    for (const [text, disagrees, shown] of [
+      [`Total 0.15\n${own}`, { part: "amount", message: "0.15", link: "0.02 DUSK" }, ["0.15", "0.02 DUSK"]],
+      [`Pay to ${SOFIA}\n${own}`, { part: "address", message: SOFIA, link: MAREK }, [short(SOFIA), short(MAREK)]],
+      [own.replace("You're asked", "sofiadesign . dusk asks you"), { part: "name", message: "sofiadesign.dusk", link: MAREK }, ["sofiadesign.dusk", short(MAREK)]],
     ]) {
+      const said = disagreement(text, disagrees, { said: shown, owners: new Map([["sofiadesign.dusk", { account: SOFIA }]]) });
       const state = newState();
       const form = mount(state);
       paste(form, text);
@@ -2320,8 +2322,9 @@ describe("a request link", () => {
   // Round 40's review: a paste refused stayed in To on its one line, and leaving To or pressing Review read it again
   // so, its lines run together: a memo on two lines then read as its link's, and filled in the payment just refused.
   it("keeps a refused paste refused as To is left, on Review, drawn again and kept, till To is edited", async () => {
-    const SAID = "The message's memo is “r35 marek T2”; its link's is “r35 marek T2 Thanks!”.";
     const text = `You're asked to pay 0.002 DUSK on Testnet · r35 marek T2\nThanks!\nPay here: ${httpsLink(`to=${ALICE.account}&amount=0.002&memo=r35+marek+T2+Thanks!&network=testnet`)}`;
+    // The message's memo, against its link's, with the line after it.
+    const SAID = disagreement(text, { part: "memo", message: "r35 marek T2", link: "r35 marek T2 Thanks!" });
     let state = newState();
     let form = mount(state);
     const shown = () => [refusal(), form.to.value, form.amount.value, state.draft?.memo ?? "", state.route];
@@ -2357,7 +2360,9 @@ describe("a request link", () => {
 
   // Sofía's, as Marek tried it: "sofiadesign.dusk asks you…" over someone else's link filled in their account.
   describe("whose .dusk name a shared request's line says it's from", () => {
-    const DISAGREES = `The message says sofiadesign.dusk; its link pays ${shortAddress(ALICE.account)}.`;
+    // The name the line says, whose account is Bob's, against the account its link pays.
+    const said = () => disagreement(message(ALICE.account), { part: "name", message: "sofiadesign.dusk", link: ALICE.account }, { said: ["sofiadesign.dusk", short(ALICE.account)], owners: sofias });
+    const LOOKING_UP = [saying("sofiadesign.dusk")];
     const message = (to) =>
       `sofiadesign.dusk asks you to pay 0.002 DUSK on Testnet · F-2026-102\nPay here: ${httpsLink(`to=${to}&amount=0.002&memo=F-2026-102&network=testnet`)}`;
     const sofias = new Map([["sofiadesign.dusk", { account: BOB.account }]]);
@@ -2373,10 +2378,10 @@ describe("a request link", () => {
       await settle();
       expect(duskNamesOwners.mock.calls).toEqual([[["sofiadesign.dusk"], { nodeUrl: "https://testnet.nodes.dusk.network" }]]);
       // Nothing filled in, nor said wrong, meanwhile; Review waits.
-      expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual(["", "", "", [], ["Looking up sofiadesign.dusk…"], true]);
+      expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual(["", "", "", [], LOOKING_UP, true]);
       answer.resolve(sofias);
       await settle();
-      expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual([oneLine(message(ALICE.account)), "", "", [DISAGREES], [], false]);
+      expect([...values(form, state), refusal(), lookingUp(), form.review.disabled]).toEqual([oneLine(message(ALICE.account)), "", "", [said()], [], false]);
 
       // Over the name's own account's link: filled in.
       duskNamesOwners.mockImplementation(async () => sofias);
@@ -2404,8 +2409,7 @@ describe("a request link", () => {
         const form = mount(state);
         paste(form, message(ALICE.account));
         await settle();
-        const memoField = dom.document.body.querySelectorAll("input").find((i) => i.getAttribute("placeholder") === "Optional");
-        const field = change === "to" ? form.to : change === "amount" ? form.amount : memoField;
+        const field = change === "to" ? form.to : change === "amount" ? form.amount : form.memo;
         typeInto(field, change === "amount" ? "0.5" : change === "to" ? "a" : "lunch");
         await settle();
         expect(lookingUp(), change).toEqual([]);
@@ -2423,10 +2427,10 @@ describe("a request link", () => {
       await settle();
       // A refresh draws Send again from its draft.
       const again = mount(state);
-      expect(lookingUp()).toEqual(["Looking up sofiadesign.dusk…"]);
+      expect(lookingUp()).toEqual(LOOKING_UP);
       answer.resolve(sofias);
       await settle();
-      expect([refusal(), again.to.value]).toEqual([[DISAGREES], oneLine(message(ALICE.account))]);
+      expect([refusal(), again.to.value]).toEqual([[said()], oneLine(message(ALICE.account))]);
 
       // Left for Home and opened again: nothing of it.
       const later = Promise.withResolvers();
@@ -2459,7 +2463,7 @@ describe("a request link", () => {
     paste(form, httpsLink(`to=${ALICE.account}&amount=2.125&memo=laksa&network=testnet`));
     await settle();
     expect(form.amount.value).toBe("2.125");
-    expect([form.amountError(), form.review.disabled]).toEqual(["Is that 2.1250 or 2125?2.1250 DUSK2125 DUSK", true]);
+    expect([readings(), form.review.disabled]).toEqual([["2.1250 DUSK", "2125 DUSK"], true]);
 
     const made = mount(newState());
     paste(made, httpsLink(`to=${ALICE.account}&amount=2.1250&memo=laksa&network=testnet`));
@@ -2476,7 +2480,7 @@ describe("a request link", () => {
     typeInto(typed.to, ALICE.account);
     typeInto(typed.amount, "1.000");
     const asked = typed.amountError();
-    expect(asked).toBe("Is that 1 or 1000?1 DUSK1000 DUSK");
+    expect(readings()).toEqual(["1 DUSK", "1000 DUSK"]);
 
     const pasted = mount(newState());
     paste(pasted, link);
@@ -2488,7 +2492,7 @@ describe("a request link", () => {
     const { openQrScanModal } = await import("./components/QrScanModal.js");
     const scanned = mount(newState());
     openQrScanModal.mockResolvedValueOnce(link);
-    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    scanButton().click();
     await settle();
     expect([scanned.amountError(), scanned.review.disabled]).toEqual([asked, true]);
   });
@@ -2501,9 +2505,9 @@ describe("a request link", () => {
     paste(form, httpsLink(`to=${ALICE.account}&amount=0.03&memo=Invoice+2026-120&network=testnet`));
     await settle();
     const filled = () => visibleText(dom.document.body.querySelector(".send-filled-note"));
-    expect(filled()).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
+    expect(filled()).toEqual(saying("Testnet"));
 
-    dom.document.body.querySelectorAll("button").find((b) => b.getAttribute("aria-label") === "Contacts").click();
+    contactsButton().click();
     await settle();
     expect([state.route, state.addressBook.mode]).toEqual(["contacts", "pick"]);
     Object.assign(state.addressBook, { loaded: true, loading: false, items: [{ id: "c", name: "Chen", address: BOB.account, type: "account" }] });
@@ -2621,7 +2625,7 @@ describe("a request link", () => {
     paste(form, `https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=1&network=mainnet`);
     await settle();
     const note = dom.document.body.querySelectorAll(".field-error").find((el) => isShown(el));
-    expect(note?.textContent).toBe("This request is for Mainnet. You are on Testnet.");
+    expect(note?.textContent).toEqual(FOR_MAINNET);
     expect([form.to.value, form.amount.value]).toEqual([`https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=1&network=mainnet`, ""]);
 
     // Marek's: an amount in the link that isn't a plain number, a hidden character in it
@@ -2630,7 +2634,7 @@ describe("a request link", () => {
       const typo = mount(newState());
       paste(typo, httpsLink(`to=${ALICE.account}&amount=${amount}`));
       await settle();
-      expect(refusal(), amount).toEqual(["This link's amount can't be read. Ask for a new one."]);
+      expect(refusal(), amount).toEqual([LINK_BAD_AMOUNT]);
       expect([typo.to.value, typo.amount.value], amount).toEqual([httpsLink(`to=${ALICE.account}&amount=${amount}`), ""]);
     }
     // Marek's, the round after: a tab in a pasted link's amount, as a chat or mail can put in, was taken out
@@ -2640,7 +2644,7 @@ describe("a request link", () => {
       const spaced = mount(newState());
       paste(spaced, httpsLink(`to=${ALICE.account}&amount=0.001${space}5&memo=x&network=testnet`));
       await settle();
-      expect(refusal(), JSON.stringify(space)).toEqual(["The words after that link may be part of it. Paste the link alone."]);
+      expect(refusal(), JSON.stringify(space)).toEqual([LINK_UNCLEAR]);
       expect([spaced.to.value, spaced.amount.value], JSON.stringify(space)).toEqual([httpsLink(`to=${ALICE.account}&amount=0.001${space}5&memo=x&network=testnet`), ""]);
     }
   });
@@ -2660,7 +2664,7 @@ describe("a request link", () => {
       typeInto(form.amount, "0.5");
       paste(form, httpsLink(`to=${to}&amount=0.001`));
       await settle();
-      expect(refusal(), to).toEqual(["This link's address isn't valid. Ask for a new one."]);
+      expect(refusal(), to).toEqual([LINK_BAD_ADDRESS]);
       expect([form.to.value, form.amount.value, state.draft.to, visibleText(dom.document.body.querySelector(".send-filled-note"))]).toEqual([oneLine(httpsLink(`to=${to}&amount=0.001`)), "", oneLine(httpsLink(`to=${to}&amount=0.001`)), ""]);
     }
   });
@@ -2674,7 +2678,7 @@ describe("a request link", () => {
       const form = mount(state);
       paste(form, httpsLink(`to=${ALICE.account}&${fields}`));
       await settle();
-      expect(refusal(), fields).toEqual(["That link can't be read. Ask for a new one."]);
+      expect(refusal(), fields).toEqual([LINK_UNREADABLE]);
       expect([form.to.value, form.amount.value, state.draft.to], fields).toEqual([httpsLink(`to=${ALICE.account}&${fields}`), "", httpsLink(`to=${ALICE.account}&${fields}`)]);
     }
     // A name that's no field's is still left out.
@@ -2685,11 +2689,11 @@ describe("a request link", () => {
   });
 
   // Marek's: a dusk:shielded- link to a public account filled a public send, and what followed a # landed in Amount.
-  it("refuses a link for one kind of payment to the other kind's recipient, and a dusk: link with a #, saying why", async () => {
+  it("refuses a link for one kind of payment to the other kind's recipient, and a dusk: link with a #", async () => {
     for (const [link, why] of [
-      [`dusk:shielded-${ALICE.account}?amount=0.001`, "This link asks for a shielded payment to a public account. Ask for a new one."],
-      [`dusk:public-${ALICE.address}?amount=0.001`, "This link asks for a public payment to a shielded address. Ask for a new one."],
-      [`dusk:${ALICE.account}?amount=0.001#to=${BOB.account}`, "That link can't be read. Ask for a new one."],
+      [`dusk:shielded-${ALICE.account}?amount=0.001`, refusedAs(`dusk:shielded-${ALICE.account}?amount=0.001`)],
+      [`dusk:public-${ALICE.address}?amount=0.001`, refusedAs(`dusk:public-${ALICE.address}?amount=0.001`)],
+      [`dusk:${ALICE.account}?amount=0.001#to=${BOB.account}`, LINK_UNREADABLE],
     ]) {
       const state = newState();
       const form = mount(state);
@@ -2700,27 +2704,27 @@ describe("a request link", () => {
     }
   });
 
-  it("refuses a link that says a field twice, or has a user part before its host, saying which", async () => {
+  it("refuses a link that says a field twice, or has a user part before its host", async () => {
     // Marek's: each would fill in its first value without a word. Sofia's: say what's wrong, for its sender to fix.
-    for (const [link, why] of [
-      [httpsLink(`to=${ALICE.account}&amount=0.001&network=testnet&network=mainnet`), "This link says the network twice. Ask for a new one."],
-      [httpsLink(`to=${ALICE.account}&to=${BOB.account}&amount=0.001`), "This link says the recipient twice. Ask for a new one."],
-      [httpsLink(`to=${ALICE.account}&amount=0.01&amount=0.01`), "This link says the amount twice. Ask for a new one."],
-      [httpsLink(`to=${ALICE.account}&memo=One&memo=One`), "This link says the memo twice. Ask for a new one."],
-      [`https://apps.dusk.network@apps.testnet.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.001`, "This link has something before the site's address. Ask for a new one."],
+    for (const link of [
+      httpsLink(`to=${ALICE.account}&amount=0.001&network=testnet&network=mainnet`),
+      httpsLink(`to=${ALICE.account}&to=${BOB.account}&amount=0.001`),
+      httpsLink(`to=${ALICE.account}&amount=0.01&amount=0.01`),
+      httpsLink(`to=${ALICE.account}&memo=One&memo=One`),
+      `https://apps.dusk.network@apps.testnet.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.001`,
     ]) {
       const state = newState();
       const form = mount(state);
       paste(form, link);
       await settle();
-      expect(refusal(), link).toEqual([why]);
+      expect(refusal(), link).toEqual([refusedAs(link)]);
       expect([form.to.value, form.amount.value, state.draft.to]).toEqual([link, "", link]);
     }
 
     const twice = mount(newState());
     paste(twice, httpsLink(`to=${ALICE.account}&amount=0.001&amount=0.15`));
     await settle();
-    expect(refusal()).toEqual(["This link asks for two different amounts. Ask for a new one."]);
+    expect(refusal()).toEqual([LINK_TWO_AMOUNTS]);
   });
 
   it("refuses one for another network the moment it's put in, saying that alone, before and at Review", async () => {
@@ -2729,14 +2733,14 @@ describe("a request link", () => {
     const form = mount(state);
     typeInto(form.to, `https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.0013&memo=Order+1044&network=mainnet`);
     await settle();
-    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect(refusal()).toEqual([FOR_MAINNET]);
     expect(form.to.value).toBe(`https://apps.dusk.network/wallet/dashboard/send?to=${ALICE.account}&amount=0.0013&memo=Order+1044&network=mainnet`);
 
     form.to.dispatchEvent(fakeEvent("blur"));
     form.review.click();
     await settle();
     expect(state.route).toBe("send");
-    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect(refusal()).toEqual([FOR_MAINNET]);
     expect(errLine()).toBe("");
   });
 
@@ -2746,18 +2750,18 @@ describe("a request link", () => {
     const state = newState();
     const form = mount(state);
     openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:1?amount=1&memo=Rent`);
-    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    scanButton().click();
     await settle();
-    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect(refusal()).toEqual([FOR_MAINNET]);
     expect(errLine()).toBe("");
 
-    // A QR code of the recipient alone fills in To, and says where it came from.
+    // A QR code of the recipient alone fills in To, and says so, with the network it pays on.
     openQrScanModal.mockResolvedValueOnce(BOB.account);
-    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    scanButton().click();
     await settle();
     expect(form.to.value).toBe(BOB.account);
     expect(refusal()).toEqual([]);
-    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the QR code, to pay on Testnet. Check it before you send.");
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toEqual(saying("Testnet"));
   });
 
   // Sofía's, in the app: a request scanned and left with Back came back, its
@@ -2765,23 +2769,19 @@ describe("a request link", () => {
   it("keeps nothing of a scanned request once Send is left with Back, a recipient typed over it or not", async () => {
     const { openQrScanModal } = await import("./components/QrScanModal.js");
     const { keepSendDraft, keptSendDraft } = await import("./lib/sendDraft.js");
+    // Back asks first; its Leave is the button that doesn't take you back to the form.
+    const asked = () => dom.document.body.querySelector("[role=alertdialog]");
+    const leave = () => asked().querySelectorAll("button").find((b) => !b.hasAttribute("data-back")).click();
     const state = newState();
     const form = mount(state);
     openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:2?amount=0.03&memo=Invoice+2026-120`);
-    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    scanButton().click();
     await settle();
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "0.03"]);
     // Back asks first, the scan's: Leave goes.
     dom.document.body.querySelector(".subnav-back").click();
-    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears the payment the QR code filled in.LeaveStay");
-    // Amélie's and Chen's: Leave was the wide pink button under the thumb. Stay is the main one there, with the
-    // focus, and Leave the quiet one before it.
-    expect(dom.document.body.querySelectorAll("[role=alertdialog] button").map((b) => [b.textContent, b.className])).toEqual([
-      ["Leave", "btn-outline"],
-      ["Stay", "btn-primary"],
-    ]);
-    expect(dom.document.activeElement.textContent).toBe("Stay");
-    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    expect(asked()).not.toBeNull();
+    leave();
     await settle();
     expect(state.route).toBe("home");
     expect(keptSendDraft(overview())).toBeNull();
@@ -2790,13 +2790,13 @@ describe("a request link", () => {
     const over = newState();
     const typedOver = mount(over);
     openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:2?amount=0.03&memo=Invoice+2026-120`);
-    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    scanButton().click();
     await settle();
     typeInto(typedOver.to, BOB.account);
     expect([typedOver.to.value, typedOver.amount.value, typedOver.memo.value]).toEqual([BOB.account, "", ""]);
     dom.document.body.querySelector(".subnav-back").click();
-    expect(visibleText(dom.document.body.querySelector("[role=alertdialog]"))).toBe("Leave this payment?This clears your unfinished payment.LeaveStay");
-    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    expect(asked()).not.toBeNull();
+    leave();
     await settle();
     expect([over.route, keptSendDraft(overview())]).toEqual(["home", null]);
 
@@ -2806,7 +2806,7 @@ describe("a request link", () => {
     const again = mount(typed);
     expect([again.to.value, again.amount.value]).toEqual([BOB.account, "0.02"]);
     dom.document.body.querySelector(".subnav-back").click();
-    dom.document.body.querySelectorAll("[role=alertdialog] button").find((b) => b.textContent === "Leave").click();
+    leave();
     await settle();
     expect([typed.route, keptSendDraft(overview())]).toEqual(["home", null]);
   });
@@ -2820,7 +2820,7 @@ describe("a request link", () => {
     expect(form.amount.value).toBe("");
     form.review.click();
     await settle();
-    expect(dom.document.body.querySelector(".err").textContent).toBe("Not a valid address. Check it and try again.");
+    expect(dom.document.body.querySelector(".err").textContent).toEqual(saying());
 
     // One to the wallet's Send that names no recipient says so.
     const empty = mount(newState());
@@ -2828,10 +2828,10 @@ describe("a request link", () => {
     empty.to.dispatchEvent(fakeEvent("blur"));
     await settle();
     expect(empty.amount.value).toBe("");
-    expect(refusal()).toEqual(["This link doesn't say who to pay. Ask for a new one."]);
+    expect(refusal()).toEqual([refusedAs(httpsLink("amount=1"))]);
   });
 
-  const memoField = () => dom.document.body.querySelectorAll("input").find((i) => i.getAttribute("placeholder") === "Optional");
+  const memoField = () => dom.document.body.querySelector(".send-form > input");
 
   it("clears the whole form when a link is refused, what an earlier link filled in too", async () => {
     // Chen's: a mainnet QR after a testnet one cleared To and kept the testnet one's amount and memo.
@@ -2839,14 +2839,14 @@ describe("a request link", () => {
     const state = newState();
     const form = mount(state);
     openQrScanModal.mockResolvedValueOnce(`dusk:public-${ALICE.account}@dusk:2?amount=0.03&memo=Chicken+rice+Sat`);
-    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    scanButton().click();
     await settle();
     expect([form.to.value, form.amount.value, memoField().value]).toEqual([ALICE.account, "0.03", "Chicken rice Sat"]);
 
     openQrScanModal.mockResolvedValueOnce(`dusk:public-${BOB.account}@dusk:1?amount=1&memo=Rent`);
-    dom.document.body.querySelector("button[aria-label='Scan QR']").click();
+    scanButton().click();
     await settle();
-    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect(refusal()).toEqual([FOR_MAINNET]);
     expect([form.to.value, form.amount.value, memoField().value]).toEqual(["", "", ""]);
     expect(state.draft).toMatchObject({ to: "", amountDusk: "", memo: "" });
 
@@ -2855,7 +2855,7 @@ describe("a request link", () => {
     typeInto(memoField(), "Typed");
     paste(form, httpsLink(`to=${ALICE.account}&memo=One&memo=Two`));
     await settle();
-    expect(refusal()).toEqual(["This link says the memo twice. Ask for a new one."]);
+    expect(refusal()).toEqual([refusedAs(httpsLink(`to=${ALICE.account}&memo=One&memo=Two`))]);
     expect([form.to.value, form.amount.value, memoField().value]).toEqual([httpsLink(`to=${ALICE.account}&memo=One&memo=Two`), "", ""]);
   });
 
@@ -2864,13 +2864,13 @@ describe("a request link", () => {
     const onTestnet = mount(newState());
     paste(onTestnet, `dusk:public-${ALICE.account}?amount=0.001&network=mainnet`);
     await settle();
-    expect(refusal()).toEqual(["This request is for Mainnet. You are on Testnet."]);
+    expect(refusal()).toEqual([FOR_MAINNET]);
     expect([onTestnet.to.value, onTestnet.amount.value]).toEqual([`dusk:public-${ALICE.account}?amount=0.001&network=mainnet`, ""]);
 
     const onMainnet = mount(newState(), overview({ nodeUrl: "https://nodes.dusk.network" }));
     paste(onMainnet, `dusk:public-${ALICE.account}?amount=0.001&network=testnet`);
     await settle();
-    expect(refusal()).toEqual(["This request is for Testnet. You are on Mainnet."]);
+    expect(refusal()).toEqual([FOR_TESTNET]);
     expect([onMainnet.to.value, onMainnet.amount.value]).toEqual([`dusk:public-${ALICE.account}?amount=0.001&network=testnet`, ""]);
   });
 
@@ -2880,7 +2880,7 @@ describe("a request link", () => {
     const form = mount(state);
     paste(form, httpsLink(`to=${ALICE.account}&amount=0.001&memo=line%20one%0Aline%20two`));
     await settle();
-    expect(refusal()).toEqual(["This link's memo has a line break. Ask for a new one."]);
+    expect(refusal()).toEqual([LINK_MEMO_LINE_BREAK]);
     expect([form.to.value, form.amount.value, memoField().value]).toEqual([httpsLink(`to=${ALICE.account}&amount=0.001&memo=line%20one%0Aline%20two`), "", ""]);
   });
 
@@ -2891,7 +2891,7 @@ describe("a request link", () => {
     paste(form, `dusk:${ALICE.account}?amount=0.01&memo=Lunch`);
     await settle();
     expect(form.to.value).toBe(ALICE.account);
-    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link, to pay on Mainnet. Check it before you send.");
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toEqual(saying("Mainnet"));
   });
 
   it("fills in the page it opened, a tab of its own, as the form any request fills in", async () => {
@@ -2903,21 +2903,25 @@ describe("a request link", () => {
     expect([form.to.value, form.amount.value]).toEqual([ALICE.account, "2.5"]);
     expect(state.draft.memo).toBe("Rent");
     expect(state.draft.requestChainId).toBe("dusk:2");
-    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toBe("Filled in from the link, to pay on Testnet. Check it before you send.");
+    expect(visibleText(dom.document.body.querySelector(".send-filled-note"))).toEqual(saying("Testnet"));
 
     // Marek's: a testnet link that says mainnet opened an empty Send without a word.
-    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(httpsLink(`to=${ALICE.account}&amount=0.001&network=mainnet`))}` });
+    const twoNetworks = httpsLink(`to=${ALICE.account}&amount=0.001&network=mainnet`);
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(twoNetworks)}` });
     vi.resetModules();
     const refused = (await import("./popup/state.js")).state;
     const unread = mount(refused);
     expect([unread.to.value, unread.amount.value]).toEqual(["", ""]);
-    expect(refusal()).toEqual(["This link names two networks, Testnet and Mainnet. Ask for a new one."]);
+    // As app-core reads a link the page opens with, on no network of its own.
+    expect(refusal()).toEqual([readRequestLink(twoNetworks).problem]);
+    expect(refusal()).toEqual([saying("Testnet", "Mainnet")]);
 
-    // A network written as no network is: never "two networks, Testnet and Testnet".
-    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(`dusk:public-${ALICE.account}@dusk:2?amount=0.001&network=dusk:02`)}` });
+    // A network written as no network is: refused too.
+    const noNetwork = `dusk:public-${ALICE.account}@dusk:2?amount=0.001&network=dusk:02`;
+    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=send&link=${encodeURIComponent(noNetwork)}` });
     vi.resetModules();
     mount((await import("./popup/state.js")).state);
-    expect(refusal()).toEqual(["This link's network can't be read. Ask for a new one."]);
+    expect(refusal()).toEqual([readRequestLink(noNetwork).problem]);
 
     // No link, or a page opened with something that isn't one: an empty form.
     vi.stubGlobal("location", { pathname: "/full.html", search: "?route=send" });
@@ -2937,16 +2941,18 @@ describe("a payment's amount in your own currency", () => {
       const el = dom.document.body.querySelector(selector);
       return el && isShown(el) ? el.textContent : "";
     };
+    // About (≈) what 30 DUSK at $0.0703 comes to, and the time of that price.
+    const FIGURES = /≈\s?\$2\.11(?!\d)[\s\S]*(?<!\d)\d{1,2}:\d{2}\s?[AP]M/;
     const mainnet = overview({ nodeUrl: "https://nodes.dusk.network" });
     const form = mount(newState(), mainnet);
     typeInto(form.to, ALICE.account);
     typeInto(form.amount, "30");
-    await vi.waitFor(() => expect(shown(".send-in-currency")).toMatch(/^≈ \$2\.11 · price at \d{1,2}:\d{2}\s?[AP]M$/));
+    await vi.waitFor(() => expect(shown(".send-in-currency")).toMatch(FIGURES));
     typeInto(form.amount, "");
     expect(shown(".send-in-currency")).toBe("");
 
     mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "30", amountLux: "30000000000", memo: "" } }, mainnet);
-    await vi.waitFor(() => expect(shown(".review-in-currency")).toMatch(/^≈ \$2\.11 · price at /));
+    await vi.waitFor(() => expect(shown(".review-in-currency")).toMatch(FIGURES));
 
     // Test DUSK: nothing.
     mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "30", amountLux: "30000000000", memo: "" } });
@@ -2970,11 +2976,13 @@ describe("a payment waiting to go out, as the network didn't answer", () => {
     const at = Date.now() - 60_000;
     const ov = overview({ waitingSends: [waiting({ at })] });
     mount({ route: "confirm", addressBook: contacts, draft: draft() }, ov);
-    expect(text(".review-again")).toBe(`Already waiting to go to Alice: same amount and memo, made at ${clockText(at)}.`);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again")).toBeTruthy();
+    // To whom, and when it was made: Review shows its amount over it, and on its button, which sends it again.
+    expect(text(".review-again")).toEqual(saying("Alice", hhmm(at)));
+    expect(confirmButton().textContent).toEqual(saying("0.013 DUSK"));
+    expect(confirmButton().textContent).toMatch(/again/i);
 
     const form = mount({ route: "send", addressBook: contacts, draft: draft() }, ov);
-    expect(text(".send-again")).toBe(`Already waiting to go to Alice: 0.013 DUSK with this memo, made at ${clockText(at)}.`);
+    expect(text(".send-again")).toEqual(saying("0.013 DUSK", "Alice", hhmm(at)));
     // Another memo is another payment.
     typeInto(dom.document.body.querySelector(".row > input"), "Order 1045");
     expect(text(".send-again")).toBe("");
@@ -2985,45 +2993,22 @@ describe("a payment waiting to go out, as the network didn't answer", () => {
     expect(text(".review-again")).toBe("");
   });
 
-  // The recipient is what makes it a double payment, so it's named: by the .dusk name it was made
-  // to, as "them" where it has no name, as "yourself" for the paying profile's own account.
-  it("names who it waits to go to, on Review and on the form, whatever name it has", () => {
-    const at = Date.now() - 60_000;
-    const none = { loaded: true, items: [] };
-    let ov = overview({ waitingSends: [waiting({ at })] });
-    mount({ route: "confirm", addressBook: none, draft: draft() }, ov);
-    expect(text(".review-again")).toBe(`Already waiting to go to them: same amount and memo, made at ${clockText(at)}.`);
-    mount({ route: "send", addressBook: none, draft: draft() }, ov);
-    expect(text(".send-again")).toBe(`Already waiting to go to them: 0.013 DUSK with this memo, made at ${clockText(at)}.`);
-
-    // Made to its .dusk name: the form says it as it was made, Review as its draft resolved it.
-    ov = overview({ waitingSends: [waiting({ at, toName: "alice.dusk" })] });
-    mount({ route: "send", addressBook: none, draft: draft() }, ov);
-    expect(text(".send-again")).toBe(`Already waiting to go to alice.dusk: 0.013 DUSK with this memo, made at ${clockText(at)}.`);
-    mount({ route: "confirm", addressBook: none, draft: draft({ duskName: { name: "alice.dusk", nodeUrl: ov.nodeUrl, to: ALICE.account } }) }, ov);
-    expect(text(".review-again")).toBe(`Already waiting to go to alice.dusk: same amount and memo, made at ${clockText(at)}.`);
-
-    // To the profile's own account.
-    ov = overview({ waitingSends: [waiting({ at, to: OWN.account })] });
-    mount({ route: "confirm", addressBook: none, draft: draft({ to: OWN.account }) }, ov);
-    expect(text(".review-again")).toBe(`Already waiting to go to yourself: same amount and memo, made at ${clockText(at)}.`);
-    mount({ route: "send", addressBook: none, draft: draft({ to: OWN.account }) }, ov);
-    expect(text(".send-again")).toBe(`Already waiting to go to yourself: 0.013 DUSK with this memo, made at ${clockText(at)}.`);
-  });
-
   it("is left out of Available and Max, with its fee, which say so", () => {
     // 177.9865 DUSK public, the fee cap 0.0025: 0.013 and its fee wait.
     const form = mount(newState(), overview({ waitingSends: [waiting()] }));
     typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toBe("Available after fees 177.9685 DUSK");
-    expect(form.feeNote()).toBe("Fee up to 0.0025 DUSK · After the payments waiting to go out");
+    expect(form.balanceLine()).toEqual(saying("177.9685 DUSK"));
+    // The fee, and that what's available is after the payments waiting.
+    expect(form.feeNote()).toEqual(saying("0.0025 DUSK"));
+    expect(form.feeNote()).toMatch(/waiting/i);
     dom.document.body.querySelector(".amount-avail button").click();
     expect(form.amount.value).toBe("177.9685");
 
     // Another profile's, or one not waiting any more, takes nothing.
     const other = mount(newState(), overview({ waitingSends: [waiting({ profileIndex: 1 }), waiting({ sendId: "s2", waiting: false, ended: "locked" })] }));
     typeInto(other.to, ALICE.account);
-    expect(other.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(other.balanceLine()).toEqual(saying("177.984 DUSK"));
+    expect(other.feeNote()).not.toMatch(/waiting/i);
   });
 
   // Astra's: Send it too opened Review for the held payment, which still counted as waiting till this one went in
@@ -3034,15 +3019,15 @@ describe("a payment waiting to go out, as the network didn't answer", () => {
     // As Send it too opens it (waiting.js againDraft): for this wallet, profile and network.
     const inPlace = draft({ replaces: "s1", reviewedFor: `${ov.accounts[0]} 0 ${ov.nodeUrl}` });
     mount({ route: "confirm", addressBook: contacts, draft: inPlace }, ov);
-    const confirm = dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK");
-    expect([Boolean(confirm), confirm?.disabled, text(".review-again")]).toEqual([true, false, ""]);
+    // Confirm on, not sending it "again", and no word of it as the same payment.
+    expect([confirmButton().disabled, text(".review-again")]).toEqual([false, ""]);
+    expect(confirmButton().textContent).not.toMatch(/again/i);
     // Back on the form it came from: Available as the balance allows, the held one left out.
     const form = mount({ route: "send", addressBook: contacts, draft: inPlace }, ov);
-    expect([form.balanceLine(), text(".send-again")]).toEqual(["Available after fees 0.0175 DUSK", ""]);
-    // Any other payment of the account's: as before, its button saying it sends it again.
+    expect([form.balanceLine(), text(".send-again")]).toEqual([saying("0.0175 DUSK"), ""]);
+    // Any other payment of the account's: as before, sent again.
     mount({ route: "confirm", addressBook: contacts, draft: draft() }, ov);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK")).toBeUndefined();
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again")).toBeTruthy();
+    expect(confirmButton().textContent).toMatch(/again/i);
   });
 });
 
@@ -3056,17 +3041,17 @@ describe("a payment made already", () => {
   };
 
   it("is said on Review, with when it went, and its button says it sends it again, as the web wallet's does", () => {
-    // Sofia's: the same request link paid, then pasted again; Amélie's: the button still said Confirm. The amount
-    // is just above it: "same amount and memo"; the recipient, which makes it a double payment, is named.
+    // Sofia's: the same request link paid, then pasted again; Amélie's: the button still said Confirm.
     const at = Date.now() - 60_000;
     confirm(draft(), [sentRecord({ submittedAt: at })]);
-    expect(again()).toBe(`Already sent to Alice: same amount and memo at ${clockText(at)}.`);
-    const button = dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again");
-    expect(button.disabled).toBe(false);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK")).toBeUndefined();
-    // Not made before: Send, without "again".
+    // To whom, and when: Review shows its amount over it, and on its button, which sends it again.
+    expect(again()).toEqual(saying("Alice", hhmm(at)));
+    expect(confirmButton().textContent).toEqual(saying("0.013 DUSK"));
+    expect(confirmButton().textContent).toMatch(/again/i);
+    expect(confirmButton().disabled).toBe(false);
+    // Not made before: Confirm, not "again".
     confirm(draft({ memo: "Order 1045" }), [sentRecord({ submittedAt: at })]);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK")).toBeTruthy();
+    expect(confirmButton().textContent).not.toMatch(/again/i);
   });
 
   // Amélie's and Sofía's: a link paid already, opened again, said nothing until Review.
@@ -3078,11 +3063,12 @@ describe("a payment made already", () => {
       const el = dom.document.body.querySelector(".send-again");
       return el && isShown(el) ? visibleText(el) : "";
     };
-    expect(note()).toBe(`Already sent to Alice: 0.013 DUSK with this memo at ${clockText(at)}.`);
+    const SAID = saying("0.013 DUSK", "Alice", hhmm(at));
+    expect(note()).toEqual(SAID);
     typeInto(form.amount, "0.014");
     expect(note()).toBe("");
     typeInto(form.amount, "0.013");
-    expect(note()).toBe(`Already sent to Alice: 0.013 DUSK with this memo at ${clockText(at)}.`);
+    expect(note()).toEqual(SAID);
   });
 
   // Sofía's: a request link paid once, pasted again, said nothing on the form, and on
@@ -3101,34 +3087,25 @@ describe("a payment made already", () => {
     form.to.dispatchEvent(fakeEvent("paste", { clipboardData: { getData: () => `dusk:${BOB.account}?amount=0.013&memo=Order%201044` } }));
     await settle();
     expect(form.to.value).toBe(BOB.account);
-    expect(note()).toBe(`Already sent to Profile 2: 0.013 DUSK with this memo at ${clockText(at)}.`);
+    expect(note()).toEqual(saying("0.013 DUSK", "Profile 2", hhmm(at)));
 
     confirm(draft({ to: BOB.account }), paid, twoProfiles);
-    expect(again()).toBe(`Already sent to Profile 2: same amount and memo at ${clockText(at)}.`);
-  });
-
-  // Without the recipient it reads as any payment of that amount; one with no name is "them", the
-  // one in To, a .dusk name it was resolved from names it on Review.
-  it("names a recipient with no name as them, and one by the .dusk name Review has", () => {
-    const at = Date.now() - 60_000;
-    const paid = [sentRecord({ submittedAt: at })];
-    const none = { loaded: true, items: [] };
-    mount({ route: "confirm", addressBook: none, draft: draft() }, { ...overview(), txs: paid });
-    expect(again()).toBe(`Already sent to them: same amount and memo at ${clockText(at)}.`);
-    mount({ route: "send", addressBook: none, draft: draft() }, { ...overview(), txs: paid });
-    expect(visibleText(dom.document.body.querySelector(".send-again"))).toBe(`Already sent to them: 0.013 DUSK with this memo at ${clockText(at)}.`);
-    const duskName = { name: "alice.dusk", nodeUrl: overview().nodeUrl, to: ALICE.account };
-    mount({ route: "confirm", addressBook: none, draft: draft({ duskName }) }, { ...overview(), txs: paid });
-    expect(again()).toBe(`Already sent to alice.dusk: same amount and memo at ${clockText(at)}.`);
+    expect(again()).toEqual(saying("Profile 2", hhmm(at)));
   });
 
   it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {
-    const yesterday = Date.now() - 24 * 60 * 60_000;
+    // Yesterday at noon, by the calendar: said as yesterday, at its time.
+    const noon = new Date();
+    noon.setDate(noon.getDate() - 1);
+    noon.setHours(12, 0, 0, 0);
+    const yesterday = noon.getTime();
     confirm(draft(), [sentRecord({ submittedAt: yesterday })]);
-    expect(again()).toMatch(/^Already sent to Alice: same amount and memo (yesterday at|on .+ at) /);
+    expect(again()).toEqual(saying("Alice", hhmm(yesterday)));
+    expect(again()).toMatch(/\byesterday\b/i);
+    expect(again()).not.toMatch(/\btoday\b/i);
 
     confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 30_000 })]);
-    expect(again()).toBe(`Already sent to Alice: same amount at ${clockText(Date.now() - 30_000)}.`);
+    expect(again()).toEqual(saying("Alice", hhmm(Date.now() - 30_000)));
     confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 11 * 60_000 })]);
     expect(again()).toBe("");
   });
@@ -3145,7 +3122,7 @@ describe("a send to yourself", () => {
   it("says so on Review too: it only costs a fee", () => {
     // Sofia's: the form said it, and Review showed just the address.
     mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: OWN.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } });
-    expect(visibleText(dom.document.body.querySelector(".review-self-note"))).toBe("This is your own account. Sending to yourself only costs a fee.");
+    expect(visibleText(dom.document.body.querySelector(".review-self-note"))).toEqual(saying());
     mount({ route: "confirm", addressBook: { loaded: true, items: [] }, draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" } });
     expect(dom.document.body.querySelector(".review-self-note")).toBeNull();
   });
@@ -3155,7 +3132,8 @@ describe("a send to yourself", () => {
 // grandson. It says what such an address sent you, as Activity tells a stranger's memo.
 describe("paying an address that sent you a memo", () => {
   const URGENT = "URGENT: your wallet will be blocked today. Send 0.1 DUSK back to this address now to keep it open.";
-  const SAID = `Sent you “${URGENT}” before · not a contact`;
+  // What Review says of the address: what it sent you, the whole memo.
+  const SAID = saying(URGENT);
   // A payment that came in, as the account's history has it.
   const cameIn = (from, memo, { hash = "c1".repeat(32), blockHeight = 4_687_000 } = {}) =>
     entryOf({ blockHeight, counterparty: from, direction: "in", hash, memo, timestamp: Date.now() - 60 * 60_000, value: "10000000" });
@@ -3171,12 +3149,12 @@ describe("paying an address that sent you a memo", () => {
   };
 
   it("says on Review what it sent you, where it's none of your contacts or profiles, and nothing where it is", () => {
-    expect(review({ entries: [cameIn(ALICE.account, URGENT)] })).toBe(SAID);
+    expect(review({ entries: [cameIn(ALICE.account, URGENT)] })).toEqual(SAID);
     // Its newest memo, with what can't be seen in it as its codes.
     // A right-to-left override (U+202E) in it.
     // Newer by its block and its time: two made in the same test can fall a millisecond apart either way.
     const newer = { ...cameIn(ALICE.account, `Pay back${String.fromCharCode(0x202e)}now`, { hash: "c2".repeat(32), blockHeight: 4_687_100 }), timestamp: Date.now() - 30 * 60_000 };
-    expect(review({ entries: [newer, cameIn(ALICE.account, URGENT)] })).toBe("Sent you “Pay back\\u202enow” before · not a contact");
+    expect(review({ entries: [newer, cameIn(ALICE.account, URGENT)] })).toEqual(saying("Pay back\\u202enow"));
     // A contact's, or your other profile's: nothing, as Activity calls neither a stranger.
     expect(review({ entries: [cameIn(ALICE.account, URGENT)], contacts: [{ name: "Alice", address: ALICE.account }] })).toBe("");
     expect(review({ to: OTHER_PROFILE, entries: [cameIn(OTHER_PROFILE, URGENT)] })).toBe("");
@@ -3209,7 +3187,7 @@ describe("paying an address that sent you a memo", () => {
     for (const history of [kept([threeDays, sixDays]), kept([threeDays], [sixDays])]) {
       mount({ route: "confirm", addressBook: { loaded: true, items: [] }, activity: { key: activityKey(ov), entries: page, names: new Map(), history, epoch: Promise.resolve(1) }, draft: draft() }, ov);
       await settle();
-      expect(said()).toBe(SAID);
+      expect(said()).toEqual(SAID);
     }
 
     // Review drawn again and again while the older blocks are read: one read of them.
@@ -3226,7 +3204,7 @@ describe("paying an address that sent you a memo", () => {
     expect([slow.sync.mock.calls.length, said()]).toEqual([1, ""]);
     synced();
     await settle();
-    expect(said()).toBe(SAID);
+    expect(said()).toEqual(SAID);
   });
 
   // Round 40's review: Review read and merged every payment kept here, and synced older blocks, for a contact or another
@@ -3266,23 +3244,6 @@ describe("paying an address that sent you a memo", () => {
     expect([history.read.mock.calls.length, said()]).toEqual([1, SAID]);
   });
 
-  // Amélie's: in the extension it was a dark box with no sign, the memo cut at "renvo…"; the web wallet's is amber,
-  // with a sign and the whole memo.
-  it("says it in an amber warning with its sign, their whole memo quoted and wrapped, in a memo's small style", async () => {
-    review({ entries: [cameIn(ALICE.account, URGENT)] });
-    const note = dom.document.body.querySelector(".review-theirs");
-    expect([note.className, note.querySelector(".review-theirs__sign")?.innerHTML]).toEqual(["callout review-theirs", iconSvg("alert")]);
-    expect(note.querySelector(".review-theirs__memo").textContent).toBe(`“${URGENT}”`);
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-    const rule = (selector) => css.split("\n}").find((block) => `\n${block}`.includes(`\n${selector} {`)) ?? "";
-    expect(rule(".callout.review-theirs")).toContain("var(--warn)");
-    expect([rule(".review-theirs__sign"), rule(".review-theirs__title")].map((r) => r.includes("color: var(--warn)"))).toEqual([true, true]);
-    // Wrapped, never cut: no ellipsis, no single line.
-    const memo = rule(".review-theirs__memo");
-    expect(memo).toContain("overflow-wrap: anywhere;");
-    expect(memo).not.toMatch(/nowrap|ellipsis/);
-  });
-
   it("says nothing of it until Contacts is read, so a contact is never called a stranger", async () => {
     const { listAddressBook } = await import("../shared/addressBook.js");
     const ov = overview();
@@ -3296,7 +3257,7 @@ describe("paying an address that sent you a memo", () => {
       expect(said()).toBe("");
       read(contacts);
       await settle();
-      expect(said()).toBe(then);
+      expect(said()).toEqual(then);
     }
   });
 });

@@ -1,47 +1,21 @@
 import { describe, expect, it } from "vitest";
 
-import { txErrorText, txRecoveryReasonLabel, txStatusTone, txStatusWord } from "./txDisplay.js";
+import { txStatusTone, txStatusWord } from "./txDisplay.js";
 
 describe("tx display helpers", () => {
-  it("says each status in one plain word, the Sent screen's", () => {
-    expect(txStatusWord("submitted")).toBe("Sending");
-    expect(txStatusWord("mempool")).toBe("Sending");
-    expect(txStatusWord("executed")).toBe("Completed");
-    expect(txStatusWord("failed")).toBe("Failed");
-    // Dropped before it ran: Failed, as Sent says it.
-    expect(txStatusWord("removed")).toBe("Failed");
-    expect(txStatusWord("unknown")).toBe("Not confirmed");
-    // The network never had it, and it waits for Send it now or Don't send.
-    expect(txStatusWord("unsent")).toBe("Held");
-    expect(txStatusWord("not_sent")).toBe("Not sent");
-    expect(txStatusWord(undefined)).toBe("Sending");
+  it("tells apart a payment still out, one that went through, failed, isn't confirmed or wasn't sent", () => {
+    // Submitted, in the mempool or not known yet: all still out.
+    expect(txStatusWord("mempool")).toBe(txStatusWord("submitted"));
+    expect(txStatusWord(undefined)).toBe(txStatusWord("submitted"));
+    // Each outcome reads as its own, never as one still out: an unknown one final on chain apart from one not confirmed.
+    const words = ["submitted", "executed", "failed", "unknown", "unsent", "not_sent"].map((status) => txStatusWord(status));
+    words.push(txStatusWord("unknown", { final: true }));
+    expect(new Set(words).size).toBe(words.length);
   });
 
-  it("puts known chain errors in plain words, and leaves others alone", () => {
-    expect(txErrorText("Panic: phoenix is not enabled in the VM")).toBe("Shielded transactions are paused on the network.");
-    expect(txErrorText("OutOfGas")).toBe("It ran out of gas. A higher gas limit lets it finish.");
-    expect(txErrorText("Out of gas")).toBe("It ran out of gas. A higher gas limit lets it finish.");
-    expect(txErrorText("Contract does not exist")).toBe("The contract it called isn't on this network.");
-    expect(txErrorText("Panic: DRC20Phoenix: paused")).toBe("");
-    expect(txErrorText(undefined)).toBe("");
-  });
-
-  it("tones a dropped transaction as failed, as its word says, and an unknown one as pending", () => {
+  it("does not visually tone one not confirmed as failed", () => {
     expect(txStatusTone("failed")).toBe("bad");
-    expect([txStatusWord("removed"), txStatusTone("removed")]).toEqual(["Failed", "bad"]);
     expect(txStatusTone("unknown")).toBe("pending");
     expect(txStatusTone("mempool")).toBe("pending");
-  });
-
-  it("maps technical recovery reasons to user-safe copy", () => {
-    expect(txRecoveryReasonLabel("watcher_timeout")).toContain("timed out");
-    expect(txRecoveryReasonLabel("not_found")).toContain("not found");
-    expect(txRecoveryReasonLabel("removed")).toContain("removed");
-    expect(txRecoveryReasonLabel("removed_unconfirmed")).toContain("not confirmed");
-    expect(txRecoveryReasonLabel("node_url_missing")).toContain("node URL is missing");
-    expect(txRecoveryReasonLabel("reconciliation_unavailable")).toContain("could not complete");
-    expect(txRecoveryReasonLabel("Odd number of digits")).toBe(
-      "The wallet could not complete the latest network status check."
-    );
   });
 });

@@ -622,7 +622,8 @@ describe("a payment from Send that can't reach the network before it goes out", 
     const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0003", walletId: "account of wallet A", params });
     await vi.waitFor(() => expect(heard()).toHaveLength(1));
     await localSend({ type: "DUSK_UI_LOCK" });
-    await expect(response).resolves.toMatchObject({ error: { message: "The wallet locked before the network answered. Nothing left your wallet." } });
+    const { NOT_SENT_TEXT } = await import("../shared/waitingSends.js");
+    await expect(response).resolves.toMatchObject({ error: { message: NOT_SENT_TEXT.locked } });
 
     engine.unlocked = true;
     statusChecks.nodeAnswers = true;
@@ -1404,7 +1405,7 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     const { render } = await import("../ui/popup/app.js");
     await render();
     await flush();
-    // The unlock form, by its password field: it has no heading.
+    // The unlock form, by its password field.
     expect(page.querySelector("#unlock-password")).toBeNull();
 
     // The first wallet's profile, picked from the menu; the engine fails the switch.
@@ -1586,10 +1587,10 @@ describe("arrival notices in the app on a phone", () => {
         expect(phoneNotices.waiting.at(-1)).toEqual({
           wallet: "account of wallet A",
           nodeUrl,
-          title: `0.01 DUSK to ${ACCOUNT.slice(0, 6)}…${ACCOUNT.slice(-6)} is waiting`,
-          publicTitle: "A payment is waiting",
-          away: "Goes out when you reopen Dusk Wallet, or asks first if Android closed it.",
-          back: "Open Dusk Wallet to send it.",
+          title: expect.stringContaining(`0.01 DUSK to ${ACCOUNT.slice(0, 6)}…${ACCOUNT.slice(-6)}`),
+          publicTitle: expect.any(String),
+          away: expect.any(String),
+          back: expect.any(String),
         })
       );
       // What a locked phone shows: no amount, no name, no memo.

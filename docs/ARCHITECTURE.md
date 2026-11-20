@@ -477,7 +477,6 @@ Key points:
 
 ```bash
 npm run test           # Run tests
-npm run test:coverage  # With coverage report
 ```
 
 Tests use Vitest and live alongside source files (`*.test.js`).
