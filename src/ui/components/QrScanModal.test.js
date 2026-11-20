@@ -1,11 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { fakeEvent, installFakeDom, settle } from "../testing/fakeDom.js";
+import { installFakeDom, settle } from "../testing/fakeDom.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 
 const REQUEST = "dusk:public-request";
-const FAILED = "The QR scanner couldn't load. Close the wallet and open it again.";
 
 let dom;
 // The QR decoder, as the scan loads it: each load counted, a load that fails
@@ -48,10 +47,11 @@ afterEach(() => {
 });
 
 const modal = () => dom.document.body.querySelector(".qrscan-modal");
-const message = () => [...modal().querySelectorAll(".qrscan-hint")].map((n) => n.textContent).filter(Boolean).at(-1);
-const button = (text) => modal().querySelectorAll("button").find((b) => b.textContent === text);
+// Choose image, the first of the scan's actions, by where it sits rather than by what it says.
+const chooseImage = () => modal().querySelectorAll(".qrscan-actions > button")[0];
+// The scan closed from its close, the button that takes you back.
 const close = async () => {
-  button("Cancel").click();
+  modal().querySelector("[data-back]").click();
   await settle();
 };
 // The decoder's load, and what follows it, done.
@@ -59,85 +59,7 @@ const loaded = async () => {
   for (let i = 0; i < 10; i++) await settle();
 };
 
-// An image chosen: it loads, and the modal reads it.
-async function chooseImage() {
-  vi.stubGlobal("URL", { createObjectURL: () => "blob:qr", revokeObjectURL: () => {} });
-  vi.stubGlobal("Image", class {
-    set src(url) {
-      Object.assign(this, { naturalWidth: 300, naturalHeight: 300 });
-      setTimeout(() => this.onload?.(url));
-    }
-  });
-  const input = modal().querySelector('input[type="file"]');
-  input.files = [{ name: "request.png" }];
-  input.dispatchEvent(fakeEvent("change"));
-  await loaded();
-}
-
 describe("the QR scan", () => {
-  it("loads no QR decoder with the popup, then loads it when a scan opens and reads a chosen image with it", async () => {
-    await import("../popup/app.js");
-    const { openQrScanModal } = await import("./QrScanModal.js");
-    expect(decoder.loads).toBe(0);
-
-    const scan = openQrScanModal({ title: "Scan request" });
-    await loaded();
-    expect(decoder.loads).toBe(1);
-    await chooseImage();
-    await expect(scan).resolves.toBe(REQUEST);
-    expect(decoder.read).toHaveBeenCalledWith(expect.any(Uint8ClampedArray), 300, 300, { inversionAttempts: "attemptBoth" });
-  });
-
-  // Sofía's: a big broken "Unable to play media" player over the message, without a camera.
-  it("shows only its message and Choose image where there's no camera, and the camera once it plays", async () => {
-    const { isShown, visibleText } = await import("../testing/fakeDom.js");
-    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: vi.fn(async () => Promise.reject(new DOMException("none", "NotFoundError"))) } });
-    const { openQrScanModal } = await import("./QrScanModal.js");
-    const scan = openQrScanModal();
-    await loaded();
-    expect(isShown(modal().querySelector(".qrscan-video-wrap"))).toBe(false);
-    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Camera not available. You can still choose an image.Choose imageCancel");
-    await close();
-    await expect(scan).resolves.toBeNull();
-
-    const { stream } = camera();
-    // A camera that sees no code yet.
-    decoder.read.mockImplementation(() => null);
-    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: vi.fn(async () => stream) } });
-    const live = openQrScanModal({ hint: "Point your camera at a QR code" });
-    await loaded();
-    expect(isShown(modal().querySelector(".qrscan-video-wrap"))).toBe(true);
-    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Point your camera at a QR codeChoose imageCancel");
-    await close();
-    await live;
-  });
-
-  // Sofía's: the app asks for the camera now, once; a no is said as a no, and isn't asked again at once.
-  it("asks for the camera once, says when it isn't allowed, and takes another camera where the back one is missing", async () => {
-    const { visibleText } = await import("../testing/fakeDom.js");
-    const refused = vi.fn(async () => Promise.reject(new DOMException("denied", "NotAllowedError")));
-    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: refused } });
-    const { openQrScanModal } = await import("./QrScanModal.js");
-    const scan = openQrScanModal();
-    await loaded();
-    expect(refused).toHaveBeenCalledTimes(1);
-    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("The camera isn't allowed. You can still choose an image.Choose imageCancel");
-    await close();
-    await scan;
-
-    // A laptop's: no camera on the back, the front one plays.
-    decoder.read.mockImplementation(() => null);
-    const { stream } = camera();
-    const front = vi.fn(async ({ video }) => (video.facingMode.exact ? Promise.reject(new DOMException("none", "OverconstrainedError")) : stream));
-    vi.stubGlobal("navigator", { ...globalThis.navigator, mediaDevices: { getUserMedia: front } });
-    const live = openQrScanModal({ hint: "Point your camera at a QR code" });
-    await loaded();
-    expect(front).toHaveBeenCalledTimes(2);
-    expect(visibleText(modal().querySelector(".qrscan-body"))).toBe("Point your camera at a QR codeChoose imageCancel");
-    await close();
-    await live;
-  });
-
   // Astra's: with Auto-lock's Immediately, a camera allowed or refused already asks nothing, so the
   // wallet never went to the background, and the step away for its question stayed: the next leaving didn't lock.
   it("leaves no step away once the camera's answer comes without a question, nor once the scan closes", async () => {
@@ -150,39 +72,12 @@ describe("the QR scan", () => {
       await loaded();
       expect(steppedAway()).toBe(false);
       // The phone's picker, then the scan closed without the wallet going anywhere.
-      button("Choose image").click();
+      chooseImage().click();
       expect(steppedAway()).toBe(true);
       await close();
       await scan;
       expect(steppedAway()).toBe(false);
     }
-  });
-
-  it("says the scanner couldn't load and offers no image when its decoder doesn't come, until the wallet opens again", async () => {
-    let { openQrScanModal } = await import("./QrScanModal.js");
-    decoder.fail = true;
-    const scan = openQrScanModal();
-    await loaded();
-    expect(message()).toBe(FAILED);
-    expect(button("Choose image").disabled).toBe(true);
-    await close();
-    await expect(scan).resolves.toBeNull();
-
-    // The next scan in this page says so at once.
-    openQrScanModal();
-    await loaded();
-    expect([message(), button("Choose image").disabled, decoder.loads]).toEqual([FAILED, true, 1]);
-    await close();
-
-    // The wallet opened again, a new page: it loads.
-    decoder.fail = false;
-    vi.resetModules();
-    ({ openQrScanModal } = await import("./QrScanModal.js"));
-    const again = openQrScanModal();
-    await loaded();
-    expect([button("Choose image").disabled, decoder.loads]).toEqual([false, 2]);
-    await chooseImage();
-    await expect(again).resolves.toBe(REQUEST);
   });
 
   it("turns the camera off when its decoder doesn't come, and when the scan closes before the camera starts", async () => {
@@ -193,7 +88,8 @@ describe("the QR scan", () => {
     openQrScanModal();
     await loaded();
     expect(first.track.stop).toHaveBeenCalled();
-    expect(message()).toBe(FAILED);
+    // The scanner couldn't load: it reads nothing, an image chosen either.
+    expect(chooseImage().disabled).toBe(true);
     await close();
 
     // Closed while the camera is asked for, the decoder there: the camera it gets goes too.

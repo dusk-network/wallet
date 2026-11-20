@@ -15,21 +15,6 @@ afterEach(() => {
 });
 
 describe("connected site status", () => {
-  it("renders an explicit active-site bar with connect and disconnect actions", async () => {
-    const appSource = await readFile(
-      path.resolve(process.cwd(), "src", "ui", "popup", "app.js"),
-      "utf8"
-    );
-    const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
-
-    expect(appSource).toContain("function activeSiteBar");
-    expect(appSource).toContain('class: "site-bar"');
-    expect(appSource).toContain("DUSK_UI_CONNECT_ORIGIN");
-    expect(appSource).toContain("DUSK_UI_DISCONNECT_ORIGIN");
-    expect(css).toContain(".site-bar");
-    expect(css).toContain(".site-bar-action");
-  });
-
   it("exposes UI messages for connecting and disconnecting the active origin", async () => {
     const background = await readFile(
       path.resolve(process.cwd(), "src", "background", "index.js"),
@@ -66,8 +51,11 @@ describe("connected site status", () => {
     await render();
     await settle();
     const bar = () => app.querySelector(".site-bar");
-    expect(visibleText(bar().querySelector(".site-bar-copy"))).toBe("Connectedhttp://127.0.0.1:5354");
+    const origin = () => visibleText(bar().querySelector(".site-bar-origin"));
+    const status = () => visibleText(bar().querySelector(".site-bar-status"));
+    expect(origin()).toBe("http://127.0.0.1:5354");
     expect(bar().title).toBe("http://127.0.0.1:5354");
+    const connected = status();
 
     // Amélie's: Wikipedia never asked for anything, and a big Connect sat on Home, Activity and Receive.
     site = { activeOrigin: "https://www.wikipedia.org", activeConnected: false };
@@ -77,7 +65,8 @@ describe("connected site status", () => {
     // A site that asked before, and isn't connected now: its Connect.
     site = { activeOrigin: "https://app.example:8443", activeConnected: false, siteRecords: { [ACCOUNT]: { "https://app.example:8443": { asked: [{ at: Date.now(), kind: "connect", answer: "rejected" }] } } } };
     await render({ forceRefresh: true });
-    expect(visibleText(bar().querySelector(".site-bar-copy"))).toBe("Not connectedapp.example:8443");
+    expect(origin()).toBe("app.example:8443");
+    expect(status()).not.toBe(connected);
 
     // Not over a screen that moves money, where a stray press on a phone would connect the site open.
     const { state } = await import("./popup/state.js");

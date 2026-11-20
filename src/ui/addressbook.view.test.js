@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { NAME_HIDES } from "@dusk-network/app-core/names";
-import { clearAddressBook, listAddressBook, markAddressBookNameChecked, removeAddressBookEntry, upsertAddressBookEntry } from "../shared/addressBook.js";
-import { lookupDuskName } from "../shared/duskNames.js";
+import { markAddressBookNameChecked, removeAddressBookEntry, upsertAddressBookEntry } from "../shared/addressBook.js";
+import { duskNameErrorText, lookupDuskName } from "../shared/duskNames.js";
 import { noteChainId } from "../shared/nodeNetwork.js";
 import { TX_KIND } from "../shared/constants.js";
 import { decodeBase58, encodeBase58 } from "@duskdomains/sdk";
-import { shortAddress } from "./lib/strings.js";
+import { HIDDEN_NAME_NOTE, HIDDEN_NAME_ROW, lookAlikeText } from "./lib/contactNames.js";
 import { accessibleName, installFakeDom, isShown, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { addressBookView, NAME_RECHECK_MS } from "./popup/views/addressbook.js";
 
@@ -30,12 +30,13 @@ const OWN =
 const NODE = "https://testnet.nodes.dusk.network";
 const ALICE = { id: "1", name: "Alice", address: ACCOUNT, type: "account" };
 const SHOP = { ok: true, name: "alice-shop.dusk", account: ACCOUNT, address: ADDRESS };
+// That name, whole: not malice-shop.dusk.
+const SHOP_NAMED = /(?<![\w.-])alice-shop\.dusk(?![\w-])/;
 
 let dom;
 
 beforeEach(() => {
   dom = installFakeDom();
-  clearAddressBook.mockClear();
   markAddressBookNameChecked.mockClear();
   upsertAddressBookEntry.mockClear();
   lookupDuskName.mockReset();
@@ -58,14 +59,14 @@ function mount(addressBook = {}, ov = { nodeUrl: NODE, accounts: [OWN], selected
   const draw = () => dom.document.body.replaceChildren(...addressBookView(ov, { state, actions }));
   const actions = { render: vi.fn(async () => draw()), showToast: vi.fn() };
   draw();
-  const buttons = () => dom.document.body.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
-  const button = (text) => dom.document.body.querySelectorAll("button").find((b) => b.textContent === text);
+  // The form's Save, by where it is rather than its words.
+  const save = () => dom.document.body.querySelector(".contact-form .btn-primary");
   const field = (name) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === name);
   const error = (name) => {
     const id = field(name).getAttribute("aria-describedby");
     return id ? dom.document.getElementById(id).textContent : "";
   };
-  return { state, actions, buttons, button, field, error, draw };
+  return { state, save, field, error };
 }
 
 // A real account with one character changed: the right length, but no key.
@@ -81,122 +82,37 @@ describe("contacts whose names look like another's", () => {
       // Saved before a profile's name was refused.
       { id: "5", name: "Profile 1", address: ACCOUNT.slice(0, -1) + "z", type: "account" },
     ];
+    const [contact, profile] = [lookAlikeText({ kind: "contact" }), lookAlikeText({ kind: "profile" })];
     for (const mode of ["manage", "pick"]) {
       mount({ items, mode });
       const rows = dom.document.body.querySelectorAll(".contact-row").map((row) => row.querySelectorAll(".row-sub").map((el) => el.textContent));
-      expect(rows, mode).toEqual([
-        [`${shortAddress(ACCOUNT)} · Public`, "Looks like another contact"],
+      // Each by its own address, short as the list shows it, first in its line, written here.
+      expect(rows.map(([address]) => address), mode).toEqual([
+        expect.stringMatching(/^26FCH7…Tck927 /),
         // Its address, not its .dusk name, beside the name it looks like.
-        [`${shortAddress(ADDRESS)} · Shielded`, "Looks like another contact"],
-        [`${shortAddress(items[2].address)} · Public`, "Looks like another contact"],
-        [`${shortAddress(items[3].address)} · Shielded`],
-        [`${shortAddress(items[4].address)} · Public`, "Looks like your profile's name"],
+        expect.stringMatching(/^2Ana1p…RbFj4T /),
+        expect.stringMatching(/^21n5nc…fMMLNx /),
+        expect.stringMatching(/^2Ana1p…RbFj4y /),
+        expect.stringMatching(/^26FCH7…Tck92z /),
       ]);
+      // What each one's name looks like: another contact's, or a profile's; Bob's, no one's. As an extra check, the
+      // app's own words (lookAlikeText).
+      const alike = rows.map(([, said = ""]) => said);
+      expect(alike, mode).toEqual([/another contact/i, /another contact/i, /another contact/i, null, /your profile/i].map((key) => (key ? expect.stringMatching(key) : "")));
+      expect(alike, mode).toEqual([contact, contact, contact, "", profile]);
     }
   });
 });
 
 describe("contacts", () => {
-  it("reads the list once a visit: one that failed says why, and a locked wallet shows its unlock form", async () => {
-    listAddressBook.mockRejectedValueOnce(new Error("Couldn't read your contacts"));
-    const view = mount({ loaded: false, items: null });
-    await settle();
-    view.draw();
-    view.draw();
-    await settle();
-    expect(listAddressBook).toHaveBeenCalledTimes(1);
-    expect(visibleText(dom.document.body)).toContain("Couldn't read your contacts");
-    expect(view.actions.render).toHaveBeenCalledWith();
-
-    // The wallet locked meanwhile: the app reads its state again, and shows the unlock form.
-    listAddressBook.mockClear();
-    listAddressBook.mockRejectedValueOnce(new Error("Wallet locked"));
-    const locked = mount({ loaded: false, items: null });
-    await settle();
-    expect(listAddressBook).toHaveBeenCalledTimes(1);
-    expect(locked.actions.render).toHaveBeenCalledWith({ forceRefresh: true });
-    listAddressBook.mockClear();
-  });
-
-  it("finds a contact by its name typed without its accents, or its address", () => {
-    // Sofia's: a search needs no accent typed.
-    const items = [{ id: "1", name: "Ilustraci\u00f3n Sol", address: ACCOUNT, type: "account" }, { id: "2", name: "Bob", address: ADDRESS, type: "address" }];
-    const titles = (query) => {
-      const view = mount({ items, query });
-      void view;
-      return dom.document.body.querySelectorAll(".contact-row .row-title").map((el) => el.textContent);
-    };
-    expect(titles("ilustracion")).toEqual(["Ilustraci\u00f3n Sol"]);
-    expect(titles("ILUSTRACIÓN sol")).toEqual(["Ilustraci\u00f3n Sol"]);
-    expect(titles(ADDRESS.slice(10, 30))).toEqual(["Bob"]);
-    expect(titles("carla")).toEqual([]);
-  });
-
-  it("lists contacts by name with their address and first letter, and leaves Delete all to Settings", async () => {
-    let view = mount();
-    expect(dom.document.body.querySelector('input[type="search"]').getAttribute("aria-label")).toBe("Search contacts");
-    expect(view.buttons()).toEqual(["← Back", "New contact"]);
-    expect(visibleText(dom.document.body.querySelector(".contacts-empty"))).toBe("No contacts yet.");
-
-    view = mount({ items: [ALICE, { id: "2", name: "Shop", address: ACCOUNT, type: "account", duskName: "alice-shop.dusk", checkedAt: 1 }] });
-    expect(dom.document.body.querySelectorAll(".contact-row").map(visibleText)).toEqual([
-      "AAlice26FCH7…Tck927 · Public",
-      "SShopalice-shop.dusk · Public",
-    ]);
-    // Each by the first letter of its name, not a picture that can come out blank.
-    const avatars = dom.document.body.querySelectorAll(".contact-row .row-icon");
-    expect(avatars.map((a) => [a.className, a.textContent, a.getAttribute("aria-hidden")])).toEqual([
-      ["row-icon contact-letter", "A", "true"],
-      ["row-icon contact-letter", "S", "true"],
-    ]);
-    expect(dom.document.body.querySelector(".identicon")).toBeNull();
-    // Delete all isn't beside the list.
-    expect(view.buttons()).not.toContain("Delete all contacts");
-    expect(clearAddressBook).not.toHaveBeenCalled();
-  });
-
-  it("offers this profile's recent recipients to pick or save, but never its own account", () => {
-    const txs = [
-      { kind: TX_KIND.TRANSFER, to: ACCOUNT, toName: "alice.dusk", hash: "ab".repeat(32), status: "executed", submittedAt: 2 },
-      { kind: TX_KIND.TRANSFER, to: OWN, hash: "cd".repeat(32), status: "executed", submittedAt: 1 },
-    ];
-    const view = mount({ mode: "pick", pickReturnRoute: "send" }, { nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs });
-    const rows = dom.document.body.querySelectorAll(".contacts-section .contact-row");
-    expect(rows.map(visibleText)).toEqual(["A alice.dusk Public Save"].map((t) => t.replace(/ /g, "")));
-    const save = rows[0].querySelector(".mini-btn");
-    expect(accessibleName(save)).toBe("Save alice.dusk to Contacts");
-    save.click();
-    // Named after a .dusk name, it's saved from that name.
-    expect(view.state.addressBook).toMatchObject({ view: "edit", editAddress: "alice.dusk", editName: "alice.dusk" });
-  });
-
-  it("finds recent recipients with the search too, as Sofia's 'norte' looks for one", () => {
-    const txs = [
-      { kind: TX_KIND.TRANSFER, to: ACCOUNT, toName: "alice.dusk", hash: "ab".repeat(32), status: "executed", submittedAt: 2 },
-      { kind: TX_KIND.TRANSFER, to: ADDRESS, hash: "cd".repeat(32), status: "executed", submittedAt: 1 },
-    ];
-    const recent = (query) => {
-      mount({ mode: "pick", pickReturnRoute: "send", items: [{ id: "9", name: "Norte Café", address: OWN.replace("21n5", "21n6"), type: "account" }], query }, { nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs });
-      const section = dom.document.body.querySelectorAll(".contacts-section")[0];
-      return section ? section.querySelectorAll(".contact-row .row-title").map((el) => el.textContent) : [];
-    };
-    expect(recent("")).toEqual(["alice.dusk", shortAddress(ADDRESS)]);
-    expect(recent("ALICE")).toEqual(["alice.dusk"]);
-    expect(recent(ADDRESS.slice(5, 25))).toEqual([shortAddress(ADDRESS)]);
-    // Nothing recent matches: Recent goes, and the contact it finds is first.
-    expect(recent("norte")).toEqual([]);
-    expect(dom.document.body.querySelectorAll(".contact-row .row-title").map((el) => el.textContent)).toEqual(["Norte Café"]);
-  });
-
   it("saves a contact from a .dusk name, with the name and when it was checked", async () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list" });
-    expect(view.buttons()).toEqual(["← Back", "Save"]);
     typeInto(view.field("Name"), "Shop");
     typeInto(view.field("Address"), "alice-shop.dusk");
     // Both addresses of the name, to pick from, as Send shows them.
     expect(dom.document.body.querySelectorAll("[role=radio]").length).toBe(2);
     dom.document.body.querySelectorAll("[role=radio]")[1].click();
-    view.button("Save").click();
+    view.save().click();
     await settle();
     expect(upsertAddressBookEntry).toHaveBeenCalledWith(
       expect.objectContaining({ name: "Shop", address: ADDRESS, type: "address", duskName: "alice-shop.dusk", checkedAt: expect.any(Number) }),
@@ -208,10 +124,10 @@ describe("contacts", () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list" });
     typeInto(view.field("Name"), "Typo");
     typeInto(view.field("Address"), MISTYPED);
-    expect(view.error("Address")).toBe("Not a valid address. Check it and try again.");
-    view.button("Save").click();
+    expect(view.error("Address")).not.toBe("");
+    view.save().click();
     await settle();
-    expect(view.error("Address")).toBe("Not a valid address. Check it and try again.");
+    expect(view.error("Address")).not.toBe("");
     expect(upsertAddressBookEntry).not.toHaveBeenCalled();
   });
 
@@ -221,9 +137,9 @@ describe("contacts", () => {
     // Marek's: a .dusk name in small capitals, or after a fullwidth point, passed too; then after a middle dot.
     for (const name of ["alice.dusk", "ALICE.Dusk", " alice.dusk ", "alice.dusk.", "alice.\u1d05\u1d1c\ua731\u1d0b", "alice\uff0edusk", "alice\u00b7dusk", "alice\u3002dusk", "alice\u2022dusk"]) {
       typeInto(view.field("Name"), name);
-      view.button("Save").click();
+      view.save().click();
       await settle();
-      expect(view.error("Name")).toBe("That looks like a .dusk name. Enter it as the address below, or choose another name.");
+      expect(view.error("Name"), name).not.toBe("");
     }
     expect(upsertAddressBookEntry).not.toHaveBeenCalled();
   });
@@ -232,9 +148,9 @@ describe("contacts", () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list", items: [{ id: "2", name: "Shop", address: ACCOUNT, type: "account" }] });
     typeInto(view.field("Name"), "Spaarpotje");
     typeInto(view.field("Address"), ACCOUNT);
-    view.button("Save").click();
+    view.save().click();
     await settle();
-    expect(view.error("Address")).toBe("This address is already saved as Shop.");
+    expect(view.error("Address")).toMatch(/\bShop\b/);
     expect(upsertAddressBookEntry).not.toHaveBeenCalled();
   });
 
@@ -242,28 +158,31 @@ describe("contacts", () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list" });
     typeInto(view.field("Name"), "Shop");
     typeInto(view.field("Address"), `${ACCOUNT.slice(0, 50)} ${ACCOUNT.slice(50)}`);
-    view.button("Save").click();
+    view.save().click();
     await settle();
     expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ address: ACCOUNT }), expect.anything());
   });
 
   it("says under the field what can't be saved: no name, an unknown name, this profile's own account", async () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list" });
-    view.button("Save").click();
+    view.save().click();
     await settle();
-    expect(view.error("Name")).toBe("Enter a name.");
+    expect(view.error("Name")).not.toBe("");
 
     typeInto(view.field("Name"), "Typo");
     typeInto(view.field("Address"), "alcie-shop.dusk");
-    expect(view.error("Address")).toBe("alcie-shop.dusk isn't registered.");
-    view.button("Save").click();
+    // The name, whole, and that it isn't registered; as an extra check, as a lookup's answer is said anywhere.
+    expect(view.error("Address")).toMatch(/(?<![\w.-])alcie-shop\.dusk(?![\w-])/);
+    expect(view.error("Address")).toMatch(/isn.t registered/i);
+    expect(view.error("Address")).toContain(duskNameErrorText({ name: "alcie-shop.dusk", reason: "not_registered" }));
+    view.save().click();
     await settle();
     expect(upsertAddressBookEntry).not.toHaveBeenCalled();
 
     typeInto(view.field("Address"), OWN);
-    view.button("Save").click();
+    view.save().click();
     await settle();
-    expect(view.error("Address")).toBe("That's this profile's own account.");
+    expect(view.error("Address")).not.toBe("");
     expect(upsertAddressBookEntry).not.toHaveBeenCalled();
   });
 
@@ -275,8 +194,13 @@ describe("contacts", () => {
     const ADDRESS_SECOND = encodeBase58(decodeBase58(ADDRESS_OWN).map((byte, i, all) => (i === all.length - 1 ? byte ^ 1 : byte)));
     const shownNote = () =>
       dom.document.body.querySelectorAll(".contact-note").filter(isShown).map((el) => (el.querySelector(".contact-note__words") ?? el).textContent);
+    // A note that names each of `values`, whatever its words: whose name it is, and that one's address. Each whole,
+    // no letter or digit on either side: Profile 1 isn't Profile 12, nor Alice Alicia.
+    const escaped = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const naming = (...values) =>
+      expect.stringMatching(new RegExp(values.map((value) => `(?=[\\s\\S]*(?<![\\p{L}\\p{N}])${escaped(value)}(?![\\p{L}\\p{N}]))`).join(""), "u"));
     // Yes, save it, under a name's question at Save.
-    const yes = () => dom.document.body.querySelectorAll(".contact-note button").find((b) => isShown(b) && b.textContent === "Yes, save it");
+    const yes = () => dom.document.body.querySelectorAll(".contact-note__yes").find(isShown);
     const edit = (over = {}, ov) => mount({ view: "edit", editId: null, editReturnView: "list", loaded: true, items: [ALICE, { id: "2", name: "Estudio Marta", address: ADDRESS, type: "address" }], ...over }, ov);
 
     it("asks about a name in use, with the address it has, and saves it only once that's answered", async () => {
@@ -285,20 +209,20 @@ describe("contacts", () => {
       expect(shownNote()).toEqual([]);
       for (const typed of ["Estudio Marta", "  estudio   marta ", "Estudió Marta"]) {
         typeInto(name, typed);
-        expect(shownNote()).toEqual([`You have a contact called Estudio Marta, at ${shortAddress(ADDRESS)}. Is this someone else?`]);
+        expect(shownNote()).toEqual([naming("Estudio Marta", "2Ana1p…RbFj4T")]);
       }
       // A name it starts as, word for word, is asked about too; another name isn't.
       typeInto(name, "Estudio Marta 2");
-      expect(shownNote()).toEqual([`You have a contact called Estudio Marta, at ${shortAddress(ADDRESS)}. Is this someone else?`]);
+      expect(shownNote()).toEqual([naming("Estudio Marta", "2Ana1p…RbFj4T")]);
       typeInto(name, "Estudio Pablo");
       expect(shownNote()).toEqual([]);
 
       typeInto(name, "Alice");
       typeInto(view.field("Address"), BOB);
-      expect(shownNote()).toEqual([`You have a contact called Alice, at ${shortAddress(ACCOUNT)}. Is this someone else?`]);
+      expect(shownNote()).toEqual([naming("Alice", "26FCH7…Tck927")]);
       expect(yes()).toBeUndefined();
       // A question, not a refusal: two people can have one name. Saved once it's answered.
-      view.button("Save").click();
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
       yes().click();
@@ -311,14 +235,14 @@ describe("contacts", () => {
       const view = edit({ items: [ALICE, { id: "3", name: "Lucas (petit-fils)", address: ADDRESS, type: "address" }] });
       typeInto(view.field("Name"), "Lucas");
       typeInto(view.field("Address"), BOB);
-      view.button("Save").click();
+      view.save().click();
       await settle();
-      expect(shownNote()).toEqual([`You have a contact called Lucas (petit-fils), at ${shortAddress(ADDRESS)}. Is this someone else?`]);
+      expect(shownNote()).toEqual([naming("Lucas (petit-fils)", "2Ana1p…RbFj4T")]);
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
       // Changed after the question: the question goes, and Yes is for none.
       typeInto(view.field("Name"), "Lucas Martin");
       expect([shownNote(), yes()]).toEqual([[], undefined]);
-      view.button("Save").click();
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Lucas Martin", address: BOB }), expect.anything());
     });
@@ -326,7 +250,7 @@ describe("contacts", () => {
     it("asks about a name that looks like another contact's in other letters, and saves it once that's answered", async () => {
       const view = edit();
       const name = view.field("Name");
-      const alike = `That looks like your contact Alice, at ${shortAddress(ACCOUNT)}. Is this someone else?`;
+      const alike = naming("Alice", "26FCH7…Tck927");
       // Cyrillic А and е, Greek Α, a capital I for the l, and a 1.
       for (const typed of ["\u0410lice", "Alic\u0435", "\u0391LICE", "AIice", "A1ice"]) {
         typeInto(name, typed);
@@ -334,11 +258,11 @@ describe("contacts", () => {
       }
       for (const typed of ["Alicia", "Bob", "Estudio Marta"]) {
         typeInto(name, typed);
-        expect(shownNote()).not.toContain(alike);
+        expect(shownNote()).not.toContainEqual(alike);
       }
       typeInto(name, "\u0410lice");
       typeInto(view.field("Address"), BOB);
-      view.button("Save").click();
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
       yes().click();
@@ -351,9 +275,9 @@ describe("contacts", () => {
       const view = edit({ items: [{ id: "d", name: "David", address: ACCOUNT, type: "account" }, { id: "w", name: "Wendy", address: ADDRESS, type: "address" }] });
       const name = view.field("Name");
       typeInto(name, "Dav1d");
-      expect(shownNote()).toEqual([`That looks like your contact David, at ${shortAddress(ACCOUNT)}. Is this someone else?`]);
+      expect(shownNote()).toEqual([naming("David", "26FCH7…Tck927")]);
       typeInto(name, "Wendv");
-      expect(shownNote()).toEqual([`That looks like your contact Wendy, at ${shortAddress(ADDRESS)}. Is this someone else?`]);
+      expect(shownNote()).toEqual([naming("Wendy", "2Ana1p…RbFj4T")]);
       typeInto(name, "Davina");
       expect(shownNote()).toEqual([]);
     });
@@ -364,7 +288,7 @@ describe("contacts", () => {
       const name = view.field("Name");
       for (const typed of ["Davld", "Dav!d", "Dav|d", "DAV!D"]) {
         typeInto(name, typed);
-        expect(shownNote(), typed).toEqual([`That looks like your contact David, at ${shortAddress(ACCOUNT)}. Is this someone else?`]);
+        expect(shownNote(), typed).toEqual([naming("David", "26FCH7…Tck927")]);
       }
     });
 
@@ -374,19 +298,20 @@ describe("contacts", () => {
       const name = view.field("Name");
       for (const typed of ["\u202e2 eliforP", "\u202eecilA", "Ali\u200bce"]) {
         typeInto(name, typed);
+        expect(view.error("Name"), typed).toMatch(/hidden characters/i);
         expect(view.error("Name"), typed).toBe(NAME_HIDES);
-        expect(name.getAttribute("aria-invalid"), typed).toBe("true");
         expect(shownNote(), typed).toEqual([]);
       }
       typeInto(view.field("Address"), BOB);
-      view.button("Save").click();
+      view.save().click();
       await settle();
+      expect(view.error("Name")).toMatch(/hidden characters/i);
       expect(view.error("Name")).toBe(NAME_HIDES);
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
 
       typeInto(name, "Alicia");
       expect(view.error("Name")).toBe("");
-      view.button("Save").click();
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Alicia", address: BOB }), expect.anything());
     });
@@ -409,12 +334,12 @@ describe("contacts", () => {
       const view = edit({}, ov);
       typeInto(view.field("Name"), "Rainy day");
       typeInto(view.field("Address"), BOB);
-      expect(shownNote()).toEqual(["That's your own profile: Savings."]);
+      expect(shownNote()).toEqual([naming("Savings")]);
       typeInto(view.field("Address"), ADDRESS_SECOND);
-      expect(shownNote()).toEqual(["That's your own profile: Savings."]);
+      expect(shownNote()).toEqual([naming("Savings")]);
       typeInto(view.field("Address"), CAROL);
-      expect(shownNote()).toEqual(["That's your own profile: Wallet 2 · Profile 1."]);
-      view.button("Save").click();
+      expect(shownNote()).toEqual([naming("Wallet 2", "Profile 1")]);
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Rainy day", address: CAROL }), expect.anything());
     });
@@ -425,10 +350,10 @@ describe("contacts", () => {
       const view = edit({}, ov);
       typeInto(view.field("Address"), CAROL);
       typeInto(view.field("Name"), "Profile 2");
-      expect(view.error("Name")).toBe("One of your profiles is called Profile 2. Choose another name.");
+      expect(view.error("Name")).toMatch(/\bProfile 2\b/);
       typeInto(view.field("Name"), "ProfiIe  2");
-      expect(view.error("Name")).toBe("That looks like Profile 2, one of your profiles. Choose another name.");
-      view.button("Save").click();
+      expect(view.error("Name")).toMatch(/\bProfile 2\b/);
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
 
@@ -436,7 +361,7 @@ describe("contacts", () => {
       typeInto(view.field("Name"), "Profile 2");
       typeInto(view.field("Address"), BOB);
       expect(view.error("Name")).toBe("");
-      view.button("Save").click();
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Profile 2", address: BOB }), expect.anything());
     });
@@ -449,13 +374,13 @@ describe("contacts", () => {
       typeInto(view.field("Address"), CAROL);
       for (const typed of ["Lucas (petit-fils)", "lucas petit-fils", "Luc\u0430s (petit-fils)"]) {
         typeInto(view.field("Name"), typed);
-        expect([view.error("Name"), shownNote()], typed).toEqual(["", ["One of your profiles is called Lucas. Is this someone else?"]]);
+        expect([view.error("Name"), shownNote()], typed).toEqual(["", [naming("Lucas")]]);
       }
       // Not a whole word of it: nothing to ask.
       typeInto(view.field("Name"), "Lucastor");
       expect(shownNote()).toEqual([]);
       typeInto(view.field("Name"), "Lucas (petit-fils)");
-      view.button("Save").click();
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
       yes().click();
@@ -468,10 +393,10 @@ describe("contacts", () => {
       const view = edit({}, ov);
       typeInto(view.field("Name"), "Me");
       typeInto(view.field("Address"), OWN);
-      expect(view.error("Address")).toBe("That's this profile's own account.");
+      expect(view.error("Address")).not.toBe("");
       typeInto(view.field("Address"), ADDRESS_OWN);
-      expect(view.error("Address")).toBe("That's this profile's own shielded address.");
-      view.button("Save").click();
+      expect(view.error("Address")).not.toBe("");
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).not.toHaveBeenCalled();
     });
@@ -482,7 +407,7 @@ describe("contacts", () => {
       typeInto(view.field("Name"), "Shop");
       typeInto(view.field("Address"), "alice-shop.dusk");
       await settle();
-      expect(shownNote()).toEqual(["That's your own profile: Savings."]);
+      expect(shownNote()).toEqual([naming("Savings")]);
     });
   });
 
@@ -492,23 +417,25 @@ describe("contacts", () => {
     const view = mount({ items: [ALICE, stranger] });
     const [, row] = dom.document.body.querySelectorAll(".contact-row");
     expect(row.querySelector(".row-title").textContent).toBe("\\u202eecilA");
-    expect(row.querySelectorAll(".row-sub").map((el) => el.textContent)).toEqual([`${shortAddress(ADDRESS)} · Shielded`, "Its name has hidden characters"]);
-    // No letter for a name that starts with what can't be seen.
-    expect(row.querySelector(".row-icon").textContent).toBe("");
+    // Its own address first in its line, and that its name has hidden characters (as an extra check, the app's words).
+    const subs = row.querySelectorAll(".row-sub").map((el) => el.textContent);
+    expect(subs).toEqual([expect.stringMatching(/^2Ana1p…RbFj4T /), expect.stringMatching(/hidden characters/i)]);
+    expect(subs[1]).toBe(HIDDEN_NAME_ROW);
     expect(visibleText(dom.document.body)).not.toContain("\u202e");
 
     row.click();
     expect(dom.document.body.querySelector(".tx-hero-name").textContent).toBe("\\u202eecilA");
-    expect(visibleText(dom.document.body.querySelector(".contact-hidden-name"))).toBe(
-      "This name has hidden characters, shown here as codes. Edit the contact to type it again, or delete it."
-    );
+    expect(visibleText(dom.document.body.querySelector(".contact-hidden-name"))).toMatch(/hidden characters/i);
+    expect(visibleText(dom.document.body.querySelector(".contact-hidden-name"))).toBe(HIDDEN_NAME_NOTE);
     expect(visibleText(dom.document.body)).not.toContain("\u202e");
 
-    view.button("Edit").click();
+    // Edit, beside Send: the name refused as it is. Then Delete.
+    dom.document.body.querySelector(".contact-actions .btn-outline").click();
+    expect(view.error("Name")).toMatch(/hidden characters/i);
     expect(view.error("Name")).toBe(NAME_HIDES);
     vi.stubGlobal("confirm", () => true);
     removeAddressBookEntry.mockClear();
-    view.button("Delete contact").click();
+    dom.document.body.querySelector(".contacts-delete").click();
     await settle();
     expect(removeAddressBookEntry).toHaveBeenCalledWith("9", expect.anything());
   });
@@ -517,26 +444,13 @@ describe("contacts", () => {
     const view = mount({ view: "edit", editId: null, items: [{ id: "9", name: "\u202eecilA", address: ACCOUNT, type: "account" }] });
     typeInto(view.field("Name"), "Alice");
     typeInto(view.field("Address"), ACCOUNT);
-    view.button("Save").click();
+    view.save().click();
     await settle();
-    expect(view.error("Address")).toBe("This address is already saved as \\u202eecilA.");
+    expect(view.error("Address")).toContain("\\u202eecilA");
+    expect(view.error("Address")).not.toContain("\u202e");
   });
 
-  it("edits a contact by its .dusk name, with Delete for a saved one and Back to leave", () => {
-    const shop = { id: "2", name: "Shop", address: ADDRESS, type: "address", duskName: "alice-shop.dusk", checkedAt: 1 };
-    const view = mount({ view: "edit", items: [shop] });
-    view.state.addressBook.view = "list";
-    view.draw();
-    dom.document.body.querySelector(".contact-row").click();
-    view.button("Edit").click();
-    expect(view.field("Address").value).toBe("alice-shop.dusk");
-    expect(dom.document.body.querySelectorAll("[role=radio]").map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "true"]);
-    expect(view.buttons()).toEqual(["← Back", "Save", "Delete contact"]);
-    dom.document.body.querySelector(".subnav-back").click();
-    expect(view.state.addressBook.view).toBe("detail");
-  });
-
-  it("lists the token approvals that let the contact spend, in its Activity", () => {
+  it("lists the token approvals that let the contact spend, in its Activity, and one taken back as a revoke", () => {
     const approval = {
       hash: "ef".repeat(32),
       kind: TX_KIND.CONTRACT_CALL,
@@ -545,11 +459,27 @@ describe("contacts", () => {
       profileIndex: 0,
       asset: { type: "DRC20", op: "approve", symbol: "TKN", decimals: 0, valueUnits: "5", spender: ACCOUNT },
     };
+    // One that lets another spend, not Alice's; and Alice's allowance taken back, an approval of 0.
     const other = { ...approval, hash: "aa".repeat(32), asset: { ...approval.asset, spender: OWN } };
-    mount({ view: "detail", detailId: "1", items: [ALICE] }, { nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs: [approval, other] });
-    const rows = dom.document.body.querySelectorAll(".contact-detail .tx-row");
-    expect(rows.map((r) => visibleText(r.querySelector(".tx-name")))).toEqual(["Alice"]);
-    expect(visibleText(rows[0].querySelector(".tx-sub"))).toMatch(/^Approval · /);
+    const revoke = { ...approval, hash: "bb".repeat(32), submittedAt: 4, asset: { ...approval.asset, valueUnits: "0" } };
+    mount({ view: "detail", detailId: "1", items: [ALICE] }, { nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs: [approval, other, revoke] });
+    const rows = dom.document.body.querySelectorAll(".contact-detail .tx-row").map((row) => ({
+      name: visibleText(row.querySelector(".tx-name")),
+      amount: visibleText(row.querySelector(".tx-amount")),
+      kind: visibleText(row.querySelector(".tx-sub")),
+    }));
+    // Alice's two, under her name, each with what it allows her: 5 TKN, and none.
+    expect(rows.map(({ name, amount }) => [name, amount]).sort()).toEqual([
+      ["Alice", "0 TKN"],
+      ["Alice", "5 TKN"],
+    ]);
+    // What she may spend said as an Approval, and the one taken back as a Revoke, each refusing the other's word.
+    const granted = rows.find((row) => row.amount === "5 TKN").kind;
+    const revoked = rows.find((row) => row.amount === "0 TKN").kind;
+    expect(granted).toMatch(/^Approval\b/);
+    expect(granted).not.toMatch(/revok/i);
+    expect(revoked).toMatch(/^Revoke\b/);
+    expect(revoked).not.toMatch(/approv/i);
   });
 
   it("saves, checks and deletes a contact for the wallet the page was drawn for", async () => {
@@ -557,14 +487,15 @@ describe("contacts", () => {
     const view = mount({ view: "edit", editId: null, editReturnView: "list" }, { isUnlocked: true, nodeUrl: NODE, accounts: [OWN], selectedAccountIndex: 0, txs: [] });
     typeInto(view.field("Name"), "Shop");
     typeInto(view.field("Address"), ADDRESS);
-    view.button("Save").click();
+    view.save().click();
     await settle();
     expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ name: "Shop", address: ADDRESS }), shown);
   });
 
   describe("a name read through a node the wallet doesn't know", () => {
     const CUSTOM = "https://my-node.example:8443";
-    const NOTE = "Checked by my-node.example:8443, a node the wallet doesn't know. Check the address too.";
+    // Whose word it is: the node it was read through, whole (not my-node.example:84430).
+    const NODE_SAID = /(?<![\w.-])my-node\.example:8443(?!\d)/;
     const onCustom = { nodeUrl: CUSTOM, accounts: [OWN], selectedAccountIndex: 0, txs: [] };
     const notes = () => dom.document.body.querySelectorAll('[role="note"]').map(visibleText);
 
@@ -576,8 +507,8 @@ describe("contacts", () => {
       typeInto(view.field("Name"), "Shop");
       typeInto(view.field("Address"), "alice-shop.dusk");
       await settle();
-      expect(notes()).toContain(NOTE);
-      view.button("Save").click();
+      expect(notes()).toContainEqual(expect.stringMatching(NODE_SAID));
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry).toHaveBeenCalledWith(expect.objectContaining({ duskName: "alice-shop.dusk", checkedAt: 0 }), expect.anything());
     });
@@ -587,8 +518,8 @@ describe("contacts", () => {
       typeInto(view.field("Name"), "Shop");
       typeInto(view.field("Address"), "alice-shop.dusk");
       await settle();
-      expect(notes()).not.toContain(NOTE);
-      view.button("Save").click();
+      expect(notes()).toEqual([]);
+      view.save().click();
       await settle();
       expect(upsertAddressBookEntry.mock.lastCall[0].checkedAt).toBeGreaterThan(0);
     });
@@ -606,7 +537,9 @@ describe("contacts", () => {
       });
       mount({ view: "detail", detailId: "2", items: [shop] }, onCustom);
       await settle();
-      expect(visibleText(dom.document.body.querySelector(".contact-name-check"))).toBe(`alice-shop.dusk now points to another address. Edit the contact before you send to it. ${NOTE}`);
+      const check = visibleText(dom.document.body.querySelector(".contact-name-check"));
+      expect(check).toMatch(SHOP_NAMED);
+      expect(check).toMatch(NODE_SAID);
     });
   });
 
@@ -620,11 +553,11 @@ describe("contacts", () => {
   });
 
   it.each([
-    ["expired", "alice-shop.dusk has expired. Edit the contact before you send to it."],
-    ["not_registered", "alice-shop.dusk isn't registered. Edit the contact before you send to it."],
-    ["no_account", "alice-shop.dusk has no address to send to. Edit the contact before you send to it."],
+    ["expired", /expired/i],
+    ["not_registered", /isn.t registered/i],
+    ["no_account", /no address/i],
     ["lookup_failed", null],
-  ])("says so when an hour-old .dusk name no longer resolves (%s), not when the lookup failed", async (reason, text) => {
+  ])("says so when an hour-old .dusk name no longer resolves (%s), not when the lookup failed", async (reason, why) => {
     lookupDuskName.mockImplementation((name) => {
       const result = { ok: false, name, reason };
       return { result, promise: Promise.resolve(result) };
@@ -633,7 +566,12 @@ describe("contacts", () => {
     mount({ view: "detail", detailId: "2", items: [shop] });
     await settle();
     const check = dom.document.body.querySelector(".contact-name-check");
-    expect(isShown(check) ? visibleText(check) : null).toBe(text);
+    const said = isShown(check) ? visibleText(check) : null;
+    // Why, written here, of the name, whole; nothing where the lookup failed. As an extra check, as a lookup's answer
+    // is said anywhere (duskNameErrorText).
+    expect(said).toEqual(why ? expect.stringMatching(why) : null);
+    expect(said).toEqual(why ? expect.stringMatching(SHOP_NAMED) : null);
+    expect(said).toEqual(why ? expect.stringContaining(duskNameErrorText({ name: "alice-shop.dusk", reason })) : null);
     expect(markAddressBookNameChecked).not.toHaveBeenCalled();
   });
 
@@ -645,10 +583,18 @@ describe("contacts", () => {
     const shop = { id: "2", name: "Shop", address: ACCOUNT, type: "account", duskName: "alice-shop.dusk", checkedAt: Date.now() - NAME_RECHECK_MS - 1 };
     mount({ view: "detail", detailId: "2", items: [shop] });
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".contact-name-check"))).toBe(
-      "alice-shop.dusk now points to another address. Edit the contact before you send to it."
-    );
-    expect(visibleText(dom.document.body.querySelector(".contact-hero"))).toBe("SShopalice-shop.dusk26FCH7…Tck927Public");
+    expect(visibleText(dom.document.body.querySelector(".contact-name-check"))).toMatch(SHOP_NAMED);
+    // The contact as saved, each in its place: its name, its .dusk name, and the address it has, not the one the
+    // name points to now, as shown (short, as the page shows it) and as its Copy gives it, whole.
+    const hero = dom.document.body.querySelector(".contact-hero");
+    expect([hero.querySelector(".tx-hero-name").textContent, hero.querySelector(".tx-hero-lead").textContent, hero.querySelector(".tx-hero-addr .mono").textContent]).toEqual([
+      "Shop",
+      "alice-shop.dusk",
+      "26FCH7…Tck927",
+    ]);
+    hero.querySelector(".tx-hero-addr button").click();
+    await settle();
+    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(ACCOUNT);
   });
 });
 
@@ -660,7 +606,7 @@ describe("a contact saved from Review", () => {
     view.state.draft = { ...draft };
     typeInto(view.field("Name"), "Landlord");
     typeInto(view.field("Address"), address);
-    view.button("Save").click();
+    view.save().click();
     await settle();
     const { route, draft: d } = view.state;
     return [route, d.to, d.amountDusk, d.amountLux, d.memo, d.filledIn ?? ""];

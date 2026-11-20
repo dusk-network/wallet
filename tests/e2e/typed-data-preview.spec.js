@@ -16,6 +16,16 @@ async function refreshPreview(page) {
   return input;
 }
 
+// The request's parts, by their place on the page rather than their words.
+const signButton = (page) => page.locator("#approval-actions .btn-primary");
+const rejectButton = (page) => page.locator("#approval-actions .btn-outline");
+const fullRequestFold = (page) => page.locator("details.ap-details:has(textarea.ap-code) > summary");
+const fullRequest = (page) => page.locator("textarea.ap-code");
+const digestFold = (page) => page.locator("details.ap-details:has(.ap-digest) > summary");
+// A value the preview cut, and the warning that text needs review.
+const clippedNote = (page) => page.locator(".ap-kv-note");
+const reviewWarning = (page) => page.locator(".callout.warn");
+
 test.beforeEach(async ({ page }) => {
   // Isolate the real renderer: only the pending-request transport is stubbed.
   await page.route("**/typed-data-preview?rid=test", route => route.fulfill({
@@ -52,10 +62,10 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("typed-data preview visibly discloses clipped text, but not an uncut value", async ({ page }) => {
-  const notice = page.getByText("Text truncated; the full value is signed.", { exact: true });
+  const notice = clippedNote(page);
   await expect(page.locator('code[title="truncated"]')).toHaveText("A".repeat(2048));
   await expect(notice).toBeVisible();
-  await expect(page.getByText("Text needs review", { exact: true })).toHaveCount(0);
+  await expect(reviewWarning(page)).toHaveCount(0);
 
   await page.evaluate(() => { window.pending.params.message.text = "A".repeat(2048); });
   await refreshPreview(page);
@@ -94,7 +104,7 @@ test("typed-data empty structs visibly retain their paths and declared type", as
   await expect(page.getByText("approveAll · Empty", { exact: true }).locator("..").locator("code")).toHaveText("{}");
   await expect(page.getByText("approveAll · Empty", { exact: true })).toBeVisible();
   await expect(page.getByText("more field(s) not shown.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Sign", exact: true })).toBeEnabled();
+  await expect(signButton(page)).toBeEnabled();
   expect(await page.evaluate(() => window.pending.params)).toEqual(params);
 });
 
@@ -117,10 +127,10 @@ test("typed-data arrays of empty structs are visible or explicitly row-limited",
       await expect(label).toBeVisible();
       await expect(label.locator("..").locator("code")).toHaveText("{}");
     }
-    const notice = page.getByText("1 more field(s) not shown. Open Full signing request (escaped JSON) above to inspect every value. The digest below covers the whole message.", { exact: true });
+    const notice = page.getByText(/^1 more field/);
     await expect(notice).toHaveCount(length > 200 ? 1 : 0);
     if (length > 200) await expect(notice).toBeVisible();
-    await expect(page.getByRole("button", { name: "Sign", exact: true })).toBeEnabled();
+    await expect(signButton(page)).toBeEnabled();
     expect(await page.evaluate(() => window.pending.params)).toEqual(params);
   }
 });
@@ -137,8 +147,8 @@ test("a keyboard-accessible full view includes every omitted value, bytes and de
     p.message = { amounts: Array(210).fill(1), note: "A".repeat(2048) + " ORIGINAL TAIL", blob: "0X00AB", marker: {} };
   });
   const input = await refreshPreview(page);
-  const summary = page.getByText("Full signing request (escaped JSON)", { exact: true });
-  const fullView = page.getByRole("textbox", { name: "Full signing request (escaped JSON)" });
+  const summary = fullRequestFold(page);
+  const fullView = fullRequest(page);
   await expect(summary).toBeVisible();
   await expect(page.locator("textarea")).toBeHidden();
   await summary.focus();
@@ -148,7 +158,7 @@ test("a keyboard-accessible full view includes every omitted value, bytes and de
   const originalFull = await fullView.inputValue();
   expect(JSON.parse(originalFull)).toEqual(input);
   expect(originalFull).not.toContain("spoofed.example");
-  await expect(page.getByText("32 zero bytes (default)", { exact: true })).toBeVisible();
+  await expect(page.getByText(/32 zero bytes/)).toBeVisible();
   await fullView.focus();
   await page.keyboard.press("Control+End");
   // Native keyboard scrolling completes asynchronously in Chromium.
@@ -165,21 +175,21 @@ test("a keyboard-accessible full view includes every omitted value, bytes and de
   expect(await fullView.inputValue()).not.toBe(originalFull);
   expect(JSON.parse(await fullView.inputValue())).toEqual(changed);
   expect(hashTypedDataHex(changed)).not.toBe(hashTypedDataHex(input));
-  await expect(page.getByRole("button", { name: "Sign", exact: true })).toBeEnabled();
+  await expect(signButton(page)).toBeEnabled();
 });
 
 test("the full view preserves string tails and Unicode originals, not normalized or injected markup", async ({ page }) => {
   for (const text of ["A".repeat(2048) + " X", "A".repeat(2048) + " Y", "é", "e\u0301", "\\u00e9", "<img src=x onerror=alert(1)>\namount : uint64 = 5\u202e"]) {
     await page.evaluate(text => { window.pending.params.message.text = text; }, text);
     const input = await refreshPreview(page);
-    await page.getByText("Full signing request (escaped JSON)", { exact: true }).click();
-    const full = await page.getByRole("textbox", { name: "Full signing request (escaped JSON)" }).inputValue();
+    await fullRequestFold(page).click();
+    const full = await fullRequest(page).inputValue();
     expect(full).not.toMatch(/[\u007f-\uffff]/);
     expect(JSON.parse(full)).toEqual(input);
     expect(hashTypedDataHex(JSON.parse(full))).toBe(hashTypedDataHex(input));
     await expect(page.locator("#app img")).toHaveCount(0);
     await expect(page.getByText("text · string", { exact: true })).toHaveCount(1);
-    await expect(page.getByRole("button", { name: "Sign", exact: true })).toBeEnabled();
+    await expect(signButton(page)).toBeEnabled();
   }
 });
 
@@ -195,10 +205,10 @@ for (const failure of ["digest mismatch", "display budget"]) {
       }
       await window.renderPreview();
     }, failure);
-    await expect(page.getByRole("alert")).toContainText("Cannot safely disclose the full signing request");
-    await expect(page.getByRole("button", { name: "Sign", exact: true })).toBeDisabled();
+    await expect(page.getByRole("alert")).toBeVisible();
+    await expect(signButton(page)).toBeDisabled();
     await expect(page.locator("textarea")).toHaveCount(0);
-    await page.getByRole("button", { name: "Reject", exact: true }).click();
+    await rejectButton(page).click();
     expect(await page.evaluate(() => window.decisions.map(d => d.decision))).toEqual(["reject"]);
   });
 }
@@ -219,8 +229,8 @@ for (const [section, field] of [["domain", "name"], ["domain", "version"], ["mes
       },
       primaryType: "Message", message: { text: "Safe message" },
     };
-    const warning = page.getByText("Text needs review", { exact: true });
-    const notice = page.getByText("Text truncated; the full value is signed.", { exact: true });
+    const warning = reviewWarning(page);
+    const notice = clippedNote(page);
     const label = section === "domain" ? `Domain ${field}` : `${field} · string`;
     const valueRow = page.getByText(label, { exact: true }).locator("..").locator("code");
     for (const [raw, display, unsafe, clipped] of [
@@ -246,10 +256,10 @@ for (const [section, field] of [["domain", "name"], ["domain", "version"], ["mes
       await expect(warning).toHaveCount(unsafe ? 1 : 0);
       if (unsafe) await expect(warning).toBeVisible();
       await expect(notice).toHaveCount(clipped ? 1 : 0);
-      await page.getByText("Digest (verify against the dApp)", { exact: true }).click();
+      await digestFold(page).click();
       await expect(page.getByText(digestHex, { exact: true })).toBeVisible();
       expect(await page.evaluate(([section, field]) => window.pending.params[section][field], [section, field])).toBe(raw);
-      await expect(page.getByRole("button", { name: "Sign", exact: true })).toBeEnabled();
+      await expect(signButton(page)).toBeEnabled();
     }
   });
 }

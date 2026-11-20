@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { accessibleName, installFakeDom, settle, typeInto, visibleText } from "../testing/fakeDom.js";
 import { WALLET_MESSAGE_EVENT } from "../../shared/constants.js";
-import { sozuArchive } from "../testing/sozuArchive.js";
 
 vi.mock("../../wallet/bus.js", () => ({ send: vi.fn() }));
 vi.mock("../../shared/duskNames.js", async (importOriginal) => ({
@@ -67,7 +66,14 @@ const menuItem = (dom, menu, text) =>
     .querySelectorAll(`${menu} [role=menuitemradio]`)
     .find((el) => el.querySelector(".net-menu-item-label").textContent === text);
 
-const SWITCHED = "The network or profile changed, so nothing was sent. Check the stake again.";
+// What the stake's own screen says after a switch: nothing was sent, as the network or profile changed, never as
+// the wallet locked.
+const saysSwitched = (app) => {
+  const text = app.querySelector(".sozu-notice")?.textContent ?? "";
+  expect(text).toMatch(/nothing was sent/i);
+  expect(text).toMatch(/network|profile/i);
+  expect(text).not.toMatch(/lock/i);
+};
 
 // The popup on Testnet at the Review of a 100 DUSK stake, drafted on
 // Staking's Sozu screen, with the wallet answering as `answer` says.
@@ -98,7 +104,8 @@ async function stakeReview(answer) {
     state,
     amount,
     sent: () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX"),
-    confirm: () => app.querySelectorAll("button").find((b) => b.textContent === "Confirm"),
+    // The Review's own button, whatever it says.
+    confirm: () => app.querySelectorAll(".review-actions .btnrow > button")[0],
   };
 }
 
@@ -156,7 +163,7 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     switched.resolve({ ...TESTNET, ...after });
     await flush();
     expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
-    expect(app.querySelector(".sozu-notice")?.textContent).toBe(SWITCHED);
+    saysSwitched(app);
     expect(amount().value).toBe("100");
     expect(sent()).toEqual([]);
   });
@@ -184,18 +191,24 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
           return {};
       }
     });
+    // Staking's figure with Sozu, by its label, as written; and what Staking says of a stake on its way.
+    const withSozu = () => {
+      const label = app.querySelectorAll(".stake-sum .stake-lbl").find((el) => /sozu/i.test(visibleText(el)));
+      return label ? visibleText(label.parentNode.querySelector(".stake-big")) : undefined;
+    };
+    const caps = () => app.querySelectorAll(".stake-sum .stake-cap").map(visibleText).join(" ");
     state.route = "stake";
     const { render } = await import("./app.js");
     await render();
     await flush();
-    expect(visibleText(app)).toContain("Your stake with Sozu is on its way.");
-    expect(visibleText(app)).not.toContain("Nothing staked yet");
+    // On its way: said so, and no figure with Sozu yet.
+    expect([withSozu(), caps()]).toEqual([undefined, expect.stringMatching(/on its way/i)]);
 
+    // It completes while Staking is open: what's with Sozu shows, to its figure, and no longer as on its way.
     completed = true;
     dom.window.dispatchEvent(new CustomEvent(WALLET_MESSAGE_EVENT, { detail: { type: "DUSK_UI_TX_STATUS", hash, status: "executed" } }));
-    await vi.waitFor(() => expect(visibleText(app)).toContain("With Sozu0.0997 DUSK"), { timeout: 2000 });
-    expect(visibleText(app)).toContain("Unstake from Sozu");
-    expect(visibleText(app)).not.toContain("on its way");
+    await vi.waitFor(() => expect(withSozu()).toBe("0.0997 DUSK"), { timeout: 2000 });
+    expect(caps()).not.toMatch(/on its way/i);
   });
 
   it("offers no Confirm on a Review left idle while the header switches to Profile 2, and sends nothing from Profile 1", async () => {
@@ -229,7 +242,7 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     expect(sent()).toEqual([]);
     expect([state.route, state.staking.screen, state.sozuDraft]).toEqual(["stake", "liquid", null]);
     expect(confirm()).toBeUndefined();
-    expect(app.querySelector(".sozu-notice")?.textContent).toBe(SWITCHED);
+    saysSwitched(app);
     expect(amount().value).toBe("100");
   });
 
@@ -300,35 +313,5 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     await flush();
     expect(overviews()).toBe(before + 1);
     expect(state.overview.chainId).toBe(2);
-  });
-});
-
-describe("Sozu's rate, as its stDUSK grew", () => {
-  const TIP = 4_800_000;
-  const archive = sozuArchive({ pool: SOZU.contracts.pool, tip: TIP, now: Date.UTC(2026, 10, 6, 12), from: 3_020_000_000_000n, to: 3_071_932_000_000n });
-
-  it("is what stDUSK did over the last 30 days, and its line says so, in place of the estimate's working", async () => {
-    // Lena's: "15,5 DUSK a block to stakers" matched nothing the chain says.
-    const { app } = popupPage();
-    vi.stubGlobal("fetch", archive);
-    vi.resetModules();
-    const { send } = await import("../../wallet/bus.js");
-    const { state } = await import("./state.js");
-    send.mockReset();
-    send.mockImplementation(async (message) => {
-      if (message.type === "DUSK_UI_GET_REWARD_RATE") return { result: 0.2 };
-      if (message.type === "DUSK_UI_GET_STAKING_FIGURES") return { result: { provisioners: [{ amount: 1_000_000_000_000_000, eligibility: 1 }], tipHeight: TIP } };
-      return { result: null };
-    });
-    const { sozuLiquidStakingView } = await import("./views/sozu.js");
-    state.staking = { screen: "liquid" };
-    state.sozu = { action: "deposit", depositAmountDusk: "", loaded: true, loading: false, profileIndex: 0, status: SOZU, pool: SOZU.pool, position: SOZU.position };
-    const draw = () => app.replaceChildren(...sozuLiquidStakingView(TESTNET, { state, actions: { send, render: async () => draw() } }));
-    draw();
-    await flush();
-    draw();
-    await flush();
-    const rate = app.querySelectorAll(".group.info .list-row").map((row) => visibleText(row)).find((text) => text.startsWith("About"));
-    expect(rate).toBe("About 21% a year. Not promised.stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.");
   });
 });

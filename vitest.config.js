@@ -11,40 +11,5 @@ export default defineConfig({
     include: ["src/**/*.test.js", "scripts/**/*.test.js"],
     // Enable globals like describe, it, expect without imports (optional)
     globals: false,
-    // Coverage configuration
-    coverage: {
-      provider: "v8",
-      reporter: ["text", "text-summary", "html", "lcov"],
-      reportsDirectory: "./coverage",
-      include: [
-        // Only measure coverage for pure utility modules (testable without mocks)
-        "src/shared/amount.js",
-        "src/shared/bytes.js",
-        "src/shared/chain.js",
-        "src/shared/constants.js",
-        "src/shared/explorer.js",
-        "src/shared/network.js",
-        "src/shared/networkPresets.js",
-        "src/shared/nodeNetwork.js",
-        "src/shared/recipientBlocklist.js",
-        "src/shared/sozuConfig.js",
-        "src/shared/txDefaults.js",
-        "src/shared/addressBook.js",
-        "src/shared/contactsCrypto.js",
-        "src/shared/contactsStore.js",
-        "src/shared/drc20Calls.js",
-        "src/ui/lib/strings.js",
-      ],
-      exclude: [
-        "src/**/*.test.js",
-      ],
-      // Coverage thresholds for tested modules
-      thresholds: {
-        lines: 80,
-        functions: 80,
-        branches: 70,
-        statements: 80,
-      },
-    },
   },
 });

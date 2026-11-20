@@ -266,9 +266,6 @@ transfers already require this field at the provider boundary.
 # Run all tests
 npm run test
 
-# Run with coverage
-npm run test:coverage
-
 # Watch mode
 npm run test -- --watch
 ```

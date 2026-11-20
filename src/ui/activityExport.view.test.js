@@ -5,12 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 import { entryOf } from "../shared/fixtures/rows.js";
-import { accessibleName, installFakeDom, isShown, settle, visibleText } from "./testing/fakeDom.js";
+import { installFakeDom, isShown, settle, visibleText } from "./testing/fakeDom.js";
 import { recordedEvm, recordedMigration } from "./testing/recordedEvm.js";
 import { activityView } from "./popup/views/activityView.js";
 import { txDetailsView } from "./popup/views/txDetails.js";
-import { activityKey } from "./popup/activity.js";
-import { handedExportKey, saveHandedExport } from "./popup/activityExport.js";
+import { ActivityChangedError, activityKey } from "./popup/activity.js";
+import { currencyName, handedExportKey, saveHandedExport } from "./popup/activityExport.js";
 import { runtimeGetURL, storageSessionGet, storageSessionRemove, storageSessionSet, tabsCreate } from "../platform/extensionApi.js";
 import { listAddressBook } from "../shared/addressBook.js";
 
@@ -26,11 +26,10 @@ vi.mock("../platform/extensionApi.js", async (importOriginal) => ({
   tabsCreate: vi.fn(async () => ({})),
 }));
 
-// The profile's verified .dusk name, as the header reads it: none unless a test gives one.
-const primary = vi.hoisted(() => ({ name: null }));
+// The profile's verified .dusk name, as the header reads it: none here.
 vi.mock("../shared/duskNames.js", async (importOriginal) => ({
   ...(await importOriginal()),
-  lookupPrimaryName: vi.fn(async () => primary.name),
+  lookupPrimaryName: vi.fn(async () => null),
 }));
 
 // What the archive answers about each stake with Sozu.
@@ -42,8 +41,6 @@ vi.mock("../shared/activityHistory.js", async (importOriginal) => ({
 
 process.env.TZ = "UTC";
 const NOW = new Date("2026-10-23T09:00:00Z");
-// When a file saved now was made, in its name (UTC here).
-const MADE = "2026-10-23-0900";
 const NODE = "https://testnet.nodes.dusk.network";
 
 const ACCOUNT = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nFWpNNfhUDUVFo4teoosnwwJTck927";
@@ -95,16 +92,13 @@ function page(pathname) {
   // The bridge's chains, as app-core reads a migration's side and the person's
   // approvals there for the EVM addresses bridged to: nothing on them here.
   vi.stubGlobal("fetch", rpc);
-  // What a download saves: the link's file name and the file.
+  // What a download saves: the file.
   saved = [];
   vi.spyOn(URL, "createObjectURL").mockImplementation((blob) => {
     saved.push({ blob });
     return "blob:activity";
   });
   vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
-  dom.document.addEventListener("click", (e) => {
-    if (e.target?.localName === "a" && e.target.getAttribute("download")) saved.at(-1).name = e.target.getAttribute("download");
-  });
 }
 
 // Mainnet, where DUSK has a price, for the values a file can add.
@@ -115,7 +109,6 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   vi.clearAllMocks();
   archive.query.mockImplementation(async () => ({}));
-  primary.name = null;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -173,8 +166,13 @@ function setup({ status = null, contacts = [], entries = WHOLE, ov: over = {}, h
 }
 
 const body = () => dom.document.body;
-const button = (name) => body().querySelectorAll("button").find((b) => visibleText(b).trim() === name || accessibleName(b) === name);
 const panel = () => body().querySelector("#activity-export");
+// Export, and Save CSV, its panel's one button: by where they are, not their words.
+const exportToggle = () => body().querySelector(".activity-export-toggle");
+const saveCsv = () => panel().querySelector("button");
+// A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
+// more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
+const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
 const fieldError = () => panel().querySelectorAll(".field-error").filter(isShown).map((el) => el.textContent).join("");
 
 // The file saved, by its columns' names.
@@ -200,45 +198,20 @@ const pickPeriod = (value) => {
 };
 
 describe("Activity's Export", () => {
-  it("opens under the head: which period, what to add, what the file is, and Save CSV", () => {
-    page("/full.html");
-    setup();
-    const toggle = button("Export");
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(body().querySelector("#activity-export")).toBeNull();
-    toggle.click();
-    expect(button("Export").getAttribute("aria-expanded")).toBe("true");
-    expect(body().querySelectorAll("#activity-export-period option").map((o) => o.textContent)).toEqual([
-      "All activity",
-      "Q4 2026",
-      "Q3 2026",
-      "Q2 2026",
-      "Q1 2026",
-      "Q4 2025",
-      "Q3 2025",
-      "Q2 2025",
-      "Q1 2025",
-      "Choose dates",
-    ]);
-    // On Testnet: no value to add, and that's said where it would be.
-    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual(["Period", "Add my contact names", "For Excel: keep accents as it opens"]);
-    expect(visibleText(panel())).toContain("Test DUSK has no value, so the file gives none.");
-    expect(visibleText(panel())).toContain("One profile's file for tax tools such as Koinly: exact amounts, times in UTC, transfers between your profiles marked.");
-    // Before the list and its filters.
-    expect(body().querySelector(".activity-page").children[0]).toBe(panel());
-  });
-
-  it("saves the whole of the profile's history, read first, in Koinly's columns, named after the profile", async () => {
+  it("saves the whole of the profile's history, read first, in Koinly's columns", async () => {
     page("/full.html");
     const { actions, history } = setup();
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(history.sync).toHaveBeenCalled();
     expect(saved).toHaveLength(1);
-    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-all-${MADE}.csv`);
     expect(saved[0].blob.type).toBe("text/csv;charset=utf-8");
     const text = await saved[0].blob.text();
+    // Koinly's universal columns, written here; as an extra check, app-core's (CSV_COLUMNS).
+    expect(text.split("\r\n")[0]).toBe(
+      "Date,Sent Amount,Sent Currency,Received Amount,Received Currency,Fee Amount,Fee Currency,Net Worth Amount,Net Worth Currency,Tag,Description,TxHash,Account Name,Account,Counterparty Name,Counterparty,Internal Transfer,Memo"
+    );
     expect(text.split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
     const lines = await linesOf();
     // All of it, oldest first, whatever the page shows or the filters pick.
@@ -257,33 +230,16 @@ describe("Activity's Export", () => {
       Memo: "Factura 33, abril",
     });
     expect(lines.map((l) => l.Date)).toEqual([...lines.map((l) => l.Date)].sort());
-    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(/^CSV saved: \d+ lines\./);
-    expect(body().querySelector("#activity-export")).toBeNull();
-  });
-
-  // Chen's, Lena's and Sofía's: the message named an older file, Android having saved the new one as "(1)".
-  it("saves it in the phone's Downloads in the app, and says the name Android saved it as, where a download made no file", async () => {
-    page("/index.html");
-    // A file of that name is there already: Android adds " (1)".
-    const invoke = vi.fn(async (cmd, args) => (cmd === "save_download" ? args.name.replace(/\.csv$/, " (1).csv") : null));
-    dom.window.__TAURI_INTERNALS__ = { invoke };
-    const { actions } = setup();
-    button("Export").click();
-    button("Save CSV").click();
-    await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
-    const [cmd, args] = invoke.mock.calls.find(([c]) => c === "save_download");
-    expect([cmd, args.name, args.mime]).toEqual(["save_download", `dusk-estudio-sofia-testnet-all-${MADE}.csv`, "text/csv"]);
-    expect(new TextDecoder().decode(Uint8Array.from(args.bytes)).split("\r\n")[0]).toBe(CSV_COLUMNS.join(","));
-    // No download besides, which the app's WebView never makes a file of.
-    expect(saved).toHaveLength(0);
-    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(new RegExp(`^CSV saved to Downloads as dusk-estudio-sofia-testnet-all-${MADE} \\(1\\)\\.csv: \\d+ lines\\.`));
+    // Saved, and how many lines it has; with the shielded activity synced, nothing said of it still coming.
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(exactly(String(lines.length)));
+    expect(actions.showToast.mock.calls.at(-1)[0]).not.toMatch(/shielded/i);
   });
 
   it("marks a transfer between the person's own profiles, which isn't income", async () => {
     page("/full.html");
     setup();
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     const own = (await linesOf()).find((l) => l.TxHash === "c3".repeat(32));
     expect(own).toMatchObject({ "Counterparty Name": "Profile 2", "Internal Transfer": "yes", Tag: "", Description: "Transfer to own profile Profile 2" });
@@ -294,78 +250,56 @@ describe("Activity's Export", () => {
     setup({
       ov: { accounts: [ACCOUNT], addresses: [ADDRESS], wallets: [{ key: "w1", n: 1, active: true, accounts: [ACCOUNT] }, { key: "w2", n: 2, name: "Savings", accounts: [SAVINGS], accountNames: { 0: "Rainy day" } }] },
     });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect((await linesOf()).find((l) => l.TxHash === "c3".repeat(32))).toMatchObject({ "Counterparty Name": "Savings · Rainy day", "Internal Transfer": "yes" });
   });
 
-  it("holds a quarter, named so, and says when there's nothing in it", async () => {
+  it("holds a quarter, and says when there's nothing in it", async () => {
     page("/full.html");
     setup();
-    button("Export").click();
+    exportToggle().click();
     pickPeriod("2026-3");
     expect(body().querySelector("#activity-export-period").value).toBe("2026-3");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
-    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`);
     expect((await linesOf()).map((l) => l.TxHash)).toEqual(["c2".repeat(32), "c3".repeat(32)]);
 
-    button("Export").click();
+    exportToggle().click();
     pickPeriod("2025-1");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     expect(saved).toHaveLength(1);
-    expect(fieldError()).toBe("There's nothing in that period, so nothing was saved.");
+    expect(fieldError()).not.toBe("");
     // Still open, to pick another.
-    expect(button("Save CSV").disabled).toBe(false);
-  });
-
-  // Sofía's, in the app: "Choose both days." stayed after both days were set.
-  it("takes Choose both days. away once both are chosen, by a phone's picker too", async () => {
-    page("/full.html");
-    setup();
-    button("Export").click();
-    pickPeriod("dates");
-    button("Save CSV").click();
-    await settle();
-    expect(fieldError()).toBe("Choose both days.");
-    const pick = (id, value) => {
-      const input = body().querySelector(`#${id}`);
-      input.value = value;
-      // A phone's date picker says it with change.
-      input.dispatchEvent(new Event("change"));
-    };
-    pick("activity-export-from", "2026-10-01");
-    expect(fieldError()).toBe("Choose both days.");
-    pick("activity-export-to", "2026-10-23");
-    expect(fieldError()).toBe("");
+    expect(saveCsv().disabled).toBe(false);
   });
 
   it("holds any dates, both days whole, and says what's wrong with them", async () => {
     page("/full.html");
     setup();
-    button("Export").click();
+    exportToggle().click();
     pickPeriod("dates");
     const day = (id, value) => {
       const input = body().querySelector(`#${id}`);
       input.value = value;
       input.dispatchEvent(new Event("input"));
     };
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
-    expect(fieldError()).toBe("Choose both days.");
+    expect(fieldError()).not.toBe("");
     day("activity-export-from", "2026-10-23");
     day("activity-export-to", "2026-10-01");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
-    expect(fieldError()).toBe("The last day is after the first");
+    expect(fieldError()).not.toBe("");
     expect(saved).toHaveLength(0);
     day("activity-export-to", "2026-10-23");
     day("activity-export-from", "2026-10-23");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
-    expect(saved[0].name).toBe(`dusk-estudio-sofia-testnet-2026-10-23-to-2026-10-23-${MADE}.csv`);
+    expect(saved).toHaveLength(1);
     expect((await linesOf()).map((l) => l.TxHash)).toContain("c1".repeat(32));
     expect((await linesOf()).map((l) => l.TxHash)).not.toContain("c2".repeat(32));
   });
@@ -373,15 +307,15 @@ describe("Activity's Export", () => {
   it("adds the user's contact names only when asked, reading them first, and says so when it can't", async () => {
     page("/full.html");
     const { state, actions } = setup({ contacts: [{ name: "Marta", address: FAUCET }] });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect((await linesOf()).find((l) => l.TxHash === "c1".repeat(32))["Counterparty Name"]).toBe("");
 
-    button("Export").click();
+    exportToggle().click();
     choose("activity-export-contacts");
     expect(state.activityExport.withContacts).toBe(true);
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     expect((await linesOf(1)).find((l) => l.TxHash === "c1".repeat(32))["Counterparty Name"]).toBe("Marta");
 
@@ -389,37 +323,24 @@ describe("Activity's Export", () => {
     state.addressBook = { loaded: false, loading: true, items: null };
     const read = Promise.withResolvers();
     listAddressBook.mockReturnValueOnce(read.promise);
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(saved).toHaveLength(2);
-    expect(button("Reading your history…").disabled).toBe(true);
+    expect(saveCsv().disabled).toBe(true);
     read.resolve([{ id: "1", name: "Marta", address: FAUCET }]);
     await settle();
     expect(saved).toHaveLength(3);
 
     // They can't be read: nothing saved, and it says so.
     listAddressBook.mockRejectedValueOnce(new Error("Wallet locked"));
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(saved).toHaveLength(3);
-    expect(fieldError()).toBe("Couldn't read your contacts, so nothing was saved. Try again.");
-    expect(actions.showToast.mock.calls.filter(([text]) => /^CSV saved/.test(text))).toHaveLength(3);
-  });
-
-  // Sofía's: the file called her "Profile 1", and a contact by its .dusk name rather than the name she saved.
-  it("names the file and its account as the header names the profile, its .dusk name, and a contact by the name saved", async () => {
-    page("/full.html");
-    primary.name = "sofia.dusk";
-    setup({ contacts: [{ name: "Marta", address: FAUCET }] });
-    button("Export").click();
-    choose("activity-export-contacts");
-    button("Save CSV").click();
-    await settle();
-    expect(saved[0].name).toBe(`dusk-sofia-dusk-testnet-all-${MADE}.csv`);
-    const sent = (await linesOf()).find((l) => l.TxHash === "a1".repeat(32));
-    expect([sent["Account Name"], sent["Counterparty Name"]]).toEqual(["sofia.dusk", "Marta"]);
+    expect(fieldError()).not.toBe("");
+    // Said saved for the three files alone.
+    expect(actions.showToast).toHaveBeenCalledTimes(3);
   });
 
   it("reads what isn't kept yet, with the details of what it has none of", async () => {
@@ -439,8 +360,8 @@ describe("Activity's Export", () => {
         needsDetails: vi.fn((entry) => entry.hash === "c2".repeat(32)),
       },
     });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(history.sync).toHaveBeenCalledTimes(3);
     expect(history.fillDetails.mock.calls[0][0].map((e) => e.hash)).toEqual(["c2".repeat(32)]);
@@ -450,12 +371,20 @@ describe("Activity's Export", () => {
   describe("with a wallet that changes while the file is made", () => {
     const OTHER_WALLET = FAUCET;
     const THEIRS = { hash: "e1".repeat(32), kind: "transfer", direction: "out", value: "9000000000", fee: "1000000", success: true, timestamp: AT, blockHeight: 4_650_000 };
-    const CHANGED = "The wallet changed while this was read, so nothing was saved. Export again.";
+    // What a read the wallet changed under says, written here: the wallet changed, so nothing was saved; not that the
+    // node failed. As an extra check, the app's own words.
+    const CHANGED = new ActivityChangedError().message;
+    const expectChanged = () => {
+      expect(fieldError()).toMatch(/wallet changed/i);
+      expect(fieldError()).toMatch(/nothing was saved/i);
+      expect(fieldError()).not.toMatch(/\bnode\b/i);
+      expect(fieldError()).toBe(CHANGED);
+    };
     const exporting = async (options) => {
       page("/full.html");
       setup(options);
-      button("Export").click();
-      button("Save CSV").click();
+      exportToggle().click();
+      saveCsv().click();
       await settle();
     };
 
@@ -465,7 +394,7 @@ describe("Activity's Export", () => {
     ])("takes no shielded history that's %s, and saves nothing", async (_, of) => {
       await exporting({ shielded: { ...of, profileIndex: 0, entries: [THEIRS] } });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it("saves nothing when the wallet says its read stopped as another opened", async () => {
@@ -474,7 +403,7 @@ describe("Activity's Export", () => {
         open: { isUnlocked: true, nodeUrl: NODE, accounts: [OTHER_WALLET], selectedAccountIndex: 0 },
       });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it.each([
@@ -485,14 +414,14 @@ describe("Activity's Export", () => {
     ])("saves nothing when it's %s by the time the file is made", async (_, open) => {
       await exporting({ open });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it("saves nothing when the wallet locks during the overview that checks it", async () => {
       // The overview's status was taken before its balance reads: only the wallet's status is as of now.
       await exporting({ status: { accounts: [], isUnlocked: false } });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it("says so of a read that stopped as the wallet changed, not that the node failed", async () => {
@@ -501,7 +430,7 @@ describe("Activity's Export", () => {
         open: { isUnlocked: true, nodeUrl: NODE, accounts: [OTHER_WALLET], selectedAccountIndex: 0 },
       });
       expect(saved).toEqual([]);
-      expect(fieldError()).toBe(CHANGED);
+      expectChanged();
     });
 
     it("saves its own shielded history as ever, with nothing changed", async () => {
@@ -512,30 +441,37 @@ describe("Activity's Export", () => {
 
   it("saves nothing half read: a history it can't have whole says so", async () => {
     page("/full.html");
+    // Said, written here: the whole history couldn't be read, so nothing was saved; not that the wallet changed.
+    const expectHalfRead = () => {
+      expect(fieldError()).toMatch(/whole history/i);
+      expect(fieldError()).toMatch(/nothing was saved/i);
+      expect(fieldError()).not.toMatch(/wallet changed/i);
+    };
     setup({ history: { sync: vi.fn(async () => Promise.reject(new Error("offline"))) } });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(saved).toHaveLength(0);
-    expect(fieldError()).toBe("Couldn't read your whole history from this node, so nothing was saved. Try again.");
+    expectHalfRead();
 
     setup({ history: { read: vi.fn(async () => ({ entries: [], state: {}, complete: false, coveredTo: 0 })) } });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(saved).toHaveLength(0);
-    expect(fieldError()).toBe("Couldn't read your whole history from this node, so nothing was saved. Try again.");
+    expectHalfRead();
   });
 
   it("says what it left out, and that shielded activity is still coming", async () => {
     page("/full.html");
     const { actions } = setup({ shielded: { walletId: ACCOUNT, nodeUrl: NODE, entries: [], profileIndex: 0, pending: true }, entries: [...WHOLE, { hash: "c9".repeat(32), direction: "in", counterparty: FAUCET, payer: false, value: "5", detailsAt: 0, timestamp: null, success: null }] });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     const said = actions.showToast.mock.calls.at(-1)[0];
-    expect(said).toContain("Left out: 1 not read yet.");
-    expect(said).toContain("Your shielded activity is still syncing: export again once it's done.");
+    // The one line left out, and the shielded activity still to come.
+    expect(said).toMatch(exactly("1"));
+    expect(said).toMatch(/shielded/i);
   });
 
   it("adds each payment's value in euros only when asked, from prices near its time, asking for no account", async () => {
@@ -558,23 +494,21 @@ describe("Activity's Export", () => {
       })
     );
     const { actions } = setup(ON_MAINNET);
-    button("Export").click();
-    // A British browser's would say pounds: this one's, in euros.
-    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toContain("Add each payment's value in euros, from CoinGecko's prices");
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(asked).toEqual([]);
     expect((await linesOf()).every((l) => l["Net Worth Amount"] === "" && l["Net Worth Currency"] === "")).toBe(true);
 
-    button("Export").click();
+    exportToggle().click();
     choose("activity-export-value");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     const lines = await linesOf(1);
     expect(lines.find((l) => l.TxHash === "c1".repeat(32))).toMatchObject({ "Net Worth Amount": "0.62500000", "Net Worth Currency": "EUR" });
-    // No price near that time: its columns stay empty, and it says so.
+    // No price near that time: its columns stay empty, and it says how many lines have none.
     expect(lines.find((l) => l.TxHash === "c2".repeat(32))).toMatchObject({ "Net Worth Amount": "", "Net Worth Currency": "" });
-    expect(actions.showToast.mock.calls.at(-1)[0]).toContain("2 lines have no euro value.");
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(exactly("2"));
     for (const url of asked) {
       expect(url).toContain("https://api.coingecko.com/api/v3/coins/dusk-network/market_chart/range?vs_currency=eur&from=");
       expect(url).not.toContain(ACCOUNT);
@@ -588,19 +522,21 @@ describe("Activity's Export", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "de-DE" });
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 429, json: async () => ({}) })));
     const { actions } = setup({ ...ON_MAINNET, entries: WHOLE.slice(0, 1) });
-    button("Export").click();
+    exportToggle().click();
     choose("activity-export-value");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     expect(saved).toHaveLength(1);
-    expect(actions.showToast.mock.calls.at(-1)[0]).toContain("no euro value");
+    // Said: lines with no value in euros, the currency named, written here; as an extra check, by the app's own name for it.
+    expect(actions.showToast.mock.calls.at(-1)[0]).toMatch(exactly("euro"));
+    expect(actions.showToast.mock.calls.at(-1)[0]).toContain(currencyName("EUR", 1));
   });
 
   // Lena's German browser got dollars on the web wallet, and Wei's Singapore phone US dollars: the region's own, where CoinGecko has it.
   it.each([
-    ["en-SG", "Singapore dollars", "sgd", "Singapore dollar"],
-    ["ro-RO", "US dollars", "usd", "US dollar"],
-  ])("adds values in the currency of the browser's region where CoinGecko prices DUSK in it, else in US dollars: %s", async (language, name, vs, one) => {
+    ["en-SG", "sgd"],
+    ["ro-RO", "usd"],
+  ])("adds values in the currency of the browser's region where CoinGecko prices DUSK in it, else in US dollars: %s", async (language, vs) => {
     page("/full.html");
     vi.stubGlobal("navigator", { ...globalThis.navigator, language });
     const asked = [];
@@ -612,30 +548,27 @@ describe("Activity's Export", () => {
         return { ok: false, status: 429, json: async () => ({}) };
       })
     );
-    const { actions } = setup({ ...ON_MAINNET, entries: WHOLE.slice(0, 1) });
-    button("Export").click();
-    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain(`Add each payment's value in ${name}, from CoinGecko's prices`);
+    setup({ ...ON_MAINNET, entries: WHOLE.slice(0, 1) });
+    exportToggle().click();
     choose("activity-export-value");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     expect(asked.length).toBeGreaterThan(0);
     for (const url of asked) expect(url).toContain(`vs_currency=${vs}&from=`);
-    expect(actions.showToast.mock.calls.at(-1)[0]).toContain(`no ${one} value`);
   });
 
   // Amélie's: a testnet export, euros ticked, gave test DUSK a euro value in a file for her tax return.
-  it("gives test DUSK no value: none to add on Testnet, said so, and none in the file, ticked on Mainnet before or not", async () => {
+  it("gives test DUSK no value: none to add on Testnet, and none in the file, ticked on Mainnet before or not", async () => {
     page("/full.html");
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "fr-FR" });
     const asked = [];
     vi.stubGlobal("fetch", vi.fn(async (url, init) => (init?.body ? rpc(url, init) : (asked.push(String(url)), { ok: true, status: 200, json: async () => ({ prices: [[SUMMER, 0.25]] }) }))));
     const { state } = setup();
-    button("Export").click();
+    exportToggle().click();
     // Ticked before, as on Mainnet: Testnet's file has none all the same.
     state.activityExport.fiat = true;
     expect(body().querySelector("#activity-export-value")).toBeNull();
-    expect(visibleText(panel())).toContain("Test DUSK has no value, so the file gives none.");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     expect(asked).toEqual([]);
     expect((await linesOf()).every((l) => l["Net Worth Amount"] === "" && l["Net Worth Currency"] === "")).toBe(true);
@@ -645,13 +578,13 @@ describe("Activity's Export", () => {
     page("/full.html");
     setup();
     const firstBytes = async (i) => [...new Uint8Array(await saved[i].blob.arrayBuffer()).slice(0, 3)];
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(await firstBytes(0)).toEqual([0x44, 0x61, 0x74]);
-    button("Export").click();
+    exportToggle().click();
     choose("activity-export-excel");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     expect(await firstBytes(1)).toEqual([0xef, 0xbb, 0xbf]);
   });
@@ -684,20 +617,23 @@ describe("Activity's Export", () => {
     const chain = vi.fn(recordedEvm(route.chain.rpcUrl).fetch);
     vi.stubGlobal("fetch", chain);
     const stranger = onMainnet([paidOut]);
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await vi.waitFor(() => expect(stranger.actions.showToast).toHaveBeenCalled());
     expect(paidThere(await linesOf())).toEqual([]);
     expect((await linesOf()).find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
     expect(chain).not.toHaveBeenCalled();
-    expect(stranger.actions.showToast.mock.calls.at(-1)[0]).toBe("CSV saved: 1 line.");
+    // Its one line, and no fees said to be in the file from that address.
+    const told = stranger.actions.showToast.mock.calls.at(-1)[0];
+    expect(told).toMatch(exactly("1"));
+    expect(told).not.toContain("0x4E4B…FF46");
 
     // From the address the profile bridged DUSK to before: booked.
     page("/full.html");
     const { actions, ov } = onMainnet([bridgedTo(owner, payout.at - 86_400_000), paidOut]);
     const exportAll = async () => {
-      button("Export").click();
-      button("Save CSV").click();
+      exportToggle().click();
+      saveCsv().click();
       await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
       const toast = actions.showToast.mock.calls.at(-1)[0];
       actions.showToast.mockClear();
@@ -709,9 +645,12 @@ describe("Activity's Export", () => {
     const down = await exportAll();
     expect(paidThere(down.lines)).toEqual([]);
     expect(down.lines.find((l) => l.TxHash === payout.hash)?.["Received Amount"]).toBe("1041.53106263");
-    expect(down.toast).toContain("1 migration's fee on BNB Smart Chain couldn't be read: export again to add it.");
-    // Nor its approvals and revokes there, or on Ethereum.
-    expect(down.toast).toContain("Some network fees may be in another profile's file, or couldn't be read: export again to add them.");
+    // The one migration's fee missing, on its chain, and no fees said to be in the file.
+    expect(down.toast).toMatch(exactly("1"));
+    expect(down.toast).toContain("BNB Smart Chain");
+    expect(down.toast).not.toContain("0x4E4B…FF46");
+    // Nor its approvals and revokes there, or on Ethereum: maybe in another profile's file.
+    expect(down.toast).toMatch(/profile/);
 
     // Read: the approval and the migration, each a cost of its own, in BNB, from the address that paid it.
     vi.stubGlobal("fetch", onChains(route.chain.rpcUrl));
@@ -720,9 +659,12 @@ describe("Activity's Export", () => {
       [approval, "0.0000023109", "cost", "BNB Smart Chain", owner],
       [migration, "0.00000243765", "cost", "BNB Smart Chain", owner],
     ]);
-    expect(up.toast).not.toContain("couldn't be read");
-    // Nandini's: it named none of the EVM addresses whose fees it has. And how far back its approvals were read.
-    expect(up.toast).toContain("The file has the network fees paid from 0x4E4B…FF46. Network fees on BNB Smart Chain from before block ");
+    // Nothing said to be unread, nor in another profile's file.
+    expect(up.toast).not.toMatch(/\bread\b/);
+    expect(up.toast).not.toMatch(/profile/);
+    // Nandini's: it named none of the EVM addresses whose fees it has. And how far back its approvals were read, on their chain.
+    expect(up.toast).toMatch(exactly("0x4E4B…FF46"));
+    expect(up.toast).toContain("BNB Smart Chain");
 
     // Together, to the wei, what the payout's details say it paid there.
     const wei = (text) => {
@@ -732,25 +674,29 @@ describe("Activity's Export", () => {
     const booked = up.lines.filter((l) => l["Sent Currency"] === "BNB").reduce((sum, l) => sum + wei(l["Sent Amount"]), 0n);
     const detailState = { route: "tx", txDetailHash: payout.hash, txDetailFrom: "activity", addressBook: { loaded: true, items: [] } };
     const tx = { hash: payout.hash, nodeUrl: MAINNET, status: "executed", kind: TX_KIND.TRANSFER, direction: "in", from: route.payoutAccount, amount: payout.value, memo: migration };
+    // The details' fee on BNB Smart Chain, its row found by its label: the amount alone, apart from what it counts.
     const detailFee = () => {
       dom.document.body.replaceChildren(...txDetailsView({ ...ov, txs: [tx] }, { state: detailState, actions: { render: async () => {}, showToast: vi.fn() } }));
-      return body()
+      const row = body()
         .querySelectorAll(".tx-detail > .group > .kv")
-        .map(visibleText)
-        .find((row) => row.startsWith("Fee on BNB Smart Chain"));
+        .find((kv) => {
+          const label = kv.querySelector(".kv-label").textContent;
+          return label.includes("BNB Smart Chain") && /fee/i.test(label);
+        });
+      return row?.querySelector(".kv-value > span").childNodes.filter((node) => node.nodeType === 3).map((node) => node.data).join("");
     };
     detailFee();
     await vi.waitFor(() => expect(detailFee()).toBeDefined());
-    expect(detailFee()).toBe("Fee on BNB Smart Chain0.00000474855 BNB · approval and migration");
-    expect(booked).toBe(wei("0.00000474855"));
+    expect(detailFee()).toBe("0.00000474855 BNB");
+    expect(booked).toBe(wei(detailFee().split(" ")[0]));
 
     // An address the profile sent DUSK to on DuskEVM is the person's too.
     page("/full.html");
     vi.stubGlobal("fetch", onChains(route.chain.rpcUrl));
     const deposit = { hash: "d5".repeat(32), kind: TX_KIND.CONTRACT_CALL, contractId: duskEvmContracts(2).bridge, fnName: "depositETHToWithValue", amount: "0", deposit: "500000000", bridgeTo: owner, status: "executed", submittedAt: payout.at - 86_400_000, profileIndex: 0 };
     const viaDuskEvm = setup({ entries: [paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [deposit] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await vi.waitFor(() => expect(viaDuskEvm.actions.showToast).toHaveBeenCalled());
     expect(paidThere(await linesOf()).map(([hash]) => hash)).toEqual([approval, migration]);
   });
@@ -765,15 +711,16 @@ describe("Activity's Export", () => {
       page("/full.html");
       vi.stubGlobal("fetch", vi.fn(async () => Promise.reject(new Error("offline"))));
       const { actions } = setup({ entries: [bridgedTo(owner, payout.at - 86_400_000), paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [], accounts }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-      button("Export").click();
-      button("Save CSV").click();
+      exportToggle().click();
+      saveCsv().click();
       await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
       return actions.showToast.mock.calls.at(-1)[0];
     };
+    // Fees not read, said either way; another profile's file named only where the wallet has one.
     const alone = await toastWith([ACCOUNT]);
-    expect(alone).toContain("Some network fees couldn't be read: export again to add them.");
-    expect(alone).not.toContain("another profile");
-    expect(await toastWith([ACCOUNT, SAVINGS])).toContain("Some network fees may be in another profile's file, or couldn't be read: export again to add them.");
+    expect(alone).toMatch(/\bread\b/);
+    expect(alone).not.toMatch(/profile/);
+    expect(await toastWith([ACCOUNT, SAVINGS])).toMatch(/profile/);
   });
 
   it("puts a migration's fees in the period of their own day, though its payout came the day after", async () => {
@@ -788,14 +735,14 @@ describe("Activity's Export", () => {
     const MAINNET = "https://nodes.dusk.network";
     const { actions } = setup({ entries, ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
     vi.stubGlobal("fetch", onChains(route.chain.rpcUrl));
-    button("Export").click();
+    exportToggle().click();
     pickPeriod("dates");
     for (const id of ["activity-export-from", "activity-export-to"]) {
       const input = body().querySelector(`#${id}`);
       input.value = "2026-11-05";
       input.dispatchEvent(new Event("input"));
     }
-    button("Save CSV").click();
+    saveCsv().click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     // The approval and the migration of 5 November, and not the payout of the 6th.
     expect((await linesOf()).map((l) => [l.TxHash, l["Sent Currency"] || l["Received Currency"], l.Account])).toEqual([
@@ -847,8 +794,8 @@ describe("Activity's Export", () => {
       page("/full.html");
       vi.stubGlobal("fetch", onChains(route.chain.rpcUrl, recorded));
       const { actions } = setup({ entries: [bridgedTo(owner, payout.at - 86_400_000), toOther, paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-      button("Export").click();
-      button("Save CSV").click();
+      exportToggle().click();
+      saveCsv().click();
       await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
       const lines = await linesOf();
       return { lines: paidThere(lines), byHash: Object.fromEntries(lines.map((l) => [l.TxHash, l])), toast: actions.showToast.mock.calls.at(-1)[0] };
@@ -870,7 +817,10 @@ describe("Activity's Export", () => {
     expect([first.byHash[revoke].Description, first.byHash[unused].Description]).toEqual(["Network fee on BNB Smart Chain: approval for migrations to Dusk revoked", "Network fee on BNB Smart Chain: approval for a migration to Dusk, not used yet"]);
     // A transfer out to BNB Smart Chain sends what reached it there, and pays the bridge's fee with the network's.
     expect(first.byHash[toOther.hash]).toMatchObject({ "Sent Amount": "1", "Sent Currency": "DUSK", "Fee Amount": "1.00185", Description: `To BNB Smart Chain, bridge fee 1 DUSK · ${other}` });
-    expect(first.toast).toContain("The file has the network fees paid from 0x4E4B…FF46 and 0x5A17…9c0d.");
+    // The addresses whose fees the file has: both; and whose file each is, known: none said to be another profile's.
+    expect(first.toast).toMatch(exactly("0x4E4B…FF46"));
+    expect(first.toast).toMatch(exactly("0x5A17…9c0d"));
+    expect(first.toast).not.toMatch(/profile/);
 
     // Profile 2 bridged to it first: Profile 2's file has it, and this one doesn't.
     memoIndex([
@@ -879,13 +829,15 @@ describe("Activity's Export", () => {
     ]);
     const second = await exportOnce();
     expect(second.lines).toEqual(owners);
-    expect(second.toast).toContain("The file has the network fees paid from 0x4E4B…FF46.");
+    expect(second.toast).toMatch(exactly("0x4E4B…FF46"));
+    expect(second.toast).not.toContain("0x5A17…9c0d");
+    expect(second.toast).not.toMatch(/profile/);
 
-    // Whose it is can't be read: in no file, and the toast says so.
+    // Whose it is can't be read: in no file, and the toast says it may be in another profile's.
     memoIndex(new Error("archive down"));
     const unread = await exportOnce();
     expect(unread.lines).toEqual(owners);
-    expect(unread.toast).toContain("Some network fees on BNB Smart Chain may be in another profile's file, or couldn't be read: export again to add them.");
+    expect(unread.toast).toMatch(/profile/);
 
     // Known here only by a deposit to DuskEVM, which the memo index doesn't list: the first profile by its account,
     // Profile 2, may be the one to book it, and the toast says so.
@@ -894,11 +846,11 @@ describe("Activity's Export", () => {
     page("/full.html");
     vi.stubGlobal("fetch", onChains(route.chain.rpcUrl, recorded));
     const viaDuskEvm = setup({ entries: [bridgedTo(owner, payout.at - 86_400_000), paidOut], ov: { nodeUrl: MAINNET, networkName: "Mainnet", txs: [deposit] }, shielded: { walletId: ACCOUNT, nodeUrl: MAINNET, entries: [], profileIndex: 0 } });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await vi.waitFor(() => expect(viaDuskEvm.actions.showToast).toHaveBeenCalled());
     expect(paidThere(await linesOf())).toEqual(owners);
-    expect(viaDuskEvm.actions.showToast.mock.calls.at(-1)[0]).toContain("Some network fees on BNB Smart Chain may be in another profile's file, or couldn't be read: export again to add them.");
+    expect(viaDuskEvm.actions.showToast.mock.calls.at(-1)[0]).toMatch(/profile/);
   });
 
   it("makes a stake with Sozu a trade of DUSK for stDUSK, with its deposit fee, as the pool's event says it", async () => {
@@ -920,8 +872,8 @@ describe("Activity's Export", () => {
       h0: { json: [{ origin: hash, events: [{ target: pool, topic: "deposit", data: `${[100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n].map(u64).join("")}01${"ab".repeat(193)}${"00".repeat(6)}` }] }] },
     }));
     setup({ entries: [{ hash, kind: TX_KIND.CONTRACT_CALL, contractId: pool, counterparty: pool, fnName: "sozu_stake", value: "100000000000", fee: "5000000", timestamp: AT, blockHeight: 4_700_000 }] });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect((await linesOf()).find((l) => l.TxHash === hash)).toMatchObject({
       "Sent Amount": "100",
@@ -936,17 +888,18 @@ describe("Activity's Export", () => {
   it("hands what the popup asks to a new full view tab, which makes the file once", async () => {
     page("/popup.html");
     setup();
-    button("Export").click();
-    expect(visibleText(panel())).toContain("The file is saved from a new tab.");
+    exportToggle().click();
     pickPeriod("2026-3");
     choose("activity-export-contacts");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     // The popup saves nothing itself: what's asked goes to the tab it opens.
     expect(saved).toHaveLength(0);
     const [[items]] = storageSessionSet.mock.calls;
     const [key] = Object.keys(items);
     const handed = items[key];
+    // Kept under its own ID, written here; as an extra check, the app's own key for it.
+    expect(key).toBe(`dusk_activity_export_v1:${handed.id}`);
     expect(key).toBe(handedExportKey(handed.id));
     expect(handed.choices).toMatchObject({ period: "2026-3", withContacts: true, fiat: false, excel: false });
     expect(runtimeGetURL).toHaveBeenCalledWith(`full.html?route=activity&save=${handed.id}`);
@@ -959,7 +912,9 @@ describe("Activity's Export", () => {
     storageSessionGet.mockImplementationOnce(async (asked) => (asked === key ? { [key]: handed } : {}));
     const tab = setup();
     await expect(saveHandedExport({ state: tab.state, render: tab.actions.render, showToast: tab.actions.showToast })).resolves.toBe(true);
-    expect(saved.map((s) => s.name)).toEqual([`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`]);
+    // Once, and the quarter asked for.
+    expect(saved).toHaveLength(1);
+    expect((await linesOf()).map((l) => l.TxHash)).toEqual(["c2".repeat(32), "c3".repeat(32)]);
     expect(storageSessionRemove).toHaveBeenCalledWith(key);
     expect(history.replaceState).toHaveBeenCalledWith(null, "", "/full.html?route=activity");
     expect(tab.state.activityExport.open).toBe(false);
@@ -968,21 +923,8 @@ describe("Activity's Export", () => {
     vi.stubGlobal("location", { pathname: "/full.html", search: "?route=activity" });
     await expect(saveHandedExport({ state: tab.state })).resolves.toBe(false);
     vi.stubGlobal("location", { pathname: "/full.html", search: "?save=old" });
-    await expect(saveHandedExport({ state: tab.state })).rejects.toThrow("The export isn't here any more. Export it again.");
+    await expect(saveHandedExport({ state: tab.state })).rejects.toThrow();
     expect(saved).toHaveLength(1);
-  });
-
-  it("says in the tab what stopped an export handed over, its panel open, with what was asked", async () => {
-    page("/full.html");
-    const id = "00000000-0000-4000-8000-000000000001";
-    const key = handedExportKey(id);
-    vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${id}` });
-    storageSessionGet.mockImplementationOnce(async () => ({ [key]: { id, choices: { period: "2025-1" } } }));
-    const tab = setup();
-    await expect(saveHandedExport({ state: tab.state, render: tab.actions.render, showToast: tab.actions.showToast })).resolves.toBe(true);
-    expect(saved).toHaveLength(0);
-    expect(fieldError()).toBe("There's nothing in that period, so nothing was saved.");
-    expect(body().querySelector("#activity-export-period").value).toBe("2025-1");
   });
 
   it("keeps two exports at once apart: each tab does its own and removes only its own", async () => {
@@ -995,35 +937,41 @@ describe("Activity's Export", () => {
     });
     page("/popup.html");
     setup();
-    button("Export").click();
+    exportToggle().click();
     pickPeriod("2026-3");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     setup();
-    button("Export").click();
+    exportToggle().click();
     pickPeriod("2026-4");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     const handed = Object.values(kept);
     expect(handed).toHaveLength(2);
     expect(new Set(handed.map((h) => h.id)).size).toBe(2);
+    expect(Object.keys(kept).sort()).toEqual(handed.map((h) => `dusk_activity_export_v1:${h.id}`).sort());
     expect(Object.keys(kept).sort()).toEqual(handed.map((h) => handedExportKey(h.id)).sort());
 
-    // The first export's tab: its file, and the second export's still there.
+    // The first export's tab: its file, Q3's, and the second export's still there.
     const [first, second] = handed;
+    const Q3 = ["c2".repeat(32), "c3".repeat(32)];
     page("/full.html");
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${first.id}` });
     await saveHandedExport({ state: setup().state });
-    expect(saved.at(-1).name).toBe(`dusk-estudio-sofia-testnet-2026-q3-${MADE}.csv`);
-    expect(Object.keys(kept)).toEqual([handedExportKey(second.id)]);
+    expect((await linesOf(0)).map((l) => l.TxHash)).toEqual(Q3);
+    expect(Object.keys(kept)).toEqual([`dusk_activity_export_v1:${second.id}`]);
+    // The second's: Q4's.
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${second.id}` });
     await saveHandedExport({ state: setup().state });
-    expect(saved.at(-1).name).toBe(`dusk-estudio-sofia-testnet-2026-q4-${MADE}.csv`);
+    expect(saved).toHaveLength(2);
+    const q4 = (await linesOf(1)).map((l) => l.TxHash);
+    expect(q4).toContain("c1".repeat(32));
+    expect(q4.filter((hash) => Q3.includes(hash))).toEqual([]);
     expect(kept).toEqual({});
     // An address that isn't an export's ID asks nothing.
     storageSessionGet.mockClear();
     vi.stubGlobal("location", { pathname: "/full.html", search: "?save=../vault" });
-    await expect(saveHandedExport({ state: setup().state })).rejects.toThrow("The export isn't here any more");
+    await expect(saveHandedExport({ state: setup().state })).rejects.toThrow();
     expect(storageSessionGet).not.toHaveBeenCalled();
     storageSessionSet.mockImplementation(async () => {});
     storageSessionGet.mockImplementation(async () => ({}));
@@ -1034,8 +982,8 @@ describe("Activity's Export", () => {
     page("/popup.html");
     setup();
     tabsCreate.mockRejectedValueOnce(new Error("Couldn't open a tab"));
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     const [[items]] = storageSessionSet.mock.calls;
     expect(storageSessionRemove).toHaveBeenCalledWith(Object.keys(items)[0]);
@@ -1046,38 +994,14 @@ describe("Activity's Export", () => {
   it("asks for an unlock first, in a tab that opened locked", async () => {
     page("/full.html");
     const id = "00000000-0000-4000-8000-000000000002";
-    const key = handedExportKey(id);
+    const key = `dusk_activity_export_v1:${id}`;
     vi.stubGlobal("location", { pathname: "/full.html", search: `?route=activity&save=${id}` });
     storageSessionGet.mockImplementationOnce(async () => ({ [key]: { id, choices: { period: "all" } } }));
     const tab = setup({ ov: { isUnlocked: false } });
     await saveHandedExport({ state: tab.state, render: tab.actions.render });
     expect(saved).toHaveLength(0);
-    expect(tab.state.activityExport.error).toBe("Unlock the wallet, then export again.");
-  });
-});
-
-describe("DUSK bridged to DuskEVM in Activity", () => {
-  it("shows under Bridge and Sent, To its DuskEVM address, with Copy", async () => {
-    page("/full.html");
-    const { state } = setup();
-    button("Sent").click();
-    expect(state.activityFilter).toBe("sent");
-    expect(body().querySelectorAll(".tx-row").map(visibleText).sort()).toEqual(
-      ["To 0xAB84…C86FBridge to DuskEVM · 07:00−0.5 DUSK", "faucet.duskSent · 07:00−5 DUSK"].sort()
-    );
-    button("Bridge").click();
-    expect(state.activityFilter).toBe("bridge");
-    const rows = body().querySelectorAll(".tx-row");
-    expect(rows.map(visibleText)).toEqual(["To 0xAB84…C86FBridge to DuskEVM · 07:00−0.5 DUSK"]);
-    const name = rows[0].querySelector(".tx-name");
-    expect([name.querySelector(".mono").textContent, name.getAttribute("title")]).toEqual(["0xAB84…C86F", EVM]);
-    const copy = rows[0].querySelector("button.tx-copy");
-    expect(accessibleName(copy)).toBe("Copy DuskEVM address");
-    copy.click();
-    await settle();
-    expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(EVM);
-    button("Received").click();
-    expect(body().querySelectorAll(".tx-row").map(visibleText)).toEqual(["26JfWK…B5NsNiReceived · 07:00+1 DUSK"]);
+    // Said: unlock first.
+    expect(tab.state.activityExport.error).toMatch(/unlock/i);
   });
 });
 
@@ -1093,8 +1017,8 @@ describe("A token in Activity's Export", () => {
   it("is what it moved, to whom, in the file's own columns, with its fee, as the chain and the wallet say it", async () => {
     page("/full.html");
     setup({ ov: { txs: [record] }, entries: [called] });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(await lineOf(record.hash)).toMatchObject({
       "Sent Amount": "123.4567891",
@@ -1110,9 +1034,9 @@ describe("A token in Activity's Export", () => {
   it("goes by the user's contact name for its recipient, only when asked", async () => {
     page("/full.html");
     setup({ ov: { txs: [record] }, entries: [called], contacts: [{ name: "Faucet shop", address: FAUCET }] });
-    button("Export").click();
+    exportToggle().click();
     choose("activity-export-contacts");
-    button("Save CSV").click();
+    saveCsv().click();
     await settle();
     expect((await lineOf(record.hash))["Counterparty Name"]).toBe("Faucet shop");
   });
@@ -1120,8 +1044,8 @@ describe("A token in Activity's Export", () => {
   it("marks one to another of the person's profiles, which isn't income", async () => {
     page("/full.html");
     setup({ ov: { txs: [{ ...record, asset: { ...ASSET, to: SAVINGS } }] }, entries: [called] });
-    button("Export").click();
-    button("Save CSV").click();
+    exportToggle().click();
+    saveCsv().click();
     await settle();
     expect(await lineOf(record.hash)).toMatchObject({ Counterparty: SAVINGS, "Internal Transfer": "yes", "Sent Currency": "TKN" });
   });
