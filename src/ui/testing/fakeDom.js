@@ -639,13 +639,6 @@ export function accessibleName(el) {
   return clean(el.getAttribute("title")) || clean(el.getAttribute("placeholder"));
 }
 
-/** The accessible names of the form fields shown under `root`, in order. */
-export const fieldNames = (root) =>
-  root
-    .querySelectorAll("input, select, textarea")
-    .filter((field) => field.getAttribute("type") !== "file" && isShown(field))
-    .map(accessibleName);
-
 /** Types `value` into an input the way the browser reports it: value, then an input event. */
 export function typeInto(input, value) {
   input.value = value;
@@ -675,36 +668,6 @@ export function typeKeys(text, { as = "keys" } = {}) {
     if (!field.dispatchEvent(fakeEvent("beforeinput", { inputType: "insertText", data: ch }))) continue;
     field.value += ch;
     field.dispatchEvent(fakeEvent("input", { inputType: "insertText", data: ch, isComposing: false }));
-  }
-}
-
-/**
- * Composes `text` where the focus is, as a phone's keyboard composes the word
- * it suggests for: a letter at a time, each an input event while composing.
- * Then commits `commit` (`text` itself by default) in its place, in Chrome's
- * order, its last input event still composing and compositionend after it, or
- * in Firefox's (`order: "firefox"`), compositionend first and then an input
- * event that isn't composing.
- * @param {string} text
- * @param {{ commit?: string, order?: "chrome" | "firefox" }} [opts]
- */
-export function compose(text, { commit = text, order = "chrome" } = {}) {
-  const field = globalThis.document.activeElement;
-  const before = field.value;
-  const update = (data) => {
-    field.dispatchEvent(fakeEvent("keydown", { key: "Unidentified", keyCode: 229, isComposing: true }));
-    field.value = before + data;
-    field.dispatchEvent(fakeEvent("input", { inputType: "insertCompositionText", data, isComposing: true }));
-  };
-  field.dispatchEvent(fakeEvent("compositionstart", { data: "" }));
-  for (let n = 1; n <= text.length; n++) update(text.slice(0, n));
-  if (order === "firefox") {
-    field.value = before + commit;
-    field.dispatchEvent(fakeEvent("compositionend", { data: commit }));
-    field.dispatchEvent(fakeEvent("input", { inputType: "insertCompositionText", data: commit, isComposing: false }));
-  } else {
-    update(commit);
-    field.dispatchEvent(fakeEvent("compositionend", { data: commit }));
   }
 }
 

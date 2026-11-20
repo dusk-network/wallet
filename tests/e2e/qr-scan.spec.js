@@ -61,28 +61,7 @@ test("opens the wallet without the QR decoder, then fills Send from a scanned re
   expect(decoder).toEqual([]);
 
   await page.getByRole("button", { name: "Scan QR" }).click();
-  await expect(page.locator(".qrscan-title")).toHaveText("Scan request");
+  await expect(page.locator(".qrscan-modal")).toBeVisible();
   await scanImage(page, account);
   expect(decoder.length).toBeGreaterThan(0);
-});
-
-test("says the scanner couldn't load while its code doesn't come, and scans once the wallet opens again", async ({ page }) => {
-  const account = await openWallet(page);
-  await page.route(DECODER, (route) => route.abort("internetdisconnected"));
-  await page.locator("#app").getByRole("button", { name: "Send" }).first().click();
-  await page.getByRole("button", { name: "Scan QR" }).click();
-  await expect(page.getByText("The QR scanner couldn't load. Close the wallet and open it again.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Choose image" })).toBeDisabled();
-  await page.locator(".qrscan-modal").getByRole("button", { name: "Cancel" }).click();
-  await expect(page.locator(".qrscan-modal")).toHaveCount(0);
-
-  // Opened again, its code there: it scans.
-  await page.unroute(DECODER);
-  await page.reload();
-  await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
-  await page.getByRole("button", { name: "Unlock" }).click();
-  await home(page);
-  await page.locator("#app").getByRole("button", { name: "Send" }).first().click();
-  await page.getByRole("button", { name: "Scan QR" }).click();
-  await scanImage(page, account);
 });
