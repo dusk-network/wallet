@@ -37,29 +37,32 @@ describe("network menu", () => {
   it("is a menu of networks with the current one checked, and focus on it", () => {
     menu.open(pill, ov);
     const list = dom.document.body.querySelector("[role=menu]");
-    expect(dom.document.getElementById(list.getAttribute("aria-labelledby")).textContent).toBe("Select network");
+    // No title over it, which hangs from the network's pill: named for screen readers alone.
+    expect([list.getAttribute("aria-label"), dom.document.body.querySelector(".net-menu-title")]).toEqual(["Network", null]);
     expect(items().map((el) => [el.querySelector(".net-menu-item-label").textContent, el.getAttribute("aria-checked")])).toEqual([
       ["Mainnet", "false"],
       ["Testnet", "true"],
       ["Devnet", "false"],
       ["Local", "false"],
-      ["Custom", "false"],
+      ["Custom node", "false"],
     ]);
+    // A second line only where the name doesn't say it all.
+    expect(items().map((el) => el.querySelector(".net-menu-item-hint")?.textContent ?? "")).toEqual(["", "", "Experimental", "127.0.0.1:8080", ""]);
     expect(item("Testnet").querySelector(".net-menu-check").innerHTML).toBe(iconSvg("check"));
     expect(dom.document.activeElement).toBe(item("Testnet"));
     expect(items().map((el) => el.getAttribute("tabindex"))).toEqual(Array(5).fill("-1"));
   });
 
-  it("checks Custom for any address a network's file doesn't list, with its host, whatever it looks like", () => {
+  it("checks Custom node for any address a network's file doesn't list, with its host, whatever it looks like", () => {
     menu.open(pill, { nodeUrl: "https://testnet.evil.example" });
     expect(items().map((el) => [el.querySelector(".net-menu-item-label").textContent, el.getAttribute("aria-checked")])).toEqual([
       ["Mainnet", "false"],
       ["Testnet", "false"],
       ["Devnet", "false"],
       ["Local", "false"],
-      ["Custom", "true"],
+      ["Custom node", "true"],
     ]);
-    expect(item("Custom").querySelector(".net-menu-item-hint").textContent).toBe("testnet.evil.example");
+    expect(item("Custom node").querySelector(".net-menu-item-hint").textContent).toBe("testnet.evil.example");
   });
 
   it("moves with the arrow keys, Home and End, and goes back to the pill on Escape", () => {
@@ -68,11 +71,11 @@ describe("network menu", () => {
     press(dom.document.activeElement, "ArrowDown");
     expect(at()).toBe("Devnet");
     press(dom.document.activeElement, "End");
-    expect(at()).toBe("Custom");
+    expect(at()).toBe("Custom node");
     press(dom.document.activeElement, "ArrowDown");
     expect(at()).toBe("Mainnet");
     press(dom.document.activeElement, "ArrowUp");
-    expect(at()).toBe("Custom");
+    expect(at()).toBe("Custom node");
     press(dom.document.activeElement, "Home");
     expect(at()).toBe("Mainnet");
 
@@ -130,8 +133,8 @@ describe("network menu", () => {
     expect(alert).toHaveBeenCalledWith("offline");
   });
 
-  it("doesn't spin for the network it's on, or for Custom, which opens Settings", async () => {
-    for (const name of ["Testnet", "Custom"]) {
+  it("doesn't spin for the network it's on, or for Custom node, which opens Settings", async () => {
+    for (const name of ["Testnet", "Custom node"]) {
       menu.open(pill, ov);
       item(name).click();
       expect(pill.classList.contains("is-switching")).toBe(false);

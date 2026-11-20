@@ -99,7 +99,7 @@ export function useNetworkGas({ actions, gasEditor, defaultLimit, fallbackPrice,
     h("p", {
       class: "gas-note",
       text: custom
-        ? "The wallet uses your custom gas from Settings."
+        ? "The wallet uses your custom fee from Settings."
         : "The wallet uses the network's gas price and a gas limit that suits this transaction.",
     }),
     extra,

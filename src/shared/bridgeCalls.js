@@ -103,20 +103,20 @@ export function bridgeServiceTransfer({ nodeUrl, to, memo, amount } = {}) {
 }
 
 /**
- * What a transfer to the bridge's account comes to, in one line: "2 DUSK
- * sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain", or
+ * What a transfer to the bridge's account comes to, in one line under its
+ * amount and the chain it goes to: "Bridge fee 1 DUSK · 1 DUSK arrives", or
  * "Nothing arrives" when the fee takes it all, the bridge doesn't pay out
  * there now, or the memo is no address there to pay.
- * @param {{ chain: string, running: boolean, recipientOk: boolean, sentLux: bigint, feeLux: bigint, arrivesLux: bigint }} service - bridgeServiceTransfer's
+ * @param {{ chain: string, running: boolean, recipientOk: boolean, feeLux: bigint, arrivesLux: bigint }} service - bridgeServiceTransfer's
  * @returns {string}
  */
-export function bridgeServiceLine({ chain, running, recipientOk, sentLux, feeLux, arrivesLux }) {
+export function bridgeServiceLine({ chain, running, recipientOk, feeLux, arrivesLux }) {
   const arrives = !running || arrivesLux <= 0n
     ? `Nothing arrives on ${chain}`
     : recipientOk
-      ? `${formatDuskExact(arrivesLux)} DUSK arrives on ${chain}`
+      ? `${formatDuskExact(arrivesLux)} DUSK arrives`
       : noBridgeRecipientText(chain);
-  return `${formatDuskExact(sentLux)} DUSK sent · ${formatDuskExact(feeLux)} DUSK bridge fee · ${arrives}`;
+  return `Bridge fee ${formatDuskExact(feeLux)} DUSK · ${arrives}`;
 }
 
 /**
@@ -139,18 +139,10 @@ export function noBridgeRecipientText(chain) {
 export function bridgeServiceWarnings(service) {
   const out = [];
   if (!service.running) {
-    out.push({
-      kind: "off",
-      title: `Not running on ${service.network} right now`,
-      text: `The bridge isn't paying out on ${service.chain} at the moment, so DUSK sent to it doesn't arrive there.`,
-    });
+    out.push({ kind: "off", title: `Not paying out on ${service.chain} now`, text: "Nothing sent to it would arrive." });
   }
   if (service.arrivesLux <= 0n) {
-    out.push({
-      kind: "fee",
-      title: `Nothing arrives on ${service.chain}`,
-      text: `The bridge takes its ${formatDuskExact(service.feeLux)} DUSK fee from the amount, and this is no more than that.`,
-    });
+    out.push({ kind: "fee", title: `Nothing arrives on ${service.chain}`, text: `The ${formatDuskExact(service.feeLux)} DUSK bridge fee takes it all.` });
   }
   return out;
 }

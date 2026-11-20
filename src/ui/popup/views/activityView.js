@@ -226,7 +226,7 @@ export function activityView(ov, { state, actions } = {}) {
             if (!ok) actions?.showToast?.("Couldn't open the explorer");
           },
         },
-        [h("span", { text: "View in Dusk explorer" }), h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("ext") })]
+        [h("span", { text: "View in explorer" }), h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("ext") })]
       )
     : null;
 

@@ -516,12 +516,12 @@ array elements. The preview remains bounded to 200 rows, depth 8 and 2048 source
 code points per string; clipping is disclosed. Byte previews summarize decoded
 hex bytes, including uppercase-prefixed and prefixless input.
 
-**Full signing request (escaped JSON)** expands a read-only, keyboard-scrollable
+**Full signing request** expands a read-only, keyboard-scrollable escaped-JSON
 view of the complete domain, schema, message and wallet-injected origin, including
 omitted preview values and original bytes. Non-ASCII characters use `\uXXXX`
 escapes (surrogate pairs for supplementary characters); parsing the JSON recovers
 the original strings without normalization. The implicit `verifyingContract`
-default is disclosed as 32 zero bytes. Unused types and extra metadata do not
+default is disclosed as "None (32 zero bytes)". Unused types and extra metadata do not
 contribute to the digest.
 
 Both views use a snapshot whose digest is checked by the shared library against

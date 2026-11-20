@@ -98,7 +98,8 @@ async function stakeReview(answer) {
     state,
     amount,
     sent: () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX"),
-    confirm: () => app.querySelectorAll("button").find((b) => b.textContent === "Confirm"),
+    // The Review's button, named for the stake.
+    confirm: () => app.querySelectorAll("button").find((b) => b.textContent === "Stake 100 DUSK"),
   };
 }
 
@@ -140,7 +141,7 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
       }
     });
 
-    // Confirm reads Sozu's terms again; the switch starts while they're read.
+    // Stake 100 DUSK reads Sozu's terms again; the switch starts while they're read.
     confirm().click();
     await flush();
     startSwitch(dom, pill);
@@ -198,7 +199,7 @@ describe("a stake with Sozu whose terms are read again as the header switches", 
     expect(visibleText(app)).not.toContain("on its way");
   });
 
-  it("offers no Confirm on a Review left idle while the header switches to Profile 2, and sends nothing from Profile 1", async () => {
+  it("offers no Stake button on a Review left idle while the header switches to Profile 2, and sends nothing from Profile 1", async () => {
     let profile = 0;
     const { dom, app, send, state, amount, sent, confirm } = await stakeReview(async (message) => {
       switch (message.type) {
@@ -329,6 +330,8 @@ describe("Sozu's rate, as its stDUSK grew", () => {
     draw();
     await flush();
     const rate = app.querySelectorAll(".group.info .list-row").map((row) => visibleText(row)).find((text) => text.startsWith("About"));
-    expect(rate).toBe("About 21% a year. Not promised.stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.");
+    expect(rate).toBe("About 21% a year, after Sozu's 10%. Not promised.");
+    // Its line, under Details.
+    expect(visibleText(app.querySelector("details.sozu-details .sozu-working"))).toBe("stDUSK went from 3.0200 to 3.0719 DUSK over the last 30 days, after Sozu's share.");
   });
 });

@@ -16,7 +16,7 @@ import { safeTextEl } from "../../components/SafeText.js";
 import { ownProfileName } from "../../components/ProfileName.js";
 import { NOT_SENT_TEXT } from "../../../shared/waitingSends.js";
 import { lastReadText, whenAtText } from "./txRow.js";
-import { NOT_SENT_CHOSEN_TEXT, UNCLEAR_TEXT, appLeaveText, reasonText } from "./sent.js";
+import { CANCEL_FAILED_TEXT, NOT_SENT_CHOSEN_TEXT, UNCLEAR_TEXT, WENT_ALREADY_TEXT, appLeaveText, reasonText } from "./sent.js";
 import { isTauriRuntime } from "../../../platform/runtime.js";
 import { isPhone } from "../../lib/device.js";
 
@@ -325,7 +325,7 @@ function staleNote(ov, hasBalance) {
 
 /**
  * The payments from Send that wait for the network, each with what it pays,
- * to whom, its memo and when it was made, to tell them apart, and Cancel;
+ * to whom, its memo and when it was made, to tell them apart, and Don't send;
  * those that went out after they waited, as Sent till their block's in; and
  * those that stopped waiting without going out, said plainly, with Send it
  * now, which takes it straight to Review, and Don't send. None goes out by
@@ -349,11 +349,11 @@ function waitingSection(ov, { state, actions } = {}) {
   };
   // "0.01 DUSK to Lucas", its amount hidden with the balances.
   const what = (send) => [balance(hidden, formatDuskExact(send.lux)), ` DUSK to ${toText(send)}`];
-  // Its memo and when it was made: "“Hors ligne un” · made at 02:34".
+  // Its memo and when it was made: "“Hors ligne un” · 02:34", or "· yesterday at 02:34".
   const madeLine = (send) =>
     h("div", { class: "muted home-waiting__made" }, [
       ...(String(send.memo ?? "").trim() ? ["“", safeTextEl(send.memo), "” · "] : []),
-      `made ${whenAtText(Number(send.at) || Date.now())}`,
+      whenAtText(Number(send.at) || Date.now()).replace(/^at /, ""),
     ]);
   const refresh = () => {
     state.needsRefresh = true;
@@ -372,34 +372,29 @@ function waitingSection(ov, { state, actions } = {}) {
     });
 
   // One state at a time (Chen's, Lena's: "Not sent yet … It's being sent.
-  // Cancel" as it went out): Not sent yet while it waits for the network,
-  // Sending while it goes out; gone out, Activity has it as this card goes
-  // (the wallet keeps it as sent before it leaves this list). One handed
-  // over without a clear answer may have gone out: it's looked up, and has no
-  // Cancel. In the app on a phone, one waiting goes out only while the app's
-  // open, which it says.
+  // Cancel" as it went out): Waiting while it waits for the network, Sending
+  // while it goes out; gone out, Activity has it as this card goes (the
+  // wallet keeps it as sent before it leaves this list). One handed over
+  // without a clear answer may have gone out: it's looked up, and has no
+  // Don't send. In the app on a phone, one waiting goes out only while the
+  // app's open, which it says. "Goes out once the network answers." is kept
+  // on purpose: it moves money later without another press.
   const sending = (send) => !send.waits && !send.checks;
   const waitingNote = (send) =>
     send.unclear && send.checks
-      ? "It may have gone out already. The wallet checks once the network answers."
+      ? "It may have gone out already; checking once the network answers."
       : send.unclear && send.waits
         ? UNCLEAR_TEXT
         : send.waits
           ? isTauriRuntime() && isPhone()
-            ? `It goes out once the network answers. ${appLeaveText(ov)}`
-            : "It goes out once the network answers."
+            ? `Goes out once the network answers. ${appLeaveText(ov)}`
+            : "Goes out once the network answers."
           : "";
-  const titleOf = (send) => (sending(send) ? "Sending: " : send.unclear ? "Not confirmed: " : "Not sent yet: ");
+  const titleOf = (send) => (sending(send) ? "Sending: " : send.unclear ? "Not confirmed: " : "Waiting: ");
   // Called off, in plain words and no colour: the person chose it (Chen's:
   // a red Send failed for Don't send).
   const cancelled = (res) =>
-    actions?.showToast?.(
-      res?.result?.cancelled
-        ? NOT_SENT_CHOSEN_TEXT
-        : res?.error
-          ? "Couldn't cancel it. Try again."
-          : "It went out already, so it can't be cancelled."
-    );
+    actions?.showToast?.(res?.result?.cancelled ? NOT_SENT_CHOSEN_TEXT : res?.error ? CANCEL_FAILED_TEXT : WENT_ALREADY_TEXT);
   // Its account sent something else while it waited (Chen's: one waiting on
   // her first phone went out after she'd paid the same from her second): it
   // goes only on Send it too, which opens its Review, as Send it now does,
@@ -417,7 +412,7 @@ function waitingSection(ov, { state, actions } = {}) {
   // payment).
   const heldBox = (send) =>
     h("div", { class: "callout warn home-waiting home-waiting--held", role: "status" }, [
-      h("div", { class: "callout-title" }, ["Not sent yet: ", ...what(send)]),
+      h("div", { class: "callout-title" }, ["Held: ", ...what(send)]),
       madeLine(send),
       h("p", { class: "muted home-waiting__note", text: meanwhile(send) }),
       h("div", { class: "home-waiting__actions" }, [
@@ -439,7 +434,7 @@ function waitingSection(ov, { state, actions } = {}) {
       madeLine(send),
       waitingNote(send) ? h("p", { class: "muted home-waiting__note", text: waitingNote(send) }) : null,
       send.unclear ? null : h("div", { class: "home-waiting__actions" }, [
-        button("Cancel", async () => {
+        button("Don't send", async () => {
           cancelled(await Promise.resolve(actions?.send?.({ type: "DUSK_UI_CANCEL_SEND", sendId: send.sendId })).catch(() => null));
           refresh();
         }),
@@ -452,7 +447,7 @@ function waitingSection(ov, { state, actions } = {}) {
       madeLine(send),
       h("p", {
         class: "muted home-waiting__note",
-        text: send.held ? meanwhile(send) : NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "Nothing was sent and no fee was charged."].filter(Boolean).join(" "),
+        text: send.held ? meanwhile(send) : NOT_SENT_TEXT[send.ended] ?? [reasonText(send.error), "No fee charged."].filter(Boolean).join(" "),
       }),
       h("div", { class: "home-waiting__actions" }, [
         // Straight to Review, with what it pays: sent from there in its
@@ -495,9 +490,7 @@ function getStartedSection(ov, { state, actions } = {}) {
     bracketTitle({ text: "Get your first DUSK" }),
     h("div", { class: "group get-started-card" }, [
       h("p", {
-        text: testnet
-          ? "Ask someone to send you test DUSK. They need your account, from Receive."
-          : "Withdraw DUSK from an exchange, or ask someone to send you some. Both start with your account, from Receive.",
+        text: testnet ? "Ask someone for test DUSK: they send it to your account." : "Get DUSK from an exchange or a friend: they send it to your account.",
       }),
       h("button", {
         class: "btn-primary",

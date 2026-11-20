@@ -17,7 +17,7 @@ describe("assets view", () => {
 });
 
 describe("tokens and NFTs on Home", () => {
-  it("shows them in one section with its two actions, the token's balance with its symbol", async () => {
+  it("shows them in one section with its two actions, a token by its name, its balance with its symbol", async () => {
     const { installFakeDom, screenReaderText, visibleText } = await import("../../testing/fakeDom.js");
     const { vi } = await import("vitest");
     const { document } = installFakeDom();
@@ -49,7 +49,16 @@ describe("tokens and NFTs on Home", () => {
       [{ contractId: TOKEN, tokenId: "7", symbol: "ART", name: "Art" }]
     );
     draw(state);
-    expect(section().querySelectorAll(".asset-row").map(visibleText)).toEqual(["TTKNToken123.45 TKN", "ART #7Art"]);
+    // The symbol once, by the balance (the letter is its icon); a token with no name goes by its symbol.
+    expect(section().querySelectorAll(".asset-row").map(visibleText)).toEqual(["TToken123.45 TKN", "ART #7Art"]);
+    state.assets = assets([{ contractId: TOKEN, symbol: "TKN", decimals: 2 }]);
+    draw(state);
+    expect(section().querySelectorAll(".asset-row").map(visibleText)).toEqual(["TTKN123.45 TKN"]);
+    state.assets = assets(
+      [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }],
+      [{ contractId: TOKEN, tokenId: "7", symbol: "ART", name: "Art" }]
+    );
+    draw(state);
     section().querySelectorAll(".section-actions button")[1].click();
     expect(state.route).toBe("asset_add_nft");
   });
@@ -88,7 +97,7 @@ describe("tokens and NFTs after a switch to another wallet, on the same network 
     // Its balance, read as the row shows.
     rows(state, "wallet-a");
     await settle();
-    expect(rows(state, "wallet-a")).toEqual(["TTKNToken123.45 TKN"]);
+    expect(rows(state, "wallet-a")).toEqual(["TToken123.45 TKN"]);
     expect(rows(state, "wallet-b")).toEqual([]);
 
     // A read for wallet A still on its way when wallet B opens.
@@ -148,7 +157,7 @@ describe("sending a token from its page", () => {
     document.body.replaceChildren(...assetTokenConfirmView(ov, { state, actions }));
     await settle();
     expect(document.body.querySelector(".pay-guard").textContent).toContain("The public balance doesn't cover the network fee:");
-    expect(document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(true);
+    expect(document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 TKN").disabled).toBe(true);
   });
 
   it("writes the token's balance and how much is missing in the browser's number format", async () => {
@@ -305,7 +314,7 @@ describe("a token send's Review", () => {
       await settle();
       const busy = visibleText(document.body.querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
       pastClickGuard();
-      document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+      document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1.5 TKN").click();
       await settle();
       return [sent[0]?.params.gas?.price, busy];
     };
@@ -344,7 +353,7 @@ describe("a token send's Review", () => {
       document.body.replaceChildren(...assetTokenConfirmView(ov, { state, actions }));
       // Up, as app.js marks a new screen.
       screenShown();
-      const confirm = document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+      const confirm = document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1.5 TKN");
       const sends = () => send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX");
 
       confirm.click();

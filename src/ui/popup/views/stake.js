@@ -501,8 +501,8 @@ const anyOf = (sum) => typeof sum?.lux === "bigint" && sum.lux !== 0n;
 // what unstaking took out that year (rewardYearsOf), from the profile's whole
 // public history and Sozu's `status`, in the web wallet's words. What each
 // was worth in the region's currency, at its time, only when asked, as
-// Activity's export asks: CoinGecko's prices.
-function rewardYears(ov, { state, actions, hidden, status }) {
+// Activity's export asks: CoinGecko's prices. Folded, as the user left it.
+function rewardYears(ov, { state, actions, hidden, status, st }) {
   const history = stakingHistory(ov, { state, actions });
   if (history.reading || !history.rows.length) return null;
   const currency = defaultCurrency();
@@ -551,34 +551,41 @@ function rewardYears(ov, { state, actions, hidden, status }) {
         actions?.render?.()?.catch?.(() => {});
       },
     }),
-    h("span", { text: `Add each reward's value in ${currencyName(currency)}, from CoinGecko's prices` }),
+    h("span", { text: `Add ${currency} value (CoinGecko)` }),
   ]);
   // Sozu's two lines, how they're counted, in both wallets' words (app-core).
   const sozuShown = years.some(({ sozu, sozuGrown, reading }) => reading > 0 || sozu === null || sozuGrown === null || anyOf(sozu) || anyOf(sozuGrown));
   return [
-    h("div", { class: "section-head" }, [bracketTitle({ text: "Rewards by year" })]),
-    h("div", { class: "group stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown, reading }) =>
-      kvRow(
-        String(year),
-        // What grew moves with each stake and unstake; what was taken out, where some was, with an unstake.
-        [line(REWARD_WORDS.claimed, claimed), line(REWARD_WORDS.sozuGrown, sozuGrown, reading > 0), line(REWARD_WORDS.sozu, sozu, reading > 0 && anyOf(sozu))]
-          .filter(Boolean)
-          .map((parts) => h("span", { class: "stake-year-part" }, parts))
-      )
-    )),
-    sozuShown ? h("p", { class: "settings-note stake-years-counted", text: REWARDS_COUNTED }) : null,
-    value,
-  ].filter(Boolean);
+    advancedPanel(
+      st,
+      "years",
+      [
+        h("div", { class: "group group--inset stake-years" }, [...years].reverse().map(({ year, claimed, sozu, sozuGrown, reading }) =>
+          kvRow(
+            String(year),
+            // What grew moves with each stake and unstake; what was taken out, where some was, with an unstake.
+            [line(REWARD_WORDS.claimed, claimed), line(REWARD_WORDS.sozuGrown, sozuGrown, reading > 0), line(REWARD_WORDS.sozu, sozu, reading > 0 && anyOf(sozu))]
+              .filter(Boolean)
+              .map((parts) => h("span", { class: "stake-year-part" }, parts))
+          )
+        )),
+        sozuShown ? h("p", { class: "settings-note stake-years-counted", text: REWARDS_COUNTED }) : null,
+        value,
+      ].filter(Boolean),
+      { summary: "Rewards by year", className: "stake-years-fold" }
+    ),
+  ];
 }
 
 function kvRow(label, value) {
   return h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 }
 
-// An Advanced disclosure that stays as the user left it when the screen redraws.
-function advancedPanel(st, key, children) {
+// An Advanced disclosure, or another fold (`summary`), that stays as the user
+// left it when the screen redraws.
+function advancedPanel(st, key, children, { summary = "Advanced", className = "" } = {}) {
   const open = Boolean(st.advancedOpen?.[key]);
-  const details = h("details", { class: "advanced", open }, [h("summary", { text: "Advanced" }), h("div", { class: "advanced-body" }, children)]);
+  const details = h("details", { class: ["advanced", className].filter(Boolean).join(" "), open }, [h("summary", { text: summary }), h("div", { class: "advanced-body" }, children)]);
   details.addEventListener("toggle", () => {
     st.advancedOpen = { ...(st.advancedOpen ?? {}), [key]: details.open };
   });
@@ -683,9 +690,15 @@ function rewardRates(ov, { state, actions }) {
   const sozu = native !== null && sozuFee ? sozuRate(native, { fees: { reward: sozuFee } }, growth) : null;
   // Sozu's over the days stDUSK grew, else over native staking's.
   const sozuDays = growth?.days ?? nativeDays;
+  // When each was measured: said once under both where it's the same, on each where not.
+  const nativeWhen = native === null ? null : nativeDays ? `over ${lastDays(nativeDays)}` : "at today's stake";
+  const sozuWhen = sozu === null ? null : sozuDays ? `over ${lastDays(sozuDays)}` : "at today's stake";
+  const whens = [...new Set([nativeWhen, sozuWhen].filter(Boolean))];
+  const once = whens.length === 1 ? whens[0] : "";
   return {
-    native: native !== null ? `About ${ratePercent(native)} a year across the network ${nativeDays ? `over ${lastDays(nativeDays)}` : "at today's stake"}. Not promised.` : null,
-    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year${sozuDays ? ` over ${lastDays(sozuDays)},` : ""} after Sozu's ${feePercent(sozuFee, amountLocale())}. Not promised.` : null,
+    native: native !== null ? `About ${ratePercent(native)} a year${once ? "" : ` ${nativeWhen}`}` : null,
+    sozu: sozu !== null ? `About ${ratePercent(sozu)} a year${once ? "" : ` ${sozuWhen}`}, after Sozu's ${feePercent(sozuFee, amountLocale())}` : null,
+    note: whens.length ? (once ? `Rates ${once}, not promised.` : "Not promised.") : null,
   };
 }
 
@@ -731,9 +744,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
   const { publicLux } = fundingOptionsForPosition(pos);
   const several = positions.length > 1;
 
-  // What's staked comes first, natively and with Sozu. With nothing natively
-  // staked beside Sozu, the native figure says there's nothing to unstake or
-  // claim, away from Unstake from Sozu.
+  // What's staked comes first, natively and with Sozu.
   const holding = sozuHolding(ov, { state, actions });
   const hasLiquid = holding.known && (holding.poolLux > 0n || holding.stDuskLux > 0n);
   const hasNative = stakedLux > 0n || rewardLux > 0n;
@@ -776,11 +787,11 @@ function stakingOverview(ov, ctx, { state, actions }) {
       : null,
     hasLiquid
       ? h("div", { class: "stake-sum__two" }, [
-          figure("Staked natively", stakedLux, hasNative ? null : ["Nothing to unstake or claim"]),
+          figure("Staked natively", stakedLux),
           figure(
             pos.stakeProfileIndex === ctx.selectedIndex ? "With Sozu" : `With Sozu · ${profileLabel(ctx.selectedIndex)}`,
             holding.poolLux,
-            [balance(hidden, fmtLux(holding.stDuskLux)), " stDUSK, rewards included"]
+            [balance(hidden, fmtLux(holding.stDuskLux)), " stDUSK"]
           ),
           figure("Native rewards", rewardLux),
         ])
@@ -827,30 +838,25 @@ function stakingOverview(ov, ctx, { state, actions }) {
   ].filter(Boolean));
 
   // Two equal choices; neither is picked for you. Each says about what it
-  // pays a year, once that's read.
+  // pays a year, once that's read, and the note under both that it's not promised.
   const rates = rewardRates(ov, { state, actions });
   const choices = h("div", { class: "group stake-choices" }, [
     listRow({
       icon: "server",
       title: "Native staking",
-      subs: [
-        ...(pos.hasStake ? ["Add to your stake", "Needs your own Dusk node"] : [`Minimum ${fmtLux(minLux)} DUSK`, "Needs your own Dusk node"]),
-        rates.native,
-      ],
+      subs: [pos.hasStake ? "Add to your stake · needs your own node" : `From ${fmtLux(minLux)} DUSK · needs your own node`, rates.native],
       onClick: () => setScreen(st, SCREEN_NATIVE, actions),
     }),
     listRow({
       icon: "drop",
-      title: ["Liquid staking", h("span", { class: "tag", text: "Sozu · third party" })],
-      subs: ["Any amount · No node needed", "You get stDUSK for your share", rates.sozu],
+      title: ["Liquid staking", h("span", { class: "tag", text: "Sozu, third party" })],
+      subs: ["Any amount · no node needed", rates.sozu],
       onClick: () => stakeWithSozu(state, st, actions),
     }),
   ]);
+  const ratesNote = rates.note ? h("p", { class: "amount-note stake-rates-note", text: rates.note }) : null;
 
-  const available = h("div", { class: "stake-avail" }, [
-    balance(hidden, fmtLux(publicLux)),
-    " DUSK available to stake, from your public balance",
-  ]);
+  const available = h("div", { class: "stake-avail" }, ["Available ", balance(hidden, fmtLux(publicLux)), " DUSK"]);
 
   // Which stake the screen shows, who owns it, and its details, out of the way.
   const advanced = advancedPanel(st, "overview", [
@@ -910,9 +916,10 @@ function stakingOverview(ov, ctx, { state, actions }) {
     subnav({ title: "Staking", onBack }),
     statusLine(st),
     summary,
-    ...(rewardYears(ov, { state, actions, hidden, status: holding.status }) ?? []),
+    ...(rewardYears(ov, { state, actions, hidden, status: holding.status, st }) ?? []),
     h("div", { class: "section-head" }, [bracketTitle({ text: "Stake" })]),
     choices,
+    ratesNote,
     available,
     advanced,
   ].filter(Boolean);
@@ -1045,7 +1052,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   });
 
   const available = h("div", { class: "amount-avail" }, [
-    h("span", {}, ["Available ", balance(hidden, fmtLux(publicLux)), " DUSK from your public balance"]),
+    h("span", {}, ["Available ", balance(hidden, fmtLux(publicLux)), " DUSK"]),
     useMin,
     maxBtn,
   ].filter(Boolean));
@@ -1053,7 +1060,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   // The facts from Dusk's staking docs, in a few lines.
   const facts = h("div", { class: "group info" }, [
     nodeRow(actions),
-    infoRow("clock", "Rewards start in about 6 to 12 hours", "Unstake any time, with no waiting period."),
+    infoRow("clock", "Rewards start in 6 to 12 hours", "Unstake any time."),
     isNew
       ? null
       : infoRow(
@@ -1061,12 +1068,8 @@ function nativeStakeView(ov, ctx, { state, actions }) {
           "10% of what you add is locked",
           "When your stake is already active. It's still yours, and unstaking returns it."
         ),
-    infoRow(
-      "alert",
-      "If your node misses its turn",
-      "Part of your stake gets locked. It's still yours, and unstaking returns it. If the node breaks the rules, part of the stake can be burned (lost)."
-    ),
-    infoRow("fee", `Network fee up to ${formatFee(feeLux, { max: true })} DUSK`, null),
+    infoRow("alert", "If your node misses its turn", "Part of the stake is locked (still yours). If it breaks the rules, part can be burned (lost)."),
+    infoRow("fee", `Fee up to ${formatFee(feeLux, { max: true })} DUSK`, null),
   ].filter(Boolean));
 
   // Who owns a new stake, and which account it is for: most people leave it.
@@ -1112,12 +1115,12 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       ]),
     ]);
 
-  // Under the minimum, the way that takes any amount, named as a third party.
+  // Under the minimum, the way that takes any amount: Sozu's screen names it a third party.
   const liquidLink = isNew
     ? h("button", {
         class: "text-btn stake-liquid-link chain-link",
         type: "button",
-        text: `Less than ${fmtLux(minLux)} DUSK? Use liquid staking (Sozu, third party)`,
+        text: `Under ${fmtLux(minLux)} DUSK? Use liquid staking`,
         onclick: () => stakeWithSozu(state, st, actions),
       })
     : null;
@@ -1151,14 +1154,20 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
-
   // What moves: the amount staked, or all of the stake or the rewards. The
   // stake and the rewards are balances, hidden with Hide balances; an amount
   // typed in for a stake shows, as on every Review; what Max filled in doesn't.
   const shownLux = kind === TX_KIND.STAKE ? d.amountLux : d.amountLux || d.displayLux;
   const allText = kind === TX_KIND.UNSTAKE ? "All stake" : kind === TX_KIND.WITHDRAW_REWARD ? "All rewards" : "—";
   const hideAmount = (kind !== TX_KIND.STAKE || Boolean(d.amountMasked)) && balancesHidden(ov);
+
+  // The button names what it does, with the amount as the head shows it: "Stake 1,000 DUSK".
+  const verb = kind === TX_KIND.UNSTAKE ? "Unstake" : kind === TX_KIND.WITHDRAW_REWARD ? "Claim" : "Stake";
+  const confirmBtn = h(
+    "button",
+    { class: "btn-primary" },
+    shownLux && safeBigInt(shownLux, 0n) > 0n ? [`${verb} `, balance(hideAmount, formatDuskExact(shownLux)), " DUSK"] : [verb]
+  );
 
   const gasPrivacy = d.payment === FUNDING_SHIELDED ? "shielded" : "public";
   // The network's gas price by default; Custom fee for gas of your own. A
@@ -1263,9 +1272,9 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
           h("span", {}, [withReviewWallet(stakeName, actions?.review), h("span", { class: "kv-muted", text: d.payment === FUNDING_SHIELDED ? " · Shielded" : " · Public" })]),
         ]),
         severalProfiles ? kvRow("Owner", profileName(ov, d.ownerProfileIndex)) : null,
-        kind === TX_KIND.STAKE && !severalProfiles && !d.hasStake ? kvRow("Rewards start", "In about 6 to 12 hours") : null,
+        kind === TX_KIND.STAKE && !severalProfiles && !d.hasStake ? kvRow("Rewards start", "In 6 to 12 hours") : null,
       ].filter(Boolean)),
-      // The node from the amount screen, once more before Confirm.
+      // The node from the amount screen, once more before the stake goes.
       kind === TX_KIND.STAKE ? h("div", { class: "group info" }, [nodeRow(actions)]) : null,
       gasEditor,
       reviewActions(confirmBtn, confirmError, pay.el),

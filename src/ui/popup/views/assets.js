@@ -267,10 +267,11 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
   const tokens = Array.isArray(st?.tokens) ? st.tokens : [];
   const nfts = Array.isArray(st?.nfts) ? st.nfts : [];
 
+  // A token by its name, its symbol beside its balance; by its symbol where it has no name.
   const tokenRows = tokens.map((t) => {
     const cid = String(t?.contractId ?? "");
     const sym = String(t?.symbol ?? "").trim() || "TOKEN";
-    const name = String(t?.name ?? "").trim() || "DRC20 token";
+    const name = String(t?.name ?? "").trim() || sym;
     const dec = Number(t?.decimals ?? 0) || 0;
     const balUnits = st?.balances?.[cid];
     const bal = balUnits != null ? formatTokenUnits(balUnits, dec, { maxFrac: UI_DISPLAY_DECIMALS }) : "—";
@@ -289,10 +290,7 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
       },
       [
         h("span", { class: "row-icon asset-letter", "aria-hidden": "true", text: sym.slice(0, 1).toUpperCase() }),
-        h("span", { class: "row-main" }, [
-          h("span", { class: "row-title", text: sym }),
-          h("span", { class: "row-sub", text: name, title: cid }),
-        ]),
+        h("span", { class: "row-main" }, [h("span", { class: "row-title", text: name, title: cid })]),
         h("span", { class: "tx-amount asset-amt" }, [balance(hidden, bal), bal === "—" ? null : h("span", { class: "tx-unit", text: ` ${sym}` })].filter(Boolean)),
       ]
     );
@@ -889,8 +887,11 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
         })
       : null;
 
-  // Back returns to the token, so Review has no Cancel.
-  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
+  // Back returns to the token, so Review has no Cancel. Its button says what
+  // it does and how much: "Send 5 EURd", "Approve 5 EURd", "Approve all EURd".
+  const valueShown = groupThousands(formatTokenUnits(String(d?.asset?.valueUnits ?? d?.asset?.value ?? "0"), dec, { maxFrac: dec }));
+  const confirmText = op === "transfer" ? `Send ${valueShown} ${sym}` : op === "approve" ? (d?.asset?.isMax ? `Approve all ${sym}` : `Approve ${valueShown} ${sym}`) : "Approve";
+  const confirmBtn = h("button", { class: "btn-primary", text: confirmText });
 
   // The public balance pays its fee.
   const pay = payGuard({

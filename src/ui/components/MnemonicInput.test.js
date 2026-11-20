@@ -265,7 +265,7 @@ describe("the recovery phrase's word boxes", () => {
     expect(words()).toEqual(TWELVE.split(" "));
   });
 
-  // Marek's: "Paste the whole phrase into any box", and the pasted phrase stayed on the phone's clipboard, where his
+  // Marek's: "Paste all words into any box", and the pasted phrase stayed on the phone's clipboard, where his
   // own page read it back in full.
   it("takes pasted words off the clipboard, in the paste's own tap, and says so once where the browser won't", async () => {
     const { box, input, words } = mount();
@@ -339,10 +339,15 @@ describe("the recovery phrase's word boxes", () => {
     paste(box(1), OTHER.replace("worth", "wurth"));
     expect([cell(7).classList.contains("is-invalid"), box(7).getAttribute("aria-invalid")]).toEqual([true, "true"]);
     expect(cell(6).classList.contains("is-invalid")).toBe(false);
-    expect(onCheck).toHaveBeenLastCalledWith("Word 7 isn't a recovery word. Check its spelling.");
+    expect(onCheck).toHaveBeenLastCalledWith("Word 7 isn't in the word list. Check its spelling.");
 
     paste(box(1), OTHER.replace("legal", "legl").replace("worth", "wurth"));
-    expect(onCheck).toHaveBeenLastCalledWith("Words 1 and 7 aren't recovery words. Check their spelling.");
+    expect(onCheck).toHaveBeenLastCalledWith("Words 1 and 7 aren't in the word list. Check their spelling.");
+
+    // More than three: counted, the marks saying which (made-up words, none in the list).
+    paste(box(1), "lantern pebble comet willow saffron quill nimbus ember tundra juniper cobalt thistle");
+    expect(onCheck).toHaveBeenLastCalledWith("12 words aren't in the word list. Check the marked ones.");
+    expect(Array.from({ length: 12 }, (_, i) => cell(i + 1).classList.contains("is-invalid"))).toEqual(Array(12).fill(true));
   });
 
   it("says plainly when a pasted phrase has the wrong count or its checksum fails, and nothing for a good one", () => {
@@ -420,7 +425,7 @@ describe("the recovery phrase's word boxes", () => {
     const { box, words, onCheck } = mount();
     typeInto(box(9), OTHER.replace("worth", "wurth"));
     expect(words()).toEqual(OTHER.replace("worth", "wurth").split(" "));
-    expect(onCheck).toHaveBeenLastCalledWith("Word 7 isn't a recovery word. Check its spelling.");
+    expect(onCheck).toHaveBeenLastCalledWith("Word 7 isn't in the word list. Check its spelling.");
   });
 
   // Chen's: in the Android app a phone's keyboard sends a space as text, never as a key, and every word went in box 1.
@@ -471,7 +476,7 @@ describe("the recovery phrase's word boxes", () => {
       // Several words at once, as voice typing composes them, put in the boxes from there, and said of after it's done.
       compose("apple kiwo pear", { order });
       expect(words().slice(0, 6), order).toEqual(["kiwi", "lemon", "apple", "kiwo", "pear", ""]);
-      expect(onCheck, order).toHaveBeenLastCalledWith("Word 4 isn't a recovery word. Check its spelling.");
+      expect(onCheck, order).toHaveBeenLastCalledWith("Word 4 isn't in the word list. Check its spelling.");
     }
   });
 
@@ -504,9 +509,9 @@ describe("the recovery phrase's word boxes", () => {
   });
 
   it("can show a line above the words that describes them", () => {
-    const { input } = mount({ hint: "Paste the whole phrase into any box." });
+    const { input } = mount({ hint: "Paste all words into any box." });
     const hint = input.el.querySelector(".srp-hint");
-    expect(hint.textContent).toBe("Paste the whole phrase into any box.");
+    expect(hint.textContent).toBe("Paste all words into any box.");
     // Above the boxes, under the 12 or 24 choice; under them, what's said of the clipboard after a paste.
     expect(input.el.children.map((el) => el.className)).toEqual(["tabs tabs--mini srp-toggle", "srp-hint", "box srp-box", "srp-clipboard"]);
     expect(input.el.getAttribute("aria-describedby")).toBe(hint.id);
@@ -640,7 +645,7 @@ describe("words suggested as a box is typed in", () => {
     expect(words()[1]).toBe("zoo");
   });
 
-  it("marks letters that start no word at once, Not a recovery word under the box, and a word not finished once it's left", () => {
+  it("marks letters that start no word at once, Not in the word list under the box, and a word not finished once it's left", () => {
     const { input, box, cell } = mount();
     const grid = input.el.querySelector(".srp-grid");
     const markOf = (n) => [cell(n).classList.contains("is-invalid"), box(n).getAttribute("aria-invalid")];
@@ -648,7 +653,7 @@ describe("words suggested as a box is typed in", () => {
     typeInto(box(5), "x");
     expect([note(input), markOf(5)]).toEqual(["", [false, null]]);
     typeInto(box(5), "xq");
-    expect([note(input), chips(input), markOf(5)]).toEqual(["Not a recovery word", [], [true, "true"]]);
+    expect([note(input), chips(input), markOf(5)]).toEqual(["Not in the word list", [], [true, "true"]]);
     // Said to screen readers as it shows, as the box's own error, under the row of boxes 5 and 6 (after its
     // chips' row, hidden).
     const line = input.el.querySelector(".srp-word-note");
@@ -657,7 +662,7 @@ describe("words suggested as a box is typed in", () => {
     // Of a box on the right, at the row's end, under it.
     expect(line.classList.contains("is-end")).toBe(false);
     typeInto(box(6), "qx");
-    expect([note(input), line.classList.contains("is-end"), markOf(6)]).toEqual(["Not a recovery word", true, [true, "true"]]);
+    expect([note(input), line.classList.contains("is-end"), markOf(6)]).toEqual(["Not in the word list", true, [true, "true"]]);
     typeInto(box(6), "");
     box(5).focus();
     // Letters that start a word again: the mark goes as they're typed.
@@ -774,7 +779,7 @@ describe("words suggested as a box is typed in", () => {
     typeKeys("ca", { as: "text" });
     expect([words()[0], chips(input)]).toEqual(["ca", []]);
     typeInto(box(1), "xq");
-    expect([note(input), chips(input)]).toEqual(["Not a recovery word", []]);
+    expect([note(input), chips(input)]).toEqual(["Not in the word list", []]);
   });
 
   it("asks nothing of the network and logs nothing as words are typed", () => {
@@ -786,7 +791,7 @@ describe("words suggested as a box is typed in", () => {
     for (const typed of ["w", "wa", "wal", "walk"]) typeInto(box(1), typed);
     keydown(box(1), "Enter");
     typeInto(box(2), "xq");
-    expect([fetch.mock.calls.length, ...logged.map((spy) => spy.mock.calls.length), note(input)]).toEqual([0, 0, 0, 0, 0, 0, "Not a recovery word"]);
+    expect([fetch.mock.calls.length, ...logged.map((spy) => spy.mock.calls.length), note(input)]).toEqual([0, 0, 0, 0, 0, 0, "Not in the word list"]);
     for (const spy of logged) spy.mockRestore();
   });
 

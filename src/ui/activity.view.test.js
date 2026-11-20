@@ -199,7 +199,7 @@ describe("Activity's rows", () => {
       profileIndex: 0,
     };
     setup({ local: [pending] });
-    expect(rows()[0]).toBe("faucet.duskSent · Just now−5 DUSKPending");
+    expect(rows()[0]).toBe("faucet.duskSent · Just now−5 DUSKSending");
     // Completed rows say nothing about it.
     expect(rows().slice(1).join("\n")).not.toMatch(/Completed|Finalized|Executed/);
 
@@ -207,9 +207,9 @@ describe("Activity's rows", () => {
     const view = setup({ local: [pending] });
     view.state.addressBook = { loaded: true, items: [{ name: "Faucet (test)", address: FAUCET }] };
     view.draw();
-    expect(rows()[0]).toBe("Faucet (test) · faucet.duskSent · Just now−5 DUSKPending");
+    expect(rows()[0]).toBe("Faucet (test) · faucet.duskSent · Just now−5 DUSKSending");
     expect(body().querySelector(".tx-row .tx-alias").textContent).toBe(" · faucet.dusk");
-    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Faucet (test) · faucet.dusk, Sent · Just now, −5 DUSK, Pending");
+    expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toBe("Faucet (test) · faucet.dusk, Sent · Just now, −5 DUSK, Sending");
   });
 
   // Lena's: after Don't send, a payment that went out anyway was a plain Sent row after a few seconds, and she
@@ -407,7 +407,7 @@ describe("the Activity view", () => {
     expect(search("gouter")).toEqual(["Le go\u00fbter du mercredi"]);
     // What can't be seen in a memo shows as its code, as everywhere a memo shows, and its button says it.
     // The last one came in from an address that isn't a contact's: the sender's words, said so.
-    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", `From ${shortAddress(SENDER)} · not in your contacts“Fac\\u202etura”`]);
+    expect(search("fac")).toEqual(["Factura 2026-074 Ilustraci\u00f3n", "Not a contact“Fac\\u202etura”"]);
     expect(visibleText(body())).not.toContain("\u202e");
     const opened = body().querySelectorAll(".tx-row button.tx-open").map(accessibleName);
     expect(opened.every((name) => /, memo /.test(name))).toBe(true);
@@ -416,7 +416,7 @@ describe("the Activity view", () => {
   // Chen's and Marek's: a stranger's "URGENT: wallet suspended - pay now to restore" read like the wallet's own words,
   // in Activity, on Home and in its details. Lena's and Amélie's then: "From sofiadesign.dusk" with nothing saying she
   // isn't a contact, and a pushy stranger's memo still the biggest thing in its row.
-  it("says a stranger's memo is theirs: who it's from and not in your contacts, a .dusk name or not, then their words, muted and in quotes", () => {
+  it("says a stranger's memo is theirs: not a contact, a .dusk name or not, under the name it's from, then their words, muted and in quotes", () => {
     const urgent = "URGENT: wallet suspended - pay now to restore";
     const { state, draw } = setup({ route: "activity" });
     const at = state.activity.entries.findIndex((entry) => entry.direction === "in" && String(entry.counterparty ?? "") === SENDER);
@@ -429,9 +429,12 @@ describe("the Activity view", () => {
     field.dispatchEvent(new Event("input"));
     expect(body().querySelectorAll(".tx-row")).toHaveLength(1);
     expect(memoLine().className).toContain("tx-memo--theirs");
-    const from = `From ${shortAddress(SENDER)} · not in your contacts`;
+    // Who it's from is the row's name, said once; under it, that it's not a contact's.
+    const from = "Not a contact";
+    expect(visibleText(body().querySelector(".tx-row .tx-name"))).toBe(shortAddress(SENDER));
     expect(visibleText(memoLine())).toBe(`${from}“${urgent}”`);
-    // Who it's from first, in the memo's own size: never cut off by a long memo.
+    expect(visibleText(body().querySelector(".tx-row"))).not.toContain(`From ${shortAddress(SENDER)}`);
+    // Not a contact first, in the memo's own size: never cut off by a long memo.
     expect(memoLine().children.map((el) => el.className)).toEqual(["tx-memo__from", "tx-memo__text"]);
     expect(memoLine().querySelector("a, b, strong")).toBeNull();
     expect(accessibleName(body().querySelector(".tx-row button.tx-open"))).toContain(`memo “${urgent}”, ${from}`);
@@ -440,15 +443,17 @@ describe("the Activity view", () => {
     state.activity.names = new Map([[SENDER, "sofiadesign.dusk"]]);
     draw();
     field.dispatchEvent(new Event("input"));
-    expect(visibleText(body().querySelector(".tx-row .tx-memo"))).toBe(`From sofiadesign.dusk · not in your contacts“${urgent}”`);
+    expect(visibleText(body().querySelector(".tx-row .tx-name"))).toBe("sofiadesign.dusk");
+    expect(visibleText(body().querySelector(".tx-row .tx-memo"))).toBe(`Not a contact“${urgent}”`);
 
-    // Its details: the same.
+    // Its details: the same, under the name in its head.
     const hash = state.activity.entries[at].hash;
     state.route = "tx";
     state.txDetailHash = hash;
     draw();
+    expect(visibleText(body().querySelector(".tx-hero-name"))).toBe("sofiadesign.dusk");
     const memoRow = body().querySelectorAll(".kv").find((kv) => kv.querySelector(".kv-label")?.textContent === "Memo");
-    expect(visibleText(memoRow.querySelector(".kv-value"))).toBe(`From sofiadesign.dusk · not in your contacts“${urgent}”`);
+    expect(visibleText(memoRow.querySelector(".kv-value"))).toBe(`Not a contact“${urgent}”`);
 
     // A contact's memo is as ever.
     state.route = "activity";
@@ -532,7 +537,7 @@ describe("the Activity view", () => {
   });
 
   // Amélie's: "marché" found nothing till History had been shown three times more, the payments kept all along;
-  // and a stranger's memo found lost its "not in your contacts".
+  // and a stranger's memo found lost its "not in your contacts", now "Not a contact".
   it("searches every payment kept on this device when older ones can't be had, a stranger's marked as in the list", async () => {
     const { state, draw } = setup({ complete: false, route: "activity" });
     const kept = state.activity.entries.map((entry) => (entry.hash === state.activity.entries.find((e) => e.counterparty === SENDER)?.hash ? { ...entry, memo: "Les fleurs du marché" } : entry));
@@ -552,7 +557,7 @@ describe("the Activity view", () => {
     field.value = "marche";
     field.dispatchEvent(new Event("input"));
     await vi.waitFor(() => expect(rows()).toHaveLength(1));
-    expect(rows()[0]).toBe(`${short(SENDER)}Received · 16:41From ${short(SENDER)} · not in your contacts“Les fleurs du marché”+1,000 DUSK`);
+    expect(rows()[0]).toBe(`${short(SENDER)}Received · 16:41Not a contact“Les fleurs du marché”+1,000 DUSK`);
     expect(body().querySelector(".tx-row .tx-memo").className).toContain("tx-memo--theirs");
     // Older payments may still match: it says so, with Show more.
     field.value = "tulipes";
@@ -675,7 +680,7 @@ describe("the Activity view", () => {
     state.activity.complete = true;
     draw();
     expect(button("Show more")).toBeUndefined();
-    button("View in Dusk explorer").click();
+    button("View in explorer").click();
     await settle();
     expect(openUrl).toHaveBeenCalledWith(`https://explorer.testnet.dusk.network/accounts/?key=${A}`);
   });
@@ -730,20 +735,31 @@ describe("a transaction's details", () => {
     return view;
   };
 
-  it("leads with who, how much and its status, then its date, memo, fee, profile and ID", async () => {
+  it("leads with who, how much and its status, then its date, memo, fee and profile, its ID under Details", async () => {
     const { state } = open({ local: [sent] }, sent.hash);
     await settle();
     expect(visibleText(body().querySelector(".tx-hero"))).toBe("Sent tofaucet.dusk" + `${short(FAUCET)}−25 DUSKCompleted`);
     expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText)).toEqual([
       "DateThu 22 Oct 2026, 14:32 UTC",
       "MemoOrder 1042",
-      "Network fee0.0037 DUSK",
+      "Fee0.0037 DUSK",
       "Fromalice.dusk · Public",
+    ]);
+    // The ID, block, gas and finality wait under Details.
+    const tech = body().querySelector("details.tx-tech");
+    expect(tech.open).toBe(false);
+    expect(visibleText(tech.querySelector("summary"))).toBe("Details");
+    expect(tech.querySelectorAll(".kv").map(visibleText)).toEqual([
       "Transaction ID3e6a0e…ae84baCopy",
+      "NetworkTestnet",
+      "Block4,658,100",
+      "Gas used3,700,000 of 10,000,000",
+      "Gas price1 LUX",
+      "SubmittedThu 22 Oct 2026, 14:32 UTC",
     ]);
     // The ID opens Dusk's explorer; Copy and the address's copy say what they copy.
     const explorerUrl = `https://explorer.testnet.dusk.network/transactions/transaction/?id=${sent.hash}`;
-    button(`Transaction 3e6a0e…ae84ba, open in Dusk explorer`).click();
+    button(`Transaction 3e6a0e…ae84ba, open in explorer`).click();
     await settle();
     expect(openUrl).toHaveBeenLastCalledWith(explorerUrl);
     button("Copy transaction ID").click();
@@ -752,18 +768,7 @@ describe("a transaction's details", () => {
     button("Copy address").click();
     await settle();
     expect(dom.clipboard.writeText).toHaveBeenLastCalledWith(FAUCET);
-    // Block, gas and finality wait under Technical details.
-    const tech = body().querySelector("details.tx-tech");
-    expect(tech.open).toBe(false);
-    expect(visibleText(tech.querySelector("summary"))).toBe("Technical details");
-    expect(tech.querySelectorAll(".kv").map(visibleText)).toEqual([
-      "NetworkTestnet",
-      "Block4,658,100",
-      "Gas used3,700,000 of 10,000,000",
-      "Gas price1 LUX",
-      "SubmittedThu 22 Oct 2026, 14:32 UTC",
-    ]);
-    button("View in Dusk explorer").click();
+    button("View in explorer").click();
     await settle();
     expect(openUrl).toHaveBeenLastCalledWith(explorerUrl);
     // Back says so, and goes back where it came from.
@@ -771,7 +776,7 @@ describe("a transaction's details", () => {
     expect(state.route).toBe("activity");
   });
 
-  it("says under Technical details how the wallet watched a send only until the chain's history has it", () => {
+  it("says under Details how the wallet watched a send only until the chain's history has it", () => {
     const tech = () => body().querySelectorAll("details.tx-tech .kv").map(visibleText);
     const checked = "Last checkedThu 22 Oct 2026, 14:32 UTC";
     open({ local: [{ ...sent, lastCheckedAt: sent.executedAt }] }, sent.hash);
@@ -787,7 +792,7 @@ describe("a transaction's details", () => {
   it("hides the amount and the fee with Hide balances", () => {
     open({ local: [sent], hidden: true }, sent.hash);
     expect(visibleText(body())).not.toContain("25 DUSK");
-    expect(visibleText(body())).toContain("Network fee•••• DUSK");
+    expect(visibleText(body())).toContain("Fee•••• DUSK");
     expect(visibleText(body())).not.toContain("0.0037");
     expect(visibleText(body())).not.toContain("0.00");
     expect([visibleText(body().querySelector(".tx-hero-amount")), screenReaderText(body().querySelector(".tx-hero-amount"))]).toEqual([
@@ -807,7 +812,7 @@ describe("a transaction's details", () => {
     expect(text).toContain("Toalice.dusk · Public");
     expect(text).toContain("FinalityFinal");
     // Its fee was the sender's.
-    expect(text.some((t) => t.startsWith("Network fee"))).toBe(false);
+    expect(text.some((t) => t.startsWith("Fee"))).toBe(false);
   });
 
   it("says why one didn't go through in plain words, and what it cost", () => {
@@ -817,7 +822,7 @@ describe("a transaction's details", () => {
     expect(visibleText(body().querySelector(".tx-hero-note"))).toBe(
       "Shielded transactions are paused on the network. The 25 DUSK stayed in your wallet."
     );
-    // The chain's own words wait under Technical details.
+    // The chain's own words wait under Details.
     expect(body().querySelectorAll("details.tx-tech .kv").map(visibleText)).toContain("ErrorPanic: phoenix is not enabled in the VM");
     // Nothing left: the amount shows muted, without a sign.
     expect([visibleText(body().querySelector(".tx-hero-amount")), body().querySelector(".tx-hero-amount").className]).toEqual([
@@ -835,17 +840,19 @@ describe("a transaction's details", () => {
 
     const pending = { ...sent, status: "mempool", feePaid: undefined, gasSpent: undefined };
     open({ local: [pending] }, pending.hash);
-    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Pending");
+    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Sending");
     expect(visibleText(body().querySelector(".tx-hero-note"))).toBe("Still waiting to go through. Don't retry yet.");
-    expect(visibleText(body())).toContain("Network feeUp to 0.01 DUSK");
+    expect(visibleText(body())).toContain("FeeUp to 0.01 DUSK");
 
+    // Dropped before it ran: Failed, as Sent says it; that no fee was charged is said once, in its note.
     const dropped = { ...pending, status: "removed" };
     open({ local: [dropped] }, dropped.hash);
-    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Dropped");
+    expect(visibleText(body().querySelector(".tx-hero-status"))).toBe("Failed");
     expect(visibleText(body().querySelector(".tx-hero-note"))).toBe(
-      "The network dropped it before it ran, so no fee was charged. The 25 DUSK stayed in your wallet."
+      "The network dropped it before it ran. No fee charged. The 25 DUSK stayed in your wallet."
     );
-    expect(visibleText(body())).toContain("Network feeNone charged");
+    expect(body().querySelectorAll(".tx-detail > .group > .kv").map(visibleText).filter((t) => t.startsWith("Fee"))).toEqual([]);
+    expect(visibleText(body())).not.toContain("None charged");
   });
 });
 
@@ -875,7 +882,7 @@ describe("a synced entry whose outcome isn't looked up yet", () => {
     expect(line()).toBe(`Dusk Domains · ${new Date(other.timestamp).toISOString().slice(11, 16)}`);
   });
 
-  it("says Unknown, muted, not Completed or Pending", () => {
+  it("says Unknown, muted, not Completed or Sending", () => {
     const view = setup();
     unfetched(view);
     view.draw();
@@ -1014,7 +1021,7 @@ describe("the chain's blue", () => {
     expect(view.state.route).toBe("activity");
 
     // Activity: the account on Dusk's explorer.
-    expect(blue().map(visibleText)).toEqual(["View in Dusk explorer"]);
+    expect(blue().map(visibleText)).toEqual(["View in explorer"]);
     blue()[0].click();
     await settle();
     expect(openUrl).toHaveBeenCalledTimes(1);

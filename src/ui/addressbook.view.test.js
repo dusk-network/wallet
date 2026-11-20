@@ -164,7 +164,7 @@ describe("contacts", () => {
     const rows = dom.document.body.querySelectorAll(".contacts-section .contact-row");
     expect(rows.map(visibleText)).toEqual(["A alice.dusk Public Save"].map((t) => t.replace(/ /g, "")));
     const save = rows[0].querySelector(".mini-btn");
-    expect(accessibleName(save)).toBe("Save alice.dusk to Contacts");
+    expect(accessibleName(save)).toBe("Save alice.dusk as a contact");
     save.click();
     // Named after a .dusk name, it's saved from that name.
     expect(view.state.addressBook).toMatchObject({ view: "edit", editAddress: "alice.dusk", editName: "alice.dusk" });

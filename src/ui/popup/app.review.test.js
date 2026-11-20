@@ -122,7 +122,7 @@ describe("a Review drawn for wallet A, with wallet B opened in another window", 
       draft: { to: TO, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
     });
     const { app, send, state } = t;
-    const confirm = app.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const confirm = app.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK");
     expect(confirm).toBeTruthy();
 
     // Wallet B opens in another window. The popup reads its overview, then
@@ -151,7 +151,7 @@ describe("a Review's Confirm, the moment the Review is up", () => {
     addressBook: { loaded: true, items: [] },
     draft: { to: TO, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
   });
-  const confirm = (t) => t.app.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+  const confirm = (t) => t.app.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK");
 
   it("ignores a click as a double-click on Review lands there, sends one a moment later, and a redraw doesn't hold it again", async () => {
     const t = await popupOn("send", review());
@@ -231,7 +231,7 @@ describe("a Review's From line", () => {
     await flush();
     expect(from()).toBe("FromWallet 2 · Profile 1 · Public");
     pastClickGuard();
-    t.app.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
     await flush();
     expect(t.asked("DUSK_UI_SEND_TX")).toEqual([expect.objectContaining({ walletId: B })]);
   });
@@ -427,7 +427,7 @@ describe("the phone's Back button", () => {
     button("Review").click();
     await flush();
     pastClickGuard();
-    button("Confirm").click();
+    button("Send 1 DUSK").click();
     await flush();
     expect(t.state.route).toBe("sent");
     button("Done").click();
@@ -493,7 +493,7 @@ describe("the phone's Back button", () => {
 
     history.back();
     await flush();
-    expect(question()?.textContent).toContain("Go back?");
+    expect(question()?.textContent).toContain("Clear the words and password you typed?");
     expect([t.state.route, history.closed]).toEqual(["onboard_import", false]);
     // The question's own Back: its Cancel, the words kept.
     history.back();
@@ -765,7 +765,7 @@ describe("a half-typed Send, left with Back", () => {
     button("Review").click();
     await flush();
     pastClickGuard();
-    button("Confirm").click();
+    button("Send 0.02 DUSK").click();
     await flush();
     expect(t.asked("DUSK_UI_SEND_TX")).toHaveLength(1);
     button("Done").click();
@@ -931,7 +931,7 @@ describe("a request link the extension's tab opened with", () => {
     button("Review").click();
     await settled();
     pastClickGuard();
-    button("Confirm").click();
+    button("Send 0.02 DUSK").click();
     await settled();
     expect(t.state.route).toBe("sent");
     button("Done").click();
@@ -973,14 +973,14 @@ describe("a request link the extension's tab opened with", () => {
 describe("coming back to the wallet during a payment", () => {
   // Seen on testnet: after a send with no clear answer, each lookup, every 10 seconds, said it was still pending
   // again, a toast with View over Review's Confirm for three minutes.
-  it("says a send is still pending once, not again at each lookup that hears no more of it", async () => {
+  it("says a send is still sending once, not again at each lookup that hears no more of it", async () => {
     const HASH = "7e".repeat(32);
     const t = await popupOn("home", { addressBook: { loaded: true, items: [] } });
     const toasts = () => t.dom.document.body.querySelectorAll(".toast").filter((el) => !el.classList.contains("toast--leaving"));
     t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "unknown" });
     await flush();
     const first = toasts().at(-1);
-    expect(first?.textContent).toContain("still pending");
+    expect(first?.textContent).toContain("still sending");
     t.deliver({ type: "DUSK_UI_TX_STATUS", hash: HASH, status: "unknown" });
     await flush();
     expect(toasts()).toEqual([first]);
@@ -1675,7 +1675,7 @@ describe("the app on a phone", () => {
     t.dom.document.dispatchEvent(fakeEvent("visibilitychange"));
     await flush();
     pastClickGuard();
-    t.app.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    t.app.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
     await flush();
     expect(t.asked("DUSK_UI_SEND_TX")).toHaveLength(1);
     const after = await popupOn("home", { addressBook: { loaded: true, items: [] }, draft: null }, undefined, { tauri: tauriBridge() });
@@ -1720,7 +1720,7 @@ describe("the app on a phone", () => {
     t.open = { ...t.open, lockOnLeave: true };
     await t.render({ forceRefresh: true });
     expect(autoLock().value).toBe("leave");
-    expect(t.app.textContent).toContain("Locks the wallet as you leave the app.");
+    expect(t.app.textContent).toContain("Locks as you leave the app.");
 
     // The wallet's own share sheet is no leaving.
     const { shareText } = await import("../../platform/native.js");
@@ -1733,7 +1733,7 @@ describe("the app on a phone", () => {
     expect(t.asked("DUSK_UI_LOCK")).toHaveLength(1);
     await show();
     expect(t.app.querySelector("input[type=password]")?.getAttribute("placeholder")).toBe("Password");
-    expect(t.app.textContent).not.toContain("Locks the wallet as you leave the app.");
+    expect(t.app.textContent).not.toContain("Locks as you leave the app.");
   });
 
   // Chen's and Sofía's: Immediately locked the app on a trip to Files or a call, and the unlock
@@ -1876,7 +1876,7 @@ describe("the app on a phone", () => {
   });
 });
 
-// Amélie's: a request link opened the app, which had no wallet, on "Set up your Dusk Wallet", on Mainnet: for a second
+// Amélie's: a request link opened the app, which had no wallet, on "Set up Dusk Wallet", on Mainnet: for a second
 // she thought her wallet and money were gone.
 describe("a payment link that opens the app before there's a wallet in it", () => {
   const WEB = `https://apps.testnet.dusk.network/wallet/dashboard/send?to=${B}&amount=0.001&memo=Les+tulipes&network=testnet`;
@@ -2216,7 +2216,8 @@ describe("a wallet tab that reloads", () => {
     const field = (name) => t.app.querySelectorAll("input, textarea").find((f) => accessibleName(f) === name);
     typeInto(field("Amount"), "0.5");
     typeInto(field("Memo"), "Rent March");
-    await vi.waitFor(() => expect(t.app.querySelector(".receive-request__meta")?.textContent).toBe("0.5 DUSK"));
+    // The QR holds the request once it's read: its Copy request comes on.
+    await vi.waitFor(() => expect(t.app.querySelector('button[data-label="Copy request"]')?.disabled).toBe(false));
     t.dom.window.dispatchEvent(fakeEvent("pagehide"));
 
     t = await popupOn("home", { addressBook: { loaded: true, items: [] }, receive: null }, undefined, { history: tab.page(false), tab: { id: 7 } });

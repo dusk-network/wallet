@@ -204,7 +204,7 @@ test("suggests the words a box's letters start under its row, a finger's size, a
   // Letters that start no word: said at once, under the box.
   await page.keyboard.insertText("x");
   await page.keyboard.insertText("q");
-  await expect(page.getByRole("alert")).toHaveText("Not a recovery word");
+  await expect(page.getByRole("alert")).toHaveText("Not in the word list");
   await expect(box(12)).toHaveAttribute("aria-invalid", "true");
 });
 
@@ -269,7 +269,7 @@ const clearOfKeyboard = (page) => page.evaluate(() => document.documentElement.c
 test("keeps Memo and Review above the keyboard on Send opened again from its Review", async ({ page }) => {
   await popupOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "0.02", memo: "" } });
   await page.getByRole("button", { name: "Review" }).click();
-  await expect(page.getByRole("button", { name: "Confirm" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Send 0.02 DUSK" })).toBeVisible();
   await page.getByRole("button", { name: "← Back" }).click();
   const memo = page.getByLabel("Memo");
   await expect(memo).toBeVisible();
@@ -297,11 +297,11 @@ test("keeps Copy request above the keyboard with the request's Memo", async ({ p
 test("puts Review's Confirm after its details on a phone turned sideways, over none of them", async ({ page }) => {
   await page.setViewportSize({ width: 915, height: 412 });
   await popupOn(page, "confirm", { draft: { to: TO, privacy: "public", amountDusk: "0.01", amountLux: "10000000", memo: "Invoice 2026-115" } });
-  const confirm = page.getByRole("button", { name: "Confirm" });
+  const confirm = page.getByRole("button", { name: "Send 0.01 DUSK" });
   await expect(confirm).toBeVisible();
   const [confirmTop, detailsBottom] = await page.evaluate(() => {
     const top = (el) => el.getBoundingClientRect().top + document.querySelector(".panel-content").scrollTop;
-    const button = [...document.querySelectorAll("button")].find((b) => b.textContent === "Confirm");
+    const button = [...document.querySelectorAll("button")].find((b) => b.textContent === "Send 0.01 DUSK");
     const details = [...document.querySelectorAll("#app .kv")];
     return [top(button), Math.max(...details.map((el) => top(el) + el.getBoundingClientRect().height))];
   });

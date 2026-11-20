@@ -218,9 +218,10 @@ export function addressBookView(ov, { state, actions } = {}) {
       ? items.filter((e) => [e?.name, e?.address, e?.duskName].some((v) => searchKey(v).includes(q)))
       : items;
 
-    // The title names the list, so the search has no label of its own.
+    // The title names the list, so the search has no label of its own, nor
+    // more than "Search" in it: it finds by name, address and .dusk name.
     const search = searchInput({
-      placeholder: "Search name or address…",
+      placeholder: "Search",
       "aria-label": "Search contacts",
       value: String(ab.query ?? ""),
       oninput: (e) => {
@@ -271,7 +272,7 @@ export function addressBookView(ov, { state, actions } = {}) {
                 class: "mini-btn",
                 type: "button",
                 text: "Save",
-                "aria-label": `Save ${d.name} to Contacts`,
+                "aria-label": `Save ${d.name} as a contact`,
                 onclick: () => {
                   // Named after a .dusk name, it's saved from that name.
                   const fromName = !d.isAddress && isDuskName(d.name);
@@ -451,7 +452,7 @@ export function addressBookView(ov, { state, actions } = {}) {
               if (!ok) actions?.showToast?.("Couldn't open the explorer");
             },
           },
-          [h("span", { text: "View in Dusk explorer" }), h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("ext") })]
+          [h("span", { text: "View in explorer" }), h("span", { class: "btn-ico", "aria-hidden": "true", html: iconSvg("ext") })]
         )
       : null;
 
@@ -694,7 +695,7 @@ export function addressBookView(ov, { state, actions } = {}) {
       // In pick mode: after creating or editing, select it and go back.
       if (ab.mode === "pick") return pick(saved.address);
 
-      actions?.showToast?.("Saved contact", 1600);
+      actions?.showToast?.("Contact saved.", 1600);
       if (!isNew && ab.editReturnView === "detail") {
         ab.detailId = saved.id;
         ab.view = "detail";
@@ -729,7 +730,7 @@ export function addressBookView(ov, { state, actions } = {}) {
             try {
               await removeAddressBookEntry(ab.editId, shown);
               await refreshItems();
-              actions?.showToast?.("Deleted contact", 1600);
+              actions?.showToast?.("Contact deleted.", 1600);
               ab.view = "list";
               rerender();
             } catch (e) {

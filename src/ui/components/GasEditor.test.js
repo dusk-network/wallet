@@ -36,12 +36,12 @@ describe("fee editor", () => {
   it("uses the network's gas price, with one Custom fee and no presets", async () => {
     const { editor, custom, fee, send } = await feeEditor();
     expect(send).toHaveBeenCalledWith({ type: "DUSK_UI_GET_CACHED_GAS_PRICE" });
-    expect(fee()).toBe("Network feeup to 0.005 DUSKTotalup to 1.005 DUSK");
+    expect(fee()).toBe("Feeup to 0.005 DUSKTotalup to 1.005 DUSK");
     expect(editor.readFinalGas()).toEqual({ limit: "2500000", price: "2" });
     // One choice, closed: no Auto, Low, Recommended or High.
     expect(visibleText(custom.querySelector("summary"))).toBe("Custom fee");
     expect(custom.open).toBe(false);
-    expect(editor.querySelectorAll("button").map((b) => b.textContent)).toEqual(["Use the network's price"]);
+    expect(editor.querySelectorAll("button").map((b) => b.textContent)).toEqual(["Use network price"]);
     expect(isShown(editor.querySelector("button.gas-reset"))).toBe(false);
   });
 
@@ -59,7 +59,7 @@ describe("fee editor", () => {
     typeInto(limit, "3000000");
     expect(isShown(error)).toBe(false);
     expect(limit.getAttribute("aria-invalid")).toBeNull();
-    expect(fee()).toBe("Network feeup to 0.006 DUSKTotalup to 1.006 DUSK");
+    expect(fee()).toBe("Feeup to 0.006 DUSKTotalup to 1.006 DUSK");
   });
 
   it("shows what the gas comes to in DUSK under the fields, exactly", async () => {
@@ -87,7 +87,7 @@ describe("fee editor", () => {
       "The gas price must be at least 1 LUX.",
       "true",
     ]);
-    expect(fee()).toBe("Network fee—Total—");
+    expect(fee()).toBe("Fee—Total—");
     expect(editor.error).toBe("The gas price must be at least 1 LUX.");
     expect(isShown(editor.querySelector(".gas-max"))).toBe(false);
     expect(() => editor.readFinalGas()).toThrow("The gas price must be at least 1 LUX.");
@@ -96,9 +96,9 @@ describe("fee editor", () => {
     // A limit under the minimum doesn't show a fee either.
     typeInto(price, "1");
     typeInto(field("Gas limit"), "1000");
-    expect(fee()).toBe("Network fee—Total—");
+    expect(fee()).toBe("Fee—Total—");
     typeInto(field("Gas limit"), "2500000");
-    expect([editor.error, fee()]).toEqual(["", "Network feeup to 0.0025 DUSKTotalup to 1.0025 DUSK"]);
+    expect([editor.error, fee()]).toEqual(["", "Feeup to 0.0025 DUSKTotalup to 1.0025 DUSK"]);
   });
 
   it("tells the page the most the gas comes to as it changes, and none while it won't do", async () => {
@@ -159,16 +159,16 @@ describe("fee editor", () => {
     editor.setGas({ limit: "10000000", price: "1" });
     dom.document.body.appendChild(editor);
     const rows = () => editor.querySelectorAll(".gas-fee .kv").filter(isShown).map(visibleText);
-    expect(rows()).toEqual(["Network feeup to 0.01 DUSK", "You receiveabout 0.1 DUSK"]);
+    expect(rows()).toEqual(["Feeup to 0.01 DUSK", "You receiveabout 0.1 DUSK"]);
     // Gas that won't do has no fee; what comes back is the same.
     typeInto(editor.querySelectorAll("input").find((i) => accessibleName(i) === "Gas price (LUX)"), "0");
-    expect(rows()).toEqual(["Network fee—", "You receiveabout 0.1 DUSK"]);
+    expect(rows()).toEqual(["Fee—", "You receiveabout 0.1 DUSK"]);
     // Hidden as the balance it is.
     editor.hideTotal = true;
     editor.amountLux = "100000000";
-    expect(rows()).toEqual(["Network fee—", "You receiveabout •••• DUSK"]);
+    expect(rows()).toEqual(["Fee—", "You receiveabout •••• DUSK"]);
     editor.amountLux = "0";
-    expect(rows()).toEqual(["Network fee—"]);
+    expect(rows()).toEqual(["Fee—"]);
   });
 
   it("rounds the fee and the total up, as the maximums they are", () => {
@@ -177,16 +177,16 @@ describe("fee editor", () => {
     // 0.001840001 DUSK at most: 0.0018 to the nearest would read lower.
     editor.setGas({ limit: "1840001", price: "1" });
     dom.document.body.appendChild(editor);
-    expect(visibleText(editor.querySelector(".gas-fee"))).toBe("Network feeup to 0.0019 DUSKTotalup to 1.0019 DUSK");
+    expect(visibleText(editor.querySelector(".gas-fee"))).toBe("Feeup to 0.0019 DUSKTotalup to 1.0019 DUSK");
   });
 
   it("goes back to the network's price from a custom one", async () => {
     const { editor, field, button } = await feeEditor();
     typeInto(field("Gas price (LUX)"), "7");
-    expect(isShown(button("Use the network's price"))).toBe(true);
-    button("Use the network's price").click();
+    expect(isShown(button("Use network price"))).toBe(true);
+    button("Use network price").click();
     expect(editor.readFinalGas()).toEqual({ limit: "2500000", price: "2" });
-    expect(isShown(button("Use the network's price"))).toBe(false);
+    expect(isShown(button("Use network price"))).toBe(false);
   });
 
   it("keeps gas the draft brought back, and the wallet's price when the node's can't be read", async () => {
@@ -207,7 +207,7 @@ describe("fee editor", () => {
     };
     expect(await shield({ limit: "40000000", price: "3" })).toEqual([
       { limit: "40000000", price: "3" },
-      "The wallet uses your custom gas from Settings.",
+      "The wallet uses your custom fee from Settings.",
     ]);
     expect((await shield({ limit: "2500000", price: "3" }))[0]).toEqual({ limit: "50000000", price: "3" });
   });
@@ -220,7 +220,7 @@ describe("fee editor", () => {
     dom.document.body.appendChild(editor);
     await settle();
     expect(editor.readFinalGas()).toEqual({ limit: "500000000", price: "3" });
-    expect(visibleText(editor.querySelector(".gas-note"))).toBe("The wallet uses your custom gas from Settings.");
+    expect(visibleText(editor.querySelector(".gas-note"))).toBe("The wallet uses your custom fee from Settings.");
   });
 
   it("starts each Review from the draft's gas, else custom gas, else the transaction's default", () => {
@@ -251,7 +251,7 @@ describe("fee editor", () => {
     editor.helpText = "Approval help.";
     editor.setGas(null);
     dom.document.body.appendChild(editor);
-    expect(visibleText(editor.querySelector(".gas-fee"))).toBe("Network feeSet by the networkTotal—");
+    expect(visibleText(editor.querySelector(".gas-fee"))).toBe("FeeSet by the networkTotal—");
     expect(editor.readFinalGas()).toBeUndefined();
     expect(editor.readOverrideGas(null)).toBeNull();
     expect(visibleText(editor.querySelector(".gas-help"))).toBe("Approval help.");

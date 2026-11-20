@@ -13,6 +13,8 @@ import { networkNameFromNodeUrl } from "../../shared/network.js";
 import { networkFor } from "@dusk-network/networks";
 import { chainIdForNode, chainWords, networkTextOf, noteChainId } from "../../shared/nodeNetwork.js";
 import { BLOCKED_TITLE, blockedRecipient } from "../../shared/recipientBlocklist.js";
+import { makeSozuStDuskToken } from "../../shared/sozuAdapter.js";
+import { sozuConfigOf } from "../../shared/sozuConfig.js";
 import { safeText, textChecks, textNeedsReview } from "../../shared/safeText.js";
 import { flattenTypedMessage, prepareTypedDataDisclosure, sanitizeStringForDisplay } from "../../shared/typedDataDisplay.js";
 import { duskNamesNetwork } from "../../shared/verifiedNames.js";
@@ -333,7 +335,7 @@ export const ENDED_ASK_TEXT = "This request isn't waiting any more. Ask the site
 export const FIRST_CONNECTION_TEXT = "You haven't connected this site before.";
 
 /** Beside a recipient that's none of your profiles or contacts, as Send's Review says it. */
-export const NOT_A_CONTACT_TEXT = "Not in your contacts";
+export const NOT_A_CONTACT_TEXT = "Not a contact";
 
 // The kind of request this window shows, and whether it said it ended.
 let shownKind = "";
@@ -392,7 +394,7 @@ function notSent(error) {
   endedSaid = true;
   const text =
     sentOf(error) === false
-      ? ["Not sent.", reasonText(error?.message), "No fee was charged."].filter(Boolean).join(" ")
+      ? ["Not sent.", reasonText(error?.message), "No fee charged."].filter(Boolean).join(" ")
       : "It may not have gone through. Check Activity before you ask the site again.";
   show(
     [h("div", { class: "err", role: "alert", text })],
@@ -437,7 +439,7 @@ function sendPasswordField(onEnter) {
   const why = h("p", { class: "ap-sub" });
   const error = fieldError(input);
   input.addEventListener("input", () => error.show(""));
-  const el = h("div", { class: "ap-actions__error ap-send-password", hidden: true }, [fieldLabel(input, "Password you unlock with"), why, input, error.el]);
+  const el = h("div", { class: "ap-actions__error ap-send-password", hidden: true }, [fieldLabel(input, "Password"), why, input, error.el]);
   return {
     el,
     input,
@@ -531,7 +533,7 @@ function decisionBar({ approveText = "Approve", approveDisabled = false, approve
     }),
   });
   // A transaction waits for the connection: offline, nothing would go out.
-  const offline = sends ? holdWhileOffline(approveBtn, { text: "You're offline. Approve once you're back online.", className: "ap-actions__error" }) : null;
+  const offline = sends ? holdWhileOffline(approveBtn, { text: "You're offline.", className: "ap-actions__error" }) : null;
   return { nodes: [error, offline, sendPassword.el, rejectBtn, approveBtn].filter(Boolean), approveBtn, rejectBtn, error, sendPassword };
 }
 
@@ -638,7 +640,7 @@ export async function renderNotification() {
   };
 
   // Who the wallet knows an account or address as: one of its profiles, by
-  // its public account or shielded address, or a saved contact. A site picks
+  // its public account or shielded address, or a contact. A site picks
   // the address, so it must be the saved one exactly: base58 tells cases
   // apart.
   const ownAddresses = Array.isArray(addresses) ? addresses : [];
@@ -653,13 +655,13 @@ export async function renderNotification() {
     if (own !== undefined) return { label: profileLabel(own), source: "your profile", own: accountsArr[own] === to };
     const contact = savedContacts.find((c) => String(c?.address ?? "").trim() === to);
     const label = String(contact?.name ?? "").trim();
-    return label ? { label, source: "saved contact", own: false } : null;
+    return label ? { label, source: "contact", own: false } : null;
   };
 
   /**
    * A Dusk recipient: the .dusk name the recipient set for its public
    * account, which the engine checks points back to it, leads; your own label
-   * for it (a profile, a saved contact) follows as a tag, so a label never
+   * for it (a profile, a contact) follows as a tag, so a label never
    * hides what the chain says. Until the name comes, and without one, the
    * short address leads. The name is asked for once the window shows; it
    * replaces the short address in its line, so nothing moves and Approve
@@ -737,11 +739,20 @@ export async function renderNotification() {
 
   const site = siteChip(origin);
 
+  // Sozu's stDUSK on this network, by the name and symbol the wallet gives it
+  // on Home and Staking, rather than the token's own capitals; null for any
+  // other contract, whatever it calls itself.
+  const sozuStDusk = (contractId) => {
+    const known = sozuConfigOf(chainIdForNode(nodeUrl))?.contracts?.["staked-dusk"];
+    const id = contractIdText(contractId);
+    return known && id && contractIdText(known) === id ? makeSozuStDuskToken(id) : null;
+  };
+
   if (!hasVault) {
     show(
       [
         site,
-        requestHead({ title: "Set up Dusk Wallet first", sub: "Create or import a recovery phrase, then try again on the site." }),
+        requestHead({ title: "No wallet yet", sub: "Set one up, then try again on the site." }),
       ],
       [
         h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject").catch((e) => renderError(answerFailedText(e))) }),
@@ -801,7 +812,7 @@ export async function renderNotification() {
       [
         site,
         requestHead({ title: summary.title, amount: summary.amount, to: headTo(summary.to) }),
-        warning("This can't be signed on this node", chainRefused),
+        warning("Can't sign on this node", chainRefused),
       ],
       decisionBar({ approveDisabled: true }).nodes
     );
@@ -832,7 +843,6 @@ export async function renderNotification() {
       }
     };
     pwd.addEventListener("input", () => showError(""));
-    const busyNote = h("p", { class: "ap-sub", text: "This can take a moment.", hidden: true });
 
     const unlockBtn = h("button", { class: "btn-primary", type: "button", text: "Unlock" });
     let busy = false;
@@ -843,7 +853,6 @@ export async function renderNotification() {
       unlockBtn.disabled = true;
       pwd.disabled = true;
       unlockBtn.textContent = "Unlocking…";
-      busyNote.hidden = false;
       showError("");
 
       try {
@@ -864,7 +873,6 @@ export async function renderNotification() {
         unlockBtn.disabled = false;
         pwd.disabled = false;
         unlockBtn.textContent = "Unlock";
-        busyNote.hidden = true;
         if (focusPassword) pwd.focus();
       }
     };
@@ -874,12 +882,8 @@ export async function renderNotification() {
       [
         site,
         requestHead({ title: summary.title, amount: summary.amount, node: summary.node, to: headTo(summary.to), sub: summary.sub }),
-        h("div", { class: "ap-unlock" }, [
-          h("label", { for: "approval-password", text: "Unlock to answer" }),
-          pwd,
-          errLine,
-          busyNote,
-        ]),
+        // What's asked shows above; the field needs no words of its own.
+        h("div", { class: "ap-unlock" }, [h("label", { for: "approval-password", class: "sr-only", text: "Password" }), pwd, errLine]),
       ],
       [h("button", { class: "btn-outline", type: "button", text: "Reject", onclick: () => decide("reject").catch((e) => showError(answerFailedText(e))) }), unlockBtn]
     );
@@ -934,27 +938,18 @@ export async function renderNotification() {
     // The site keeps a shielded address it has for the profile picked.
     const sharesShielded = () =>
       requestedShielded || (currentAccountIndex !== null && selected === currentAccountIndex && currentShieldedGrant);
+    // What the site gets, for the profile picked above: a share alone, to a
+    // site connected with that profile, gives nothing that moves funds.
     const factsHost = h("div", { class: "ap-facts-host" });
     const drawFacts = () => {
-      const account = String(displayAccounts[selected] ?? "");
-      const name = nameOf(account);
-      const who = [name, account ? shortAddress(account) : ""].filter(Boolean).join(" · ");
       const connected = currentAccountIndex !== null && currentAccountIndex === selected;
+      const shareOnly = requestedShielded && connected;
       setChildren(factsHost, [
-        sectionTitle("What the site gets", "ap-connect-facts"),
         facts(
           [
-            requestedShielded && connected
-              ? null
-              : {
-                  icon: "eye",
-                  title: "Sees your public address, .dusk name and balance",
-                  sub: `${who ? `${who}, ` : ""}${lastsText}`,
-                },
-            sharesShielded()
-              ? { icon: "shield", title: "Gets your shielded address", sub: "It can send you shielded payments. It can't see your shielded balance." }
-              : null,
-            { icon: "lock", title: "Can't move funds without your approval", sub: "Every payment and signature asks you here first." },
+            shareOnly ? null : { icon: "eye", title: "Sees your public account, .dusk name and balance", sub: `${lastsText[0].toUpperCase()}${lastsText.slice(1)}` },
+            sharesShielded() ? { icon: "shield", title: "Can send you shielded payments, not see your shielded balance" } : null,
+            shareOnly ? null : { icon: "lock", title: "Can't move funds without your approval" },
           ],
           { label: "What the site gets" }
         ),
@@ -1000,19 +995,22 @@ export async function renderNotification() {
   // ---- Switch network ------------------------------------------------------
 
   // The host of the node it goes to in large type, what that choice means,
-  // and each side by its name, a custom node's with its host; the addresses
-  // in full and the chain IDs a site sees sit under Details.
+  // and the network it leaves by its name, a custom node's with its host;
+  // the addresses in full and the chain IDs a site sees sit under Details.
   function renderSwitchNetwork() {
     const from = params?.from ?? {};
     const to = params?.to ?? {};
     const summary = requestSummary("switch_network", params);
     const net = (n) => (n.nodeUrl ? networkTextOf(n.nodeUrl) : String(n.networkName ?? "Unknown"));
+    // A network's own name on the button; a custom node's host is too long for it.
+    const toName = String(to.networkName ?? "").trim();
+    const named = toName && !["Custom", "Unknown"].includes(toName);
     show(
       [
         site,
-        requestHead({ title: summary.title, node: summary.node, sub: "The wallet then uses that network, for every site." }),
+        requestHead({ title: summary.title, node: summary.node, sub: "Applies to every site." }),
         summary.sub ? note(summary.sub, "eye", { className: "ap-visible" }) : null,
-        group([kv("From", net(from)), kv("To", net(to))]),
+        group([kv("From", net(from))]),
         details("Details", [
           group(
             [
@@ -1024,7 +1022,7 @@ export async function renderNotification() {
           ),
         ]),
       ],
-      decisionBar({ approveText: "Switch" }).nodes
+      decisionBar({ approveText: named ? `Switch to ${toName}` : "Switch" }).nodes
     );
   }
 
@@ -1050,7 +1048,7 @@ export async function renderNotification() {
         sectionTitle(preview.truncated ? "Message, shortened" : "Message", "ap-message-title"),
         box,
         goesOnNote(box, "message"),
-        preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash below covers the full message." }) : null,
+        preview.truncated ? h("p", { class: "ap-sub", text: "Shortened here. The hash under Details covers all of it." }) : null,
         preview.needsReview ? warning(TEXT_REVIEW_TITLE, reviewWords(preview.checks ?? { hidden: true }, "message", "sign it")) : null,
       ]);
     } else {
@@ -1075,11 +1073,20 @@ export async function renderNotification() {
     show(
       [
         site,
-        requestHead({ title: "Sign a message?" }),
+        requestHead({ title: "Sign this message?" }),
         message,
-        group([kv("Account", profileValue()), kv("Message hash", mono(hashLine), { stack: true })]),
-        note("Signing sends no transaction and moves no funds.", "info"),
-        details("Details", [group([kv("Network", nodeUrl ? networkTextOf(nodeUrl) : chainName(chainId) || "Custom"), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
+        group([kv("Account", profileValue())]),
+        note("Signing moves no funds.", "info"),
+        details("Details", [
+          group(
+            [
+              kv("Message hash", mono(hashLine), { stack: true }),
+              kv("Network", nodeUrl ? networkTextOf(nodeUrl) : chainName(chainId) || "Custom"),
+              kv("Chain ID", mono(chainId || "—")),
+            ],
+            { className: "group--inset" }
+          ),
+        ]),
       ],
       decisionBar({ approveText: "Sign" }).nodes
     );
@@ -1107,13 +1114,11 @@ export async function renderNotification() {
               statement.flagged ? warning(TEXT_REVIEW_TITLE, reviewWords(statement.checks, "statement", "sign in")) : null,
             ])
           : null,
-        group([
-          kv("Account", profileValue()),
-          kv("Nonce", mono(nonceShown || "—"), { stack: nonceShown.length > 24 }),
-          expiresAt ? kv("Expires", dateText(expiresAt)) : null,
+        group([kv("Account", profileValue()), expiresAt ? kv("Expires", dateText(expiresAt)) : null]),
+        note("Sign in only to sites you trust. It moves no funds.", "info"),
+        details("Details", [
+          group([kv("Nonce", mono(nonceShown || "—"), { stack: nonceShown.length > 24 }), kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" }),
         ]),
-        note("Only sign in to sites you trust. Signing in moves no funds.", "info"),
-        details("Details", [group([kv("Chain ID", mono(chainId || "—"))], { className: "group--inset" })]),
       ],
       decisionBar({ approveText: "Sign in" }).nodes
     );
@@ -1143,7 +1148,7 @@ export async function renderNotification() {
           h("div", {
             class: "err",
             role: "alert",
-            text: "Cannot safely disclose the full signing request. Signing is disabled. Reject this request and ask the site for a smaller or corrected payload.",
+            text: "Can't show the full signing request safely, so it can't be signed. Reject it and ask the site for a smaller or corrected one.",
           }),
         ],
         decisionBar({ approveText: "Sign", approveDisabled: true }).nodes
@@ -1186,11 +1191,11 @@ export async function renderNotification() {
           displayRow("Domain name", domainName),
           displayRow("Domain version", domainVersion),
           displayRow("Chain ID", domainChainId),
-          displayRow("Verifying contract", { display: verifyingContract || "32 zero bytes (default)", flags: [] }),
+          displayRow("Verifying contract", { display: verifyingContract || "None (32 zero bytes)", flags: [] }),
           kv("Primary type", h("code", { text: primaryType }), { stack: true }),
         ]),
         h("details", { class: "advanced ap-details" }, [
-          h("summary", { text: "Full signing request (escaped JSON)" }),
+          h("summary", { text: "Full signing request" }),
           h("div", { class: "ap-details__body" }, [
             h("p", {
               class: "ap-sub",
@@ -1203,7 +1208,7 @@ export async function renderNotification() {
               wrap: "off",
               spellcheck: false,
               dir: "ltr",
-              "aria-label": "Full signing request (escaped JSON)",
+              "aria-label": "Full signing request",
               text: disclosure.json,
             }),
           ]),
@@ -1215,17 +1220,19 @@ export async function renderNotification() {
               class: "ap-sub",
               text: [
                 truncated.omittedCount > 0 ? `${truncated.omittedCount} more field(s) not shown.` : "",
-                truncated.depthLimited ? "Some fields are nested deeper than this screen displays." : "",
-                "Open Full signing request (escaped JSON) above to inspect every value.",
-                "The digest below covers the whole message.",
+                truncated.depthLimited ? "Some fields are nested deeper than this screen shows." : "",
+                "Full signing request, above, has every value; the digest covers them all.",
               ]
                 .filter(Boolean)
                 .join(" "),
             })
           : null,
         h("details", { class: "advanced ap-details" }, [
-          h("summary", { text: "Digest (verify against the dApp)" }),
-          h("div", { class: "ap-details__body" }, [h("code", { class: "ap-digest", text: digestHex || "—" })]),
+          h("summary", { text: "Digest" }),
+          h("div", { class: "ap-details__body" }, [
+            h("p", { class: "ap-sub", text: "Check it against the digest the site shows." }),
+            h("code", { class: "ap-digest", text: digestHex || "—" }),
+          ]),
         ]),
         hasTextSafetyWarning
           ? warning(
@@ -1236,10 +1243,7 @@ export async function renderNotification() {
               ].filter(Boolean).join(" ")
             )
           : null,
-        note(
-          "Signing authorizes this exact message for the site shown above. It sends no transaction. Check every field: a site can ask for a signature over contracts or values you don't mean to trust.",
-          "info"
-        ),
+        note("A signature can commit you to what these fields say. Check each one. It sends no transaction.", "info"),
       ],
       decisionBar({ approveText: "Sign" }).nodes
     );
@@ -1276,12 +1280,17 @@ export async function renderNotification() {
     }
 
     const nft = type === "DRC721";
-    const label = [String(meta?.name ?? "").trim(), String(meta?.symbol ?? "").trim()].filter(Boolean).join(" · ");
+    // A token by its name and symbol in the title; an NFT's under it.
+    const own = nft ? null : sozuStDusk(contractId);
+    const name = String(own?.name ?? meta?.name ?? "").trim();
+    const symbol = String(own?.symbol ?? meta?.symbol ?? "").trim();
+    const title = !nft && symbol ? `Add ${name ? `${name} (${symbol})` : symbol}?` : requestSummary("watch_asset", params).title;
+    const label = nft ? [name, symbol].filter(Boolean).join(" · ") : "";
     const bar = decisionBar({ approveText: nft ? "Import NFT" : "Add token", approveDisabled: nft && ownedKnown && !owned });
     show(
       [
         site,
-        requestHead({ title: requestSummary("watch_asset", params).title, sub: label || undefined }),
+        requestHead({ title, sub: label || undefined }),
         group([
           kv("Standard", type || "(missing)"),
           kv("Contract", contractId ? shortMono(contractIdText(contractId)) : "(missing)"),
@@ -1291,7 +1300,6 @@ export async function renderNotification() {
         nft && ownedKnown && !owned
           ? warning("Not yours", "The connected profile doesn't own this NFT, so it can't be imported.")
           : null,
-        note("The wallet checks the contract's standard and its on-chain details before adding it.", "info"),
         details("Details", [
           group(
             [
@@ -1320,7 +1328,7 @@ export async function renderNotification() {
     // Who a public transaction shows as: the profile's verified .dusk name,
     // or its account when it has none.
     const myName = nameOf(activeAccount);
-    const me = myName ? `your name ${myName}` : "your account";
+    const me = myName || "your account";
 
     // The network's lines, which most people skip: the chain the signature
     // carries, and apart from it the ID sites are told, a custom node's own.
@@ -1344,13 +1352,13 @@ export async function renderNotification() {
         const reset = h("button", {
           class: "text-btn text-btn--inline",
           type: "button",
-          text: "Use the network's price",
+          text: "Use network price",
           onclick: () => {
             gasEditor.setGas?.(gasEditor.networkGas);
             siteFee.hidden = true;
           },
         });
-        setChildren(siteFee, [warning("This site chose a high fee", `It's ${times} times the network's price.`, [reset])]);
+        setChildren(siteFee, [warning(`High fee: ${times}× the network's price`, "", [reset])]);
       } else if (fromSite.price) {
         const compared =
           asked <= 0n
@@ -1429,31 +1437,35 @@ export async function renderNotification() {
       const amountLux = safeBigInt(params?.amount, 0n).toString();
       const memo = String(params?.memo ?? "");
       const gasEditor = gasEditorFor(amountLux);
-      // A recipient the network's file blocks: why, at the top, and no Approve.
-      const blocked = blockedRecipient(to, chainIdForNode(nodeUrl));
-      const bar = decisionBar({ approveDisabled: Boolean(blocked), getApprovedParams: () => gasEditor.readOverrideGas(gas), sends: true });
-      const pay = guardFor(gasEditor, bar, safeBigInt(amountLux, 0n), () => !blocked);
-      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => !blocked && pay.covered() });
       // To the bridge's account: the memo is the address the bridge pays
       // out to on another chain, and one that isn't an address there is
       // flagged, as are its fee taking the whole amount and a route it
       // doesn't pay out on now.
       const service = bridgeServiceTransfer({ nodeUrl, to, memo, amount: amountLux });
+      // The button says what it does, and how much.
+      const approveText = `${service ? "Bridge" : "Pay"} ${formatDuskExact(amountLux)} DUSK`;
+      // A recipient the network's file blocks: why, at the top, and no Approve.
+      const blocked = blockedRecipient(to, chainIdForNode(nodeUrl));
+      const bar = decisionBar({ approveText, approveDisabled: Boolean(blocked), getApprovedParams: () => gasEditor.readOverrideGas(gas), sends: true });
+      const pay = guardFor(gasEditor, bar, safeBigInt(amountLux, 0n), () => !blocked);
+      submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => !blocked && pay.covered() });
       // A public transfer shows on chain for good: say what, only what
       // applies, and under which name. A shielded one gets no line.
-      const visible = service
-        ? `Visible to everyone: amount, the recipient on ${service.chain}, and ${me}.`
-        : memo
-          ? `Visible to everyone: amount, memo, ${me}, and the recipient's account.`
-          : `Visible to everyone: amount, ${me}, and the recipient's account.`;
+      const visible = `Public: anyone can see the amount, ${memo && !service ? "memo, " : ""}${me} and the recipient.`;
       const amount = { value: formatDuskExact(amountLux), unit: "DUSK" };
+      // The recipient in full on the main view, unless it's a contact or one
+      // of your profiles, which the head names: then under Details. A bridge
+      // payout's recipient always shows in full, its own row; the bridge's
+      // account, which the tag vouches for, sits under Details.
+      const toRow = (className = "ap-to-row") => kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className });
+      const named = !service && Boolean(knownAs(to));
       const head = service
         ? requestHead({
             title: `Bridge to ${service.chain}`,
             amount,
-            to: service.recipientOk ? plainTo(service.recipient, `on ${service.chain}`) : null,
-            // What arrives there, once the bridge takes its fee.
-            sub: bridgeServiceLine(service),
+            // What arrives there, once the bridge takes its fee; a warning
+            // says it when nothing would.
+            sub: service.running && service.recipientOk && service.arrivesLux > 0n ? bridgeServiceLine(service) : null,
             tag: headTag("Known bridge account"),
           })
         : requestHead({ title: "Pay", amount, to: toLine(to) });
@@ -1467,28 +1479,32 @@ export async function renderNotification() {
           shielded ? null : note(visible, "eye", { className: "ap-visible" }),
           ...(service ? bridgeServiceWarnings(service).map((w) => warning(w.title, w.text)) : []),
           service && !service.recipientOk
-            ? warning(
-                `The memo isn't an address on ${service.chain}`,
-                `The bridge pays out to the address in the memo. Reject this, and check the address on the site.`
-              )
+            ? warning(`The memo isn't an address on ${service.chain}`, "The bridge pays out to the memo's address. Reject this and check it on the site.")
             : null,
           siteFee,
           gasEditor,
           group([
             kv("From", shielded ? inWallet(h("span", { text: "Your shielded balance" })) : payerLine(rail)),
-            service
-              ? kv("To", [h("span", { class: "ap-kv-note", text: `The bridge's account for ${service.chain}` }), h("code", { class: "ap-address", text: to })], {
-                  stack: true,
-                  className: "ap-to-row",
-                })
-              : kv("To", h("code", { class: "ap-address", text: to || "(missing)" }), { stack: true, className: "ap-to-row" }),
+            service || named ? null : toRow(),
             service
               ? kv(`Recipient on ${service.chain}`, h("code", { class: "ap-address", text: safeText(memo).text || "(none)" }), { stack: true })
               : memo
                 ? kv("Memo", safeTextEl(memo), { stack: memo.length > 24 })
                 : null,
           ]),
-          details("Details", [group(networkRows(), { className: "group--inset" })]),
+          details("Details", [
+            group(
+              [
+                service
+                  ? kv("To", [h("span", { class: "ap-kv-note", text: `The bridge's account for ${service.chain}` }), h("code", { class: "ap-address", text: to })], { stack: true, className: "ap-to-row" })
+                  : named
+                    ? toRow()
+                    : null,
+                ...networkRows(),
+              ],
+              { className: "group--inset" }
+            ),
+          ]),
         ],
         bar.nodes
       );
@@ -1539,20 +1555,23 @@ export async function renderNotification() {
     // The call as a person checks it: the contract and the DUSK it sends,
     // and whom its amount pays when the site names someone.
     const amountTo = String(params?.to ?? "").trim();
-    const callRows = ({ from = false } = {}) =>
+    // `contract`: false where a token's row names it already.
+    const callRows = ({ from = false, contract = true } = {}) =>
       group([
         from ? kv("From", payerLine(rail)) : null,
-        kv("Contract", contractValueEl(contractLabel(contractShown, nodeUrl), shortMono(contractShown))),
+        contract ? kv("Contract", contractValueEl(contractLabel(contractShown, nodeUrl), shortMono(contractShown))) : null,
         safeBigInt(amountLux, 0n) > 0n ? kv("Amount", `${formatDuskExact(amountLux)} DUSK`) : null,
         safeBigInt(amountLux, 0n) > 0n && amountTo ? kv("Amount to", h("code", { class: "ap-address", text: amountTo }), { stack: true }) : null,
         safeBigInt(depositLux, 0n) > 0n ? kv("Deposit", `${formatDuskExact(depositLux)} DUSK`) : null,
       ]);
-    // Under Details: the network, the function, its arguments' size and hash
-    // (the line a site can show to match), the bytes, and the site's words.
-    const detailsBlock = () =>
+    // Under Details: what the call names in full (`rows`), the network, the
+    // function, its arguments' size and hash (the line a site can show to
+    // match), the bytes, and the site's words.
+    const detailsBlock = (rows = []) =>
       details("Details", [
         group(
           [
+            ...rows,
             ...networkRows(),
             kv("Contract ID", mono(contractShown), { stack: true }),
             // The site's name for it, as a memo is shown: what reorders text shows as its code.
@@ -1565,11 +1584,11 @@ export async function renderNotification() {
         siteDetails(display),
       ]);
     // What everyone sees of a send, as on Send's Review; other calls have no such line.
-    const sendVisible = (what) => (rail === "Public" ? note(`Visible to everyone: ${what}, and ${me}.`, "eye", { className: "ap-visible" }) : null);
+    const sendVisible = (what) => (rail === "Public" ? note(`Public: anyone can see ${what} and ${me}.`, "eye", { className: "ap-visible" }) : null);
     // Reject and Approve, with the box to type MAX in: an allowance that is or
     // may be unlimited waits for MAX, and any approval for gas that will do.
     // While the token is being read, Approve stays off.
-    const maxGatedBar = (gated, approveText, { reading = false } = {}) => {
+    const maxGatedBar = (gated, approveText, { reading = false, typeMax = "Type MAX to approve" } = {}) => {
       const bar = decisionBar({
         approveText,
         approveDisabled: gated || reading,
@@ -1578,8 +1597,8 @@ export async function renderNotification() {
         sends: true,
       });
       const ackInput = textInput({
-        placeholder: "Type MAX to confirm",
-        "aria-label": "Type MAX to confirm",
+        placeholder: typeMax,
+        "aria-label": typeMax,
         onEnter: () => bar.approveBtn.click(),
         oninput: () => pay.draw(),
       });
@@ -1593,18 +1612,24 @@ export async function renderNotification() {
     // above the call and its bytes.
     const bridge = argsOk ? bridgeCallOf(params, { own }) : null;
     if (bridge) {
-      const bar = decisionBar({ getApprovedParams: () => gasEditor.readOverrideGas(gas), sends: true });
+      const approveText =
+        bridge.kind === "deposit"
+          ? `Bridge ${formatDuskExact(bridge.amountLux)} DUSK`
+          : bridge.kind === "prove"
+            ? "Prove withdrawal"
+            : `Claim ${withdrawalAmount(bridge.amountWei).value} DUSK`;
+      const bar = decisionBar({ approveText, getApprovedParams: () => gasEditor.readOverrideGas(gas), sends: true });
       const pay = guardFor(gasEditor, bar, sendsLux);
       submitOnGasEnter(gasEditor, bar.approveBtn, { ready: () => pay.covered() });
       const summary = requestSummary("send_tx", params, { own });
       let head;
       let decoded;
       if (bridge.kind === "deposit") {
-        // Sent as the bridge expects (bridgeCallOf): its deposit is what it bridges.
+        // Sent as the bridge expects (bridgeCallOf): its deposit is what it
+        // bridges. Its recipient shows in full, in its row.
         head = requestHead({
           title: summary.title,
           amount: summary.amount,
-          to: plainTo(bridge.recipient, "on DuskEVM"),
           tag: headTag("Known DuskEVM bridge call"),
         });
         decoded = group([
@@ -1698,6 +1723,15 @@ export async function renderNotification() {
       const partyTo = (party) => (kindOf(party) ? plainTo(party.value, "", { evm: false, prefix: `to ${kindOf(party)} ` }) : toLine(party.value));
       // Drawn once: it asks for the recipient's .dusk name.
       const toEl = drc20.to ? partyTo(drc20.to) : null;
+      // The recipient in full on the main view, unless it's a contact or one
+      // of your profiles, which the head names: then under Details.
+      const toNamed = Boolean(drc20.to && knownAs(drc20.to.value));
+      // The spender short, by the name the network gives a contract it knows;
+      // in full under Details.
+      const spenderValue = (party) => {
+        const label = party.kind === "contract" ? contractLabel(contractIdText(party.value), nodeUrl) : null;
+        return label ? contractValueEl(label, shortMono(party.value)) : [kindOf(party) ? h("span", { class: "ap-kv-note", text: `A ${kindOf(party)}` }) : null, shortMono(party.value)];
+      };
       const title = isApprove
         ? "Allow spending?"
         : isIncrease
@@ -1705,45 +1739,48 @@ export async function renderNotification() {
           : drc20.fn === "decrease_allowance"
             ? "Allow less spending?"
             : "Send tokens";
-      const approveText = isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve";
+      // The button names what it does and how much, once the token's read.
+      const approveText = (token, exact) => {
+        if (!token) return isTransfer ? "Approve transfer" : isApprove || isIncrease ? "Approve spending" : "Approve";
+        if (isMax) return `Approve all ${token.symbol}`;
+        if (isApprove) return `Approve ${exact} ${token.symbol}`;
+        if (isIncrease) return `Approve ${exact} ${token.symbol} more`;
+        return drc20.fn === "decrease_allowance" ? "Approve" : `Send ${exact} ${token.symbol}`;
+      };
 
       // `token`: undefined while it's read, null when it couldn't be, else
       // its name, symbol and decimals (tokenDetails).
       const drawToken = (token) => {
         const reading = token === undefined;
-        // Exact, as an approval shows DUSK: every decimal the token has.
-        const amount = token
-          ? { value: groupThousands(formatTokenUnits(units, token.decimals, { maxFrac: token.decimals })), unit: token.symbol }
-          : reading
-            ? null
-            : { value: String(units), unit: "units" };
-        const tokenName = token ? token.name || token.symbol : contractIdText(contractShown, { short: true });
-        const { bar, ackInput } = maxGatedBar(isMax, approveText, { reading });
+        // Exact, as an approval shows DUSK: every decimal the token has. The
+        // most there is says what it is, its figure under Details.
+        const exact = token ? groupThousands(formatTokenUnits(units, token.decimals, { maxFrac: token.decimals })) : "";
+        const amount = token ? { value: isMax ? "Unlimited" : exact, unit: token.symbol } : reading ? null : { value: String(units), unit: "units" };
+        const { bar, ackInput } = maxGatedBar(isMax, approveText(token, exact), { reading });
         show(
           [
             site,
-            requestHead({ title, amount, to: toEl, sub: reading ? "Reading the token…" : `${tokenName} · DRC20` }),
+            requestHead({ title, amount, to: toEl, sub: reading ? "Reading the token…" : null }),
             token === null ? note("Couldn't read this token, so the amount is in its raw units.", "alert", { className: "ap-token-unread" }) : null,
             // A transfer names whom it pays; an allowance moves nothing yet.
-            drc20.to ? sendVisible("this call, the tokens it moves") : null,
+            drc20.to ? sendVisible("this transfer") : null,
             group([
               kv("From", payerLine(rail)),
-              drc20.to ? kv("To", partyValue(drc20.to), { stack: true }) : null,
-              drc20.spender ? kv("Spender", partyValue(drc20.spender), { stack: true }) : null,
+              drc20.to && !toNamed ? kv("To", partyValue(drc20.to), { stack: true }) : null,
+              drc20.spender ? kv("Spender", spenderValue(drc20.spender)) : null,
               drc20.owner ? kv("Owner", partyValue(drc20.owner), { stack: true }) : null,
-              kv(
-                "Token",
-                token ? h("span", {}, [h("span", { text: `${token.name ? `${token.name} (${token.symbol})` : token.symbol} ` }), shortMono(contractShown)]) : shortMono(contractShown)
-              ),
-              kv("Units", mono(units)),
+              kv("Token", token ? contractValueEl(token.name ? `${token.name} (${token.symbol})` : token.symbol, shortMono(contractShown)) : shortMono(contractShown)),
             ]),
-            isMax && !reading
-              ? warning("Unlimited allowance", "This lets the spender move all of this token from your account, now and later. Only continue if you trust it.", [ackInput])
-              : null,
-            callRows(),
+            isMax && !reading ? warning("Unlimited allowance", `The spender can move all your ${token?.symbol ?? "tokens of this contract"}, now and later.`, [ackInput]) : null,
+            callRows({ contract: false }),
             siteFee,
             gasEditor,
-            detailsBlock(),
+            detailsBlock([
+              drc20.to && toNamed ? kv("To", partyValue(drc20.to), { stack: true }) : null,
+              drc20.spender ? kv("Spender", partyValue(drc20.spender), { stack: true }) : null,
+              kv("Units", mono(units)),
+              isMax && token ? kv("Amount", `${exact} ${token.symbol}`) : null,
+            ]),
           ],
           bar.nodes
         );
@@ -1753,7 +1790,10 @@ export async function renderNotification() {
       const meta = await sendResult({ type: "DUSK_UI_DRC20_GET_METADATA", contractId: contractIdHex, driver: drc20.driver }).catch(() => null);
       // The window drew something else meanwhile: the wallet locked, say.
       if (seq !== renderSeq) return;
-      drawToken(tokenDetails(meta));
+      // Sozu's stDUSK by the names the wallet gives it, the decimals the token's.
+      const own = sozuStDusk(contractShown);
+      const token = tokenDetails(meta);
+      drawToken(token && own ? { ...token, name: own.name, symbol: own.symbol } : token);
       return;
     }
 
@@ -1776,7 +1816,7 @@ export async function renderNotification() {
       const approvedBool = Boolean(decoded?.approved);
 
       const bar = decisionBar({
-        approveText: isTransferFrom ? "Approve transfer" : "Approve",
+        approveText: isTransferFrom ? "Send NFT" : "Approve",
         getApprovedParams: () => gasEditor.readOverrideGas(gas),
         sends: true,
       });
@@ -1791,7 +1831,7 @@ export async function renderNotification() {
             to: isTransferFrom && toStr ? toLine(toStr) : null,
             sub: `${name} (${sym})${tokenIdStr ? ` · #${tokenIdStr}` : ""}`,
           }),
-          isTransferFrom ? sendVisible("this call") : null,
+          isTransferFrom ? sendVisible("this transfer") : null,
           group([
             kv("From", payerLine(rail)),
             tokenIdStr ? kv("Token ID", mono(tokenIdStr)) : null,
@@ -1821,21 +1861,24 @@ export async function renderNotification() {
     // a driver reads but not as one the wallet can show. Such a call that sets
     // an allowance may be unlimited, so it waits for MAX.
     const unreadAllowance = Boolean(tokenCall) && ["approve", "increase_allowance"].includes(fnNameLower);
-    const { bar, ackInput, pay } = maxGatedBar(unreadAllowance);
+    // A call that only deposits DUSK says so on its button; any other, Approve.
+    const depositOnly = safeBigInt(depositLux, 0n) > 0n && safeBigInt(amountLux, 0n) === 0n;
+    const { bar, ackInput } = maxGatedBar(unreadAllowance, !unreadAllowance && depositOnly ? `Deposit ${formatDuskExact(depositLux)} DUSK` : "Approve", {
+      typeMax: "Type MAX to approve anyway",
+    });
     const summary = requestSummary("send_tx", params, { own });
-    const unchecked = callsBridge({ nodeUrl: params?.nodeUrl, contractId: contractIdHex })
-      ? warning(
-          "The wallet can't check this bridge call",
-          "It goes to the DuskEVM bridge, but it isn't a transfer the wallet knows for this network. Reject it unless you know why the site sent it."
-        )
+    const bridgeUnchecked = callsBridge({ nodeUrl: params?.nodeUrl, contractId: contractIdHex });
+    // One line of what can't be read, and for a token call that may set an
+    // allowance, that it may be unlimited, with the box to type MAX in.
+    const unchecked = bridgeUnchecked
+      ? warning("Can't check this bridge call", "It isn't a transfer the wallet knows for this network. Reject it unless you know why the site sent it.")
       : tokenCall
         ? warning(
-            "The wallet can't read this request",
-            "It looks like a token call, but the wallet can't show its amount or the accounts it names. Reject it unless you know what the site sent."
+            "Can't read this token call",
+            `Its amount and accounts can't be shown.${unreadAllowance ? " It may allow unlimited spending." : ""} Reject it unless you know what the site sent.`,
+            unreadAllowance ? [ackInput] : []
           )
-        : note("The wallet can't read this call's arguments. Check them on the site before you approve.", "alert", {
-            className: "ap-opaque",
-          });
+        : note("Can't read this call's arguments. Check them on the site first.", "alert", { className: "ap-opaque" });
     show(
       [
         site,
@@ -1845,13 +1888,8 @@ export async function renderNotification() {
         }),
         callRows({ from: true }),
         unchecked,
-        unreadAllowance
-          ? warning(
-              "This may be an unlimited allowance",
-              "The wallet can't check how much this lets the spender move. It could be all of this token, now and later. Only continue if you trust the site.",
-              [ackInput]
-            )
-          : null,
+        // A bridge call read as an allowance still waits for MAX.
+        unreadAllowance && bridgeUnchecked ? warning("It may allow unlimited spending", "", [ackInput]) : null,
         siteFee,
         gasEditor,
         detailsBlock(),

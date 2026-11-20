@@ -118,15 +118,12 @@ export function convertFormView(ov, { state, actions } = {}) {
       field.input.focus();
     },
   });
+  // What Max fills in, the fee on the line under it left out already, as Send says it.
   const available = h("div", { class: "amount-avail", hidden: !known }, [
-    h("span", { class: "amount-avail__text" }, [
-      feeLux > 0n ? "Available after fees " : "Available ",
-      balance(hidden, formatDusk(avail)),
-      " DUSK",
-    ]),
+    h("span", { class: "amount-avail__text" }, ["Available ", balance(hidden, formatDusk(avail)), " DUSK"]),
     maxBtn,
   ]);
-  const feeNote = feeLux > 0n ? h("div", { class: "amount-fee-note", text: `Network fee up to ${formatFee(feeLux, { max: true })} DUSK` }) : null;
+  const feeNote = feeLux > 0n ? h("div", { class: "amount-fee-note", text: `Fee up to ${formatFee(feeLux, { max: true })} DUSK` }) : null;
 
   const nextBtn = h("button", {
     class: "btn-primary",
@@ -192,8 +189,9 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   const fromRail = kind === TX_KIND.SHIELD ? "Public" : "Shielded";
   const toRail = kind === TX_KIND.SHIELD ? "Shielded" : "Public";
 
-  // Back returns to Shield with the draft, so Review has no Cancel.
-  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
+  // Back returns to Shield with the draft, so Review has no Cancel. Its
+  // button says what it does, the amount as Review shows it: "Shield 2 DUSK".
+  const confirmBtn = h("button", { class: "btn-primary", text: `${kind === TX_KIND.SHIELD ? "Shield" : "Unshield"} ${formatDuskExact(d.amountLux)} DUSK` });
 
   // The network's gas price by default; Custom fee for gas of your own.
   const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({ kind, amountLux: d.amountLux, ov, actions, gas: d?.gas });

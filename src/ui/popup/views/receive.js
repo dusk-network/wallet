@@ -7,10 +7,9 @@ import { saveToDownloads, shareText } from "../../../platform/native.js";
 import { isTauriRuntime } from "../../../platform/runtime.js";
 import { isPhone } from "../../lib/device.js";
 import { duskNameEl } from "../../components/DuskName.js";
-import { fullAddressEl } from "../../components/ShortAddress.js";
+import { shortAddressEl } from "../../components/ShortAddress.js";
 import { decimalInput, fieldLabel, textInput } from "../../components/FormControls.js";
 import { segmented } from "../../components/Segmented.js";
-import { formatDuskPlain } from "@dusk-network/app-core/amounts";
 import { displayText } from "@dusk-network/app-core/text";
 import { requestFileName, stamped } from "../../lib/fileNames.js";
 import { shortAddress } from "../../lib/strings.js";
@@ -109,7 +108,7 @@ export function receiveView(ov, { state, actions } = {}) {
     },
   });
 
-  // --- QR, then the name with its copy button, and the address in full ---
+  // --- QR, then the name with its copy button, and the address short ---
   const qrCard = h("div", { class: "box qr-box receive-qr-card" });
 
   // An icon button that copies what `value` gives and says Copied on itself.
@@ -123,7 +122,7 @@ export function receiveView(ov, { state, actions } = {}) {
       : lookupShieldedName(account, address, { nodeUrl: ov?.nodeUrl });
   let shownName = "";
 
-  // What people reach through that name, said under it.
+  // On the shielded tab, that anyone can see the name's address is this one: said under it.
   const nameNote = h("p", {
     class: "receive-name-note",
     id: `receive-name-note-${++nameNotes}`,
@@ -137,18 +136,17 @@ export function receiveView(ov, { state, actions } = {}) {
   nameLookup.then((name) => {
     if (!name) return;
     shownName = name;
-    nameNote.textContent =
-      tab === "public"
-        ? `People who send to ${name} reach this public account.`
-        : `People who pay ${name} choose public or shielded. Anyone can see this address belongs to ${name}.`;
     nameField.hidden = false;
+    if (tab !== "shielded") return;
+    nameNote.textContent = `Anyone can see this address belongs to ${name}.`;
     nameNote.hidden = false;
   });
 
-  // The address to read whole, and a button that copies it and says Copied in
-  // words; named for what it gives, as each Copy and Share here is (Nandini's
-  // and Sofía's: a request filled in, the first Copy and the first of two
-  // Shares gave a client the bare address).
+  // The address short (6…6), whole in its tooltip, the QR and the copy; and a
+  // button that copies it and says Copied in words; named for what it gives,
+  // as each Copy and Share here is (Nandini's and Sofía's: a request filled
+  // in, the first Copy and the first of two Shares gave a client the bare
+  // address).
   const copyAddress = copyButton({
     value: () => recipient,
     label: "Copy address",
@@ -160,7 +158,7 @@ export function receiveView(ov, { state, actions } = {}) {
   copyAddress.disabled = !recipient;
   const addressField = h("div", { class: "receive-field receive-field--address" }, [
     recipient
-      ? fullAddressEl(recipient, { className: "receive-field__address" })
+      ? shortAddressEl(recipient, { className: "receive-field__address" })
       : h("code", { class: "receive-field__address", text: "—" }),
   ]);
 
@@ -183,7 +181,6 @@ export function receiveView(ov, { state, actions } = {}) {
   // look: as the payer will see it, its codes and what to check, under the field.
   const memoShown = h("div", { class: "receive-memo-shown", role: "status", hidden: true });
   const linkErr = h("div", { class: "field-error", role: "alert", hidden: true });
-  const linkNote = h("div", { class: "muted" });
 
   // The requests made here, drawn again on their own as one is kept, so what's pressed stays as it is.
   const requestsHost = h("div", { class: "receive-requests-host" });
@@ -269,7 +266,7 @@ export function receiveView(ov, { state, actions } = {}) {
     share: { verb: "Share", go: () => shareTheRequest() },
   });
 
-  // What the QR asks for, once it holds a request.
+  // That a request is filled in, while the form is closed: open, its fields say what it asks.
   const summaryMeta = h("span", { class: "receive-request__meta" });
 
   const requestDetails = h(
@@ -287,7 +284,6 @@ export function receiveView(ov, { state, actions } = {}) {
         memoErr,
         memoShown,
         linkErr,
-        linkNote,
         requestActions,
         formAsk.el,
       ]),
@@ -334,7 +330,7 @@ export function receiveView(ov, { state, actions } = {}) {
     return ok;
   };
   // A request as it goes: a few words of what it asks, its link, and its QR
-  // code's picture, the one Download saves.
+  // code's picture, the one Save QR saves.
   const shareRequest = async ({ text, qrValue, lux, memo, to }) => {
     const network = testNetworkOf(ov);
     let picture = {};
@@ -391,11 +387,11 @@ export function receiveView(ov, { state, actions } = {}) {
         actions?.showToast?.(`QR saved to Downloads as ${saved}`);
       } else {
         await downloadQrPng(curQrValue, name, opts);
-        actions?.showToast?.("Downloaded QR PNG");
+        actions?.showToast?.("QR saved");
       }
       keepRequest();
     } catch (e) {
-      actions?.showToast?.(e?.message ?? "QR download failed", 2500);
+      actions?.showToast?.(e?.message ?? "Couldn't save the QR.", 2500);
     }
   };
 
@@ -431,7 +427,7 @@ export function receiveView(ov, { state, actions } = {}) {
   const downloadMenuItem = h("button", {
     class: "qr-context-menu__item",
     type: "button",
-    text: "Download QR PNG",
+    text: "Save QR",
     onclick: () => {
       hideQrMenu();
       downloadCurrentQr();
@@ -474,7 +470,7 @@ export function receiveView(ov, { state, actions } = {}) {
   const downloadBtn = h("button", {
     class: "btn-outline",
     type: "button",
-    text: "Download QR PNG",
+    text: "Save QR",
     onclick: () => {
       if (!askFirst(rowAsk, "download")) downloadCurrentQr();
     },
@@ -487,7 +483,7 @@ export function receiveView(ov, { state, actions } = {}) {
   );
   const rowAsk = paidAsk(r, "row", {
     ...(appLinkBtn ? { app: { verb: "Copy", go: () => appLinkBtn.pressAnyway() } } : {}),
-    download: { verb: "Download", go: () => downloadCurrentQr() },
+    download: { verb: "Save", go: () => downloadCurrentQr() },
   });
   // While a request is being made, its Copy and Share come first: the
   // address's buttons go below the form, and back above it once it's closed.
@@ -559,8 +555,6 @@ export function receiveView(ov, { state, actions } = {}) {
     curUri = made.dusk;
     // Where the network has no web wallet, the one link there is.
     curLink = made.https ?? made.dusk;
-    linkNote.textContent = made.https ? "The QR holds what you ask for. The link opens the web wallet's Send, filled in." : "The QR holds what you ask for.";
-    linkNote.hidden = !made.ok;
     // Copied was about the link before.
     if (curLink !== asked) resetCopied(copyRequestBtn);
 
@@ -577,11 +571,7 @@ export function receiveView(ov, { state, actions } = {}) {
     copyRequestBtn.disabled = !wantRequest;
     if (shareRequestBtn) shareRequestBtn.disabled = !wantRequest;
     for (const button of [copyRequestBtn, shareRequestBtn].filter(Boolean)) button.className = wantRequest ? "btn-primary" : "btn-outline";
-    if (wantRequest) {
-      summaryMeta.textContent = made.lux !== null ? `${amountForInput(formatDuskPlain(made.lux))} DUSK` : "With memo";
-    } else {
-      summaryMeta.textContent = hasReq && valid ? "Configured" : "";
-    }
+    summaryMeta.textContent = !wantRequest && hasReq && valid ? "Configured" : "";
 
     downloadBtn.disabled = !curQrValue;
     if (!curQrValue) hideQrMenu();

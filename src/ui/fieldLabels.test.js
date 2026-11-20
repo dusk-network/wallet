@@ -143,7 +143,7 @@ describe("field labels", () => {
       "Node URL",
       "Prover URL",
       "Archiver URL",
-      "Custom gas",
+      "Custom fee",
     ]);
     // Contacts is a row of its own.
     expect(body.querySelectorAll(".settings-row").map(visibleText)).toContain("Contacts");
@@ -155,7 +155,7 @@ describe("field labels", () => {
     expect(fieldNames(body)).toEqual([
       "Password",
       "Confirm password",
-      "I understand that my recovery phrase is the only way to restore this wallet.",
+      "Only my recovery phrase can restore this wallet.",
     ]);
 
     const words = Array.from({ length: 12 }, (_, i) => `Word ${i + 1}`);
@@ -164,10 +164,11 @@ describe("field labels", () => {
     const group = body.querySelector(".mnemonic-input");
     expect([group.getAttribute("role"), accessibleName(group)]).toEqual(["group", "Recovery phrase"]);
 
-    // Check your recovery words: the three asked, by their places, as one group.
+    // Check your recovery phrase: the three asked, by their places, as one group named as the page is.
     body = await show(onboardingCreateConfirmView({ state: { onboard: { ...onboard, checkPlaces: [2, 7, 12] } }, actions: actions() }));
     expect(fieldNames(body)).toEqual(["Word 2", "Word 7", "Word 12"]);
-    expect(accessibleName(body.querySelector(".mnemonic-input"))).toBe("Check your recovery words");
+    const asked = body.querySelector(".mnemonic-input");
+    expect([asked.getAttribute("role"), accessibleName(asked)]).toEqual(["group", "Check your recovery phrase"]);
 
     body = await show(lockedView({ state: {}, actions: actions() }));
     expect(fieldNames(body)).toEqual(["Password"]);

@@ -74,7 +74,7 @@ const NO_STAKE_TEXT = "No stake gets stDUSK at Sozu's deposit fee now.";
 
 // Sozu's terms read again before a stake is sent, and found changed.
 const CHANGED_TITLE = "Sozu's terms changed";
-const CHANGED_TEXT = "These are the figures now. Check them, then confirm again.";
+const CHANGED_TEXT = "These are the figures now. Check them, then stake again.";
 
 // A stake's Review left because the network, profile or lock changed while
 // its terms were read again: the stake's form says so.
@@ -145,21 +145,28 @@ function depositFeeParts(rate, feeLux, hidden) {
 }
 
 /**
- * On a stake's Review, that its deposit fee doesn't come back: by its DUSK,
- * hidden with the balances, or as Sozu's while it wasn't read. Nothing for a
- * stake with no fee.
- * @param {object | null} quote - the draft's
- * @param {object | null} rate - its fee rate
+ * On a stake's Review, its deposit fee's row: its DUSK, hidden with the
+ * balances, its rate, and that it doesn't come back, for a stake with one.
+ * @param {object} quote - the draft's
+ * @param {object} rate - its fee rate
  * @param {boolean} hidden
  */
-function depositFeeGone(quote, rate, hidden) {
+function depositFeeRow(quote, rate, hidden) {
+  const feeLux = safeBigInt(quote.fee, 0n);
+  return [balance(hidden, formatDuskExact(feeLux.toString())), ` DUSK (${feePercent(rate, amountLocale())})${feeLux > 0n ? ", not refunded" : ""}`];
+}
+
+/**
+ * On a stake's Review with no deposit fee row (its quote or rate not read),
+ * that Sozu's deposit fee doesn't come back. Nothing for a stake with no fee,
+ * nor where the row says it.
+ * @param {object | null} quote - the draft's
+ * @param {object | null} rate - its fee rate
+ */
+function depositFeeGone(quote, rate) {
   const feeLux = quote ? safeBigInt(quote.fee, 0n) : null;
-  if (feeLux === 0n) return null;
-  return h(
-    "p",
-    { class: "stake-cap sozu-fee-gone" },
-    rate && feeLux !== null ? ["The deposit fee of ", balance(hidden, formatDuskExact(feeLux.toString())), " DUSK doesn't come back."] : ["Sozu's deposit fee doesn't come back."]
-  );
+  if (feeLux === 0n || (rate && feeLux !== null)) return null;
+  return h("p", { class: "stake-cap sozu-fee-gone" }, ["Sozu's deposit fee doesn't come back."]);
 }
 
 // A stake's quote as a draft keeps it, in strings: the fee and its rate,
@@ -231,8 +238,8 @@ function applyStakeTerms({ st, draft, terms }) {
   return changed;
 }
 
-// Drafted stakes whose Confirm is reading Sozu's terms again: one check at a
-// time for each, a redrawn Review's Confirm included.
+// Drafted stakes whose Review button ("Stake 100 DUSK") is reading Sozu's
+// terms again: one check at a time for each, a redrawn Review's included.
 const rechecking = new WeakSet();
 
 /**
@@ -242,7 +249,7 @@ const rechecking = new WeakSet();
  * this record, never with what the Review was last drawn with: the context
  * is replaced the moment a switch starts (context.js), before the overview
  * names the new network or profile. Drawn after a switch or a lock, the
- * Review offers no Confirm; a check that answers after one, from another
+ * Review offers no button to send; a check that answers after one, from another
  * network, or after the Review was left, does nothing at all. The wallet's
  * engine checks the same just before it sends.
  * @param {object} ov - the overview the form was drawn with
@@ -807,6 +814,8 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
   });
 
   const estimate = h("div", { class: "stake-estimate", hidden: true });
+  // What the stake typed earns in a year at today's rate, under Details.
+  const yearNote = h("div", { class: "stake-cap sozu-year", hidden: true });
   // What Sozu takes of a stake, before and as it's typed; how an unstake comes back.
   const feeLine = (feeLux = null) => (depositFee ? ["Deposit fee ", ...depositFeeParts(depositFee, feeLux, hidden)] : ["Deposit fee not read yet"]);
   const termsNote = h("p", { class: "amount-note sozu-terms", hidden: stakeOff || !cfg }, isWithdraw ? [SOZU_UNSTAKE_LINE] : feeLine());
@@ -833,6 +842,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     if (isWithdraw) st.withdrawAmountDusk = raw;
     else st.depositAmountDusk = raw;
     estimate.hidden = true;
+    yearNote.hidden = true;
     showMaxNote(false);
     if (!isWithdraw) termsNote.replaceChildren(...feeLine());
     if (!cfg) {
@@ -888,25 +898,23 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       reviewBtn.disabled = true;
       return null;
     }
-    // What it gets for what's left after the fee, what that earns in a year at
-    // today's rate, then what stDUSK is.
+    // What it gets for what's left after the fee; what that earns in a year at
+    // today's rate under Details, where what stDUSK is is said too.
     const { earned } = sozuYear({ amount: lux, growth: figures.growth, nativeRate: figures.native, status: rateStatus });
     estimate.replaceChildren(
-      ...[
-        h("div", { class: "stake-estimate__main" }, [
-          "You get about ",
-          balance(field.isMasked(), stDuskText(quote.stDusk)),
-          " stDUSK, worth about ",
-          balance(field.isMasked(), formatDusk(quote.worth.toString())),
-          " DUSK now.",
-        ]),
-        earned !== null && earned > 0n
-          ? h("div", { class: "sozu-year" }, ["At today's rate that's about ", balance(field.isMasked(), formatDusk(earned)), " DUSK in rewards a year, after Sozu's share and the deposit fee."])
-          : null,
-        h("div", { text: "stDUSK is Sozu's token for your share. Its DUSK value follows Sozu's pool, its rewards and its fees." }),
-      ].filter(Boolean)
+      h("div", { class: "stake-estimate__main" }, [
+        "You get about ",
+        balance(field.isMasked(), stDuskText(quote.stDusk)),
+        " stDUSK, worth about ",
+        balance(field.isMasked(), formatDusk(quote.worth.toString())),
+        " DUSK.",
+      ])
     );
     estimate.hidden = false;
+    yearNote.replaceChildren(
+      ...(earned !== null && earned > 0n ? ["At today's rate that's about ", balance(field.isMasked(), formatDusk(earned)), " DUSK in rewards a year, after Sozu's share and the deposit fee."] : [])
+    );
+    yearNote.hidden = !(earned !== null && earned > 0n);
     if (lux > maxStakeLux) {
       field.setError(shortfallText({ missingLux: lux + stakeFeeLux + unstakeFeeLux - publicBalanceLux, hidden, withFee: "this fee and the fee to unstake later" }));
       reviewBtn.disabled = true;
@@ -987,7 +995,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       {},
       isWithdraw
         ? ["Staked with Sozu ", balance(hidden, fmtLux(poolBalanceLux)), " DUSK"]
-        : ["Available ", balance(hidden, fmtLux(publicBalanceLux)), " DUSK from your public balance"]
+        : ["Available ", balance(hidden, fmtLux(publicBalanceLux)), " DUSK"]
     ),
     maxBtn,
   ]);
@@ -1035,27 +1043,32 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
 
   // The position, as the shared sums make it (sozuPosition), in both wallets'
   // words: each short, as a row is, with what it is to the last lux for a
-  // pointer. What's put in and earned waits for the whole history, and the
-  // rewards for each stake's deposit fee; they're before those fees, which the
-  // row above them says, as Rewards by year's growth is after them.
+  // pointer. What it's worth now and its stDUSK on the screen; what's put in,
+  // taken out and earned under Details. Those wait for the whole history, and
+  // the rewards for each stake's deposit fee; they're before those fees, which
+  // the row above them says, as Rewards by year's growth is after them.
   const held = sozuPosition({ rows: history.rows, status: rateStatus, facts: history.facts, complete: Boolean(history.whole) });
   const money = (lux) => h("span", { title: hidden ? undefined : formatDuskExact(lux.toString()) }, [balance(hidden, fmtLux(lux)), " DUSK"]);
   const reading = h("span", { class: "muted", text: "Reading your history…" });
   const positionGroup = position && (poolBalanceLux > 0n || stDuskLux > 0n || held.putIn > 0n)
     ? h("div", { class: "group sozu-position" }, [
+        kv(POSITION_WORDS.worthNow, money(poolBalanceLux)),
+        kv(POSITION_WORDS.stDusk, [balance(hidden, fmtLux(stDuskLux)), " stDUSK", stDuskAction].filter(Boolean)),
+        held.waiting ? h("p", { class: "stake-cap", text: held.waiting === 1 ? "One more on its way isn't counted yet." : `${held.waiting} more on their way aren't counted yet.` }) : null,
+      ].filter(Boolean))
+    : null;
+  const historyRows = positionGroup
+    ? [
         history.whole ? kv(POSITION_WORDS.putIn, money(held.putIn)) : null,
         history.whole && held.takenOut > 0n ? kv(POSITION_WORDS.takenOut, money(held.takenOut)) : null,
-        kv(POSITION_WORDS.worthNow, money(poolBalanceLux)),
         history.whole && held.depositFees > 0n ? kv(held.feesExact ? POSITION_WORDS.depositFees : POSITION_WORDS.depositFeesAbout, money(held.depositFees)) : null,
         history.reading
           ? kv(POSITION_WORDS.earned, reading)
           : history.whole && held.earned !== null
             ? kv(POSITION_WORDS.earned, held.earned < 0n ? h("span", {}, [MINUS, money(-held.earned)]) : money(held.earned))
             : null,
-        kv(POSITION_WORDS.stDusk, [balance(hidden, fmtLux(stDuskLux)), " stDUSK", stDuskAction].filter(Boolean)),
-        held.waiting ? h("p", { class: "stake-cap", text: held.waiting === 1 ? "One more on its way isn't counted yet." : `${held.waiting} more on their way aren't counted yet.` }) : null,
-      ].filter(Boolean))
-    : null;
+      ].filter(Boolean)
+    : [];
 
   const sozuLink = h("button", {
     class: "text-btn chain-link sozu-site",
@@ -1074,18 +1087,37 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       h("span", { class: "row-main" }, [h("span", { class: "row-title", text: title }), sub ? h("span", { class: "row-sub", text: sub }) : null].filter(Boolean)),
       extra,
     ].filter(Boolean));
-  // What it pays a year, once that's read, and the one line of what that's made of.
+  // What it pays a year, once that's read, after Sozu's share of rewards; the one line of what that's made of under Details.
   const yearly = sozuRate(figures.native, rateStatus, figures.growth);
   const working = sozuRateLine({ growth: figures.growth, native: figures.measured ?? null, nativeRate: figures.native, provisioners: figures.provisioners, tipHeight: figures.tipHeight, status: rateStatus, locale: amountLocale() });
+  const rewardFee = feeRateOf(rateStatus?.fees?.reward);
   const facts = h("div", { class: "group info" }, [
-    fact("drop", "Any amount, no node needed", "You get stDUSK, a token for your share of Sozu's pool.", positionGroup ? null : stDuskAction),
     yearly !== null && working
-      ? fact("percent", `About ${new Intl.NumberFormat(amountLocale(), { maximumFractionDigits: 0, style: "percent" }).format(yearly)} a year. Not promised.`, working)
+      ? fact(
+          "percent",
+          `About ${new Intl.NumberFormat(amountLocale(), { maximumFractionDigits: 0, style: "percent" }).format(yearly)} a year, after Sozu's ${rewardFee ? feePercent(rewardFee, amountLocale()) : "share"}. Not promised.`
+        )
       : null,
-    // Sozu's own fees, read from its contract each time.
-    fact("percent", fees.title, fees.sub),
-    fact("fee", `Network fee up to ${formatFee(isWithdraw ? unstakeFeeLux : stakeFeeLux, { max: true })} DUSK`),
+    fact("fee", `Fee up to ${formatFee(isWithdraw ? unstakeFeeLux : stakeFeeLux, { max: true })} DUSK`),
   ].filter(Boolean));
+  // The rest, out of the way, open or not as it was left: the position's
+  // history, what a stake typed earns, the rate's working, Sozu's own fees
+  // (read from its contract each time), and what stDUSK is.
+  const details = h("details", { class: "advanced sozu-details", open: Boolean(st.detailsOpen) }, [
+    h("summary", { text: "Details" }),
+    h("div", { class: "advanced-body" }, [
+      historyRows.length ? h("div", { class: "group group--inset sozu-history" }, historyRows) : null,
+      yearNote,
+      yearly !== null && working ? h("p", { class: "stake-cap sozu-working", text: working }) : null,
+      h("div", { class: "group info" }, [
+        fact("percent", fees.title, fees.sub),
+        fact("drop", "stDUSK is Sozu's token for your share of its pool.", "Its DUSK value follows the pool, its rewards and its fees.", positionGroup ? null : stDuskAction),
+      ]),
+    ].filter(Boolean)),
+  ]);
+  details.addEventListener("toggle", () => {
+    st.detailsOpen = details.open;
+  });
 
   // Brought back from Review, the amount says how it stands at once.
   if ((isWithdraw ? st.withdrawAmountDusk : st.depositAmountDusk) || !cfg) check();
@@ -1114,6 +1146,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
     // Review right under the amount, so both fit above a phone's keyboard.
     h("div", { class: "stake-bottom" }, [reviewBtn]),
     facts,
+    details,
   ].filter(Boolean);
 }
 
@@ -1158,17 +1191,19 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     state.route = "stake";
     actions?.render?.().catch(() => {});
   };
-  const confirmBtn = h("button", {
-    class: "btn-primary",
-    text: "Confirm",
-    disabled: submitDisabled || rechecking.has(draft),
-  });
 
-  // The call's own gas at the network's price; Custom fee for gas of your own.
-  const gasOpts = { privacy: "public", fnName };
   const hidden = balancesHidden(ov);
   // What Max filled in stays hidden here; an amount typed shows, as on every Review.
   const amountMasked = hidden && Boolean(draft.amountMasked);
+  // The button names what it does, with the amount as the head shows it: "Stake 0.5 DUSK".
+  const confirmBtn = h(
+    "button",
+    { class: "btn-primary", disabled: submitDisabled || rechecking.has(draft) },
+    [`${isStake ? "Stake" : "Unstake"} `, balance(amountMasked, formatDuskExact(draftNeeds.toString())), " DUSK"]
+  );
+
+  // The call's own gas at the network's price; Custom fee for gas of your own.
+  const gasOpts = { privacy: "public", fnName };
   const ownGas = getDefaultGas(TX_KIND.CONTRACT_CALL, gasOpts);
   const gasEditor = document.createElement("dusk-gas-editor");
   gasEditor.maxDecimals = UI_DISPLAY_DECIMALS;
@@ -1180,7 +1215,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   gasEditor.extraLux = [String(draft.deposit ?? "0")];
   gasEditor.setGas(draft?.gas ?? null);
   // The contract the call goes to, Sozu's pool as its hub named it, with the
-  // gas under Custom fee: there to check before Confirm, out of the way.
+  // gas under Custom fee: there to check before it's sent, out of the way.
   const poolId = contractIdText(draft.contractId);
   const contractRow = h("div", { class: "kv sozu-contract" }, [
     h("span", { class: "kv-label", text: "Contract" }),
@@ -1217,7 +1252,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
   const line = isStake ? "With Sozu, a third party" : "From Sozu, back to your public balance";
   const profileName = profileNameEl(ov, { index: Number(draft.profileIndex ?? 0) || 0 });
 
-  // Gas that won't do, or terms that couldn't be checked, say so above Confirm; nothing is sent.
+  // Gas that won't do, or terms that couldn't be checked, say so above its button; nothing is sent.
   const confirmError = h("div", { class: "field-error", role: "alert", hidden: !draft.checkError, text: draft.checkError ?? "" });
 
   // This Review, with the popup still where its stake belongs (reviewRecord).
@@ -1236,7 +1271,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
 
   // It ignores a click for a moment once Review is up (clickGuard.js).
   confirmBtn.addEventListener("click", guarded(async () => {
-    // One check at a time for this stake, whichever Confirm is pressed.
+    // One check at a time for this stake, whichever Review's button is pressed.
     if (rechecking.has(draft) || !pay.covered()) return;
     // The popup moved on since this Review was drawn.
     if (!stillHere(null)) {
@@ -1260,7 +1295,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
     draft.gas = gas;
     // A stake goes ahead on Sozu's terms as they are when it's sent: read
     // them again first, and if anything this Review shows changed, show the
-    // new figures for another Confirm instead of sending.
+    // new figures for another press instead of sending.
     if (isStake) {
       rechecking.add(draft);
       let terms = null;
@@ -1288,7 +1323,7 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
         return;
       }
       if (applyStakeTerms({ st, draft, terms })) {
-        // New figures, for a Confirm of their own: one a moment ago is not for them.
+        // New figures, for a press of their own: one a moment ago is not for them.
         screenShown();
         actions?.render?.().catch(() => {});
         return;
@@ -1356,13 +1391,13 @@ export function sozuConfirmView(ov, { state, actions } = {}) {
       syncing ? syncWarning() : null,
       h("div", { class: "group" }, [
         quote
-          ? kv("You get about", h("span", {}, [balance(amountMasked, stDuskText(quote.stDusk)), " stDUSK, worth about ", balance(amountMasked, fmtLux(quote.worth)), " DUSK now"]))
+          ? kv("You get about", h("span", {}, [balance(amountMasked, stDuskText(quote.stDusk)), " stDUSK, worth about ", balance(amountMasked, fmtLux(quote.worth)), " DUSK"]))
           : null,
-        quote && quoteRate ? kv("Deposit fee", h("span", {}, depositFeeParts(quoteRate, safeBigInt(quote.fee, 0n), hidden))) : null,
+        quote && quoteRate ? kv("Deposit fee", h("span", {}, depositFeeRow(quote, quoteRate, hidden))) : null,
         kv(isStake ? "From" : "To", [h("span", {}, [withReviewWallet(profileName, actions?.review), h("span", { class: "kv-muted", text: " · Public" })])]),
       ].filter(Boolean)),
-      // How an unstake comes back, and that a stake's deposit fee doesn't.
-      isStake ? depositFeeGone(quote, quoteRate, hidden) : h("p", { class: "stake-cap", text: SOZU_UNSTAKE_LINE }),
+      // How an unstake comes back; a stake's deposit fee row says it doesn't.
+      isStake ? depositFeeGone(quote, quoteRate) : h("p", { class: "stake-cap", text: SOZU_UNSTAKE_LINE }),
       gasEditor,
       reviewActions(
         confirmBtn,

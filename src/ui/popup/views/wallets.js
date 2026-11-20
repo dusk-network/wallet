@@ -8,9 +8,9 @@ import { h } from "../../lib/dom.js";
 import { HOLD_TO_SHOW_TEXT, holdToShow, onPageAway } from "../../lib/pageAway.js";
 import { isFirefoxAndroid } from "../../lib/device.js";
 import { shortAddress } from "../../lib/strings.js";
-import { decimalInput, fieldError, fieldLabel, groupLabel, newPasswordField, passwordForm, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
-import { srpGridEl } from "./onboarding.js";
-import { createWordCheck, wordsMismatch } from "../../components/WordCheck.js";
+import { decimalInput, fieldError, fieldLabel, newPasswordField, passwordForm, passwordInput, unlockPasswordField } from "../../components/FormControls.js";
+import { PHRASE_WARNING, srpGridEl } from "./onboarding.js";
+import { PHRASE_MATCHES_TEXT, createWordCheck, wordsMismatch } from "../../components/WordCheck.js";
 import { wordPlaces } from "../../../shared/recoveryWords.js";
 import { subnav } from "../../components/Subnav.js";
 import { isExtensionRuntime } from "../../../platform/runtime.js";
@@ -122,12 +122,14 @@ export function removeWalletView(ov, { state, actions } = {}) {
 }
 
 /** What a reset takes with the wallets: the app has no connected sites. */
-export const resetKeptText = () => (platform.capabilities.dapp ? "contacts, names, activity and connected sites" : "contacts, names and activity");
+export const resetKeptText = () => (platform.capabilities.dapp ? "contacts, names, activity and sites" : "contacts, names and activity");
 
 /**
  * Reset, as Settings chose it: every wallet here goes, so the password first,
  * as for removing one, or in the app with fingerprint unlock on, a
- * fingerprint. Locked or not: the wallet checks it against the vault.
+ * fingerprint. Locked or not: the wallet checks it against the vault. Only
+ * here, where it's done, it says what goes, and that only each wallet's
+ * recovery phrase gets the funds back.
  */
 export function resetWalletView(ov, { state, actions } = {}) {
   const pwd = unlockPasswordField({ onEnter: () => btn.click() });
@@ -208,7 +210,7 @@ export function resetWalletView(ov, { state, actions } = {}) {
     h("div", { class: "row onboard-form" }, [
       h("p", {
         class: "auth-lead",
-        text: `This removes every wallet here, with its ${resetKeptText()}. Your funds stay on Dusk. You need each recovery phrase to use them again.`,
+        text: `Removes every wallet here, with its ${resetKeptText()}. Funds stay on Dusk; you need each wallet's recovery phrase to get them back.`,
       }),
       ...pwd.els,
       err.el,
@@ -254,8 +256,8 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
     onPageAway(() => reveal(false), shown);
     return [
       open ? h("p", { class: "settings-profile-line", text: walletLabel(open) }) : null,
-      h("p", { class: "auth-lead", text: `These are this wallet's ${mnemonic.trim().split(/\s+/).length} words, in order. Check them against the ones you wrote down.` }),
-      h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
+      h("p", { class: "auth-lead", text: `This wallet's ${mnemonic.trim().split(/\s+/).length} words, in order.` }),
+      h("p", { class: "phrase-warning", text: PHRASE_WARNING }),
       shown,
       h("div", { class: "phrase-tools" }, [toggle]),
       h("button", { class: "btn-primary btn-full", type: "button", text: "Done", onclick: () => backToSettings(state, actions) }),
@@ -329,7 +331,6 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
   page.replaceChildren(
     ...[
       open ? h("p", { class: "settings-profile-line", text: walletLabel(open) }) : null,
-      h("p", { class: "auth-lead", text: "Your password, to see this wallet's recovery phrase." }),
       ...pwd.els,
       err.el,
       btn,
@@ -340,7 +341,7 @@ export function recoveryPhraseView(ov, { state, actions } = {}) {
 }
 
 /**
- * Check your recovery words, from Settings: the password first, or a
+ * Check your recovery phrase, from Settings: the password first, or a
  * fingerprint where it's on, as for the recovery phrase; then three of the
  * open wallet's words, chosen at random, compared by the wallet. They match,
  * or don't, and that's all a check says: Try again asks the same three, and
@@ -385,7 +386,7 @@ export function checkWordsView(ov, { state, actions } = {}) {
           if (res?.error) throw new Error(res.error.message ?? "Couldn't check the words");
           if (!page.isConnected || state.context !== asked) return;
           if (res?.match === true) {
-            page.replaceChildren(h("p", { class: "auth-lead", text: "Your recovery words match." }), done);
+            page.replaceChildren(h("p", { class: "auth-lead", text: PHRASE_MATCHES_TEXT }), done);
             return;
           }
           page.replaceChildren(
@@ -406,13 +407,7 @@ export function checkWordsView(ov, { state, actions } = {}) {
         }
       },
     });
-    page.replaceChildren(
-      h("p", { class: "auth-lead", text: "Enter these words from your recovery phrase." }),
-      groupLabel(words.el, "Check your recovery words"),
-      words.el,
-      wordsError.el,
-      checkBtn
-    );
+    page.replaceChildren(words.el, wordsError.el, checkBtn);
     words.focus();
   };
 
@@ -439,14 +434,14 @@ export function checkWordsView(ov, { state, actions } = {}) {
       btn.disabled = false;
       fingerBtn.disabled = false;
       pwd.input.disabled = false;
-      btn.textContent = "Next";
+      btn.textContent = "Start check";
     }
   };
 
   const btn = h("button", {
     class: "btn-primary btn-full",
     type: "button",
-    text: "Next",
+    text: "Start check",
     onclick: () => {
       err.show("");
       pwd.error.show("");
@@ -466,7 +461,7 @@ export function checkWordsView(ov, { state, actions } = {}) {
     onclick: async () => {
       if (busy) return;
       err.show("");
-      const answer = await fingerprintPassword({ title: "Check your recovery words" });
+      const answer = await fingerprintPassword({ title: "Check your recovery phrase" });
       if (!pwd.input.isConnected) return;
       if (answer.ok && answer.secret) return start(answer.secret);
       if (answer.reason === "invalidated" || answer.reason === "off") fingerBtn.hidden = true;
@@ -480,17 +475,21 @@ export function checkWordsView(ov, { state, actions } = {}) {
     })
     .catch(() => {});
 
-  page.replaceChildren(h("p", { class: "auth-lead", text: "Your password, to check this wallet's recovery words." }), ...pwd.els, err.el, btn, fingerBtn);
+  page.replaceChildren(...pwd.els, err.el, btn, fingerBtn);
   focusOnOpen(pwd.input);
-  return Object.assign([subnav({ title: "Check your recovery words", onBack: () => backToSettings(state, actions) }), page], { busy: () => busy && state.context === asked });
+  return Object.assign([subnav({ title: "Check your recovery phrase", onBack: () => backToSettings(state, actions) }), page], { busy: () => busy && state.context === asked });
 }
 
-/** A new password for every wallet here: the current one, then the new one twice. */
+/**
+ * A new password for every wallet here: the current one, then the new one
+ * twice. With more than one wallet here, it says it's for all of them.
+ */
 export function changePasswordView(ov, { state, actions } = {}) {
-  const current = passwordField({ label: "Current password", placeholder: "The password you unlock with", onEnter: () => next.input.focus() });
+  const current = passwordField({ label: "Current password", onEnter: () => next.input.focus() });
   // The new one, twice, apart from the current one (FormControls.js).
   const next = newPasswordField({ caption: "New password", placeholder: "At least 8 characters", onEnter: () => again.input.focus() });
-  const again = newPasswordField({ caption: "Confirm password", placeholder: "The same password again", onEnter: () => btn.click() });
+  const again = newPasswordField({ caption: "Confirm password", placeholder: "Same password again", onEnter: () => btn.click() });
+  const several = (Array.isArray(ov?.wallets) && ov.wallets.length > 1) || Number(ov?.walletsHere) > 1;
   const err = formError();
   const fields = [current, next, again];
 
@@ -554,7 +553,7 @@ export function changePasswordView(ov, { state, actions } = {}) {
   return Object.assign([
     subnav({ title: "Change password", onBack: () => backToSettings(state, actions) }),
     h("div", { class: "row onboard-form" }, [
-      h("p", { class: "auth-lead", text: "Every recovery phrase here is encrypted again with the new password." }),
+      several ? h("p", { class: "auth-lead", text: "For every wallet here." }) : null,
       passwordForm(current.els),
       passwordForm([...next.els, ...again.els]),
       err.el,
@@ -639,11 +638,12 @@ export function sendPasswordView(ov, { state, actions } = {}) {
   return Object.assign([
     subnav({ title: "Password on big sends", onBack: () => backToSettings(state, actions) }),
     h("div", { class: "row onboard-form" }, [
-      h("label", { class: "settings-switch", for: "send-password-on" }, [on, h("span", { text: "Ask for the password on big sends" })]),
+      // The switch is the title's: it says only On.
+      h("label", { class: "settings-switch", for: "send-password-on" }, [on, h("span", { text: "On" })]),
       h("p", {
         class: "settings-note",
         // In the app no site asks for anything.
-        text: `On sends, stakes${isExtensionRuntime() ? ", shielding and what sites ask" : " and shielding"}, network fee included. A token's transfer, or a contract the wallet doesn't know, asks on any amount.`,
+        text: `Counts sends, stakes${isExtensionRuntime() ? ", shielding and site requests" : " and shielding"}, network fee included. Token transfers and unknown contracts always ask.`,
       }),
       amountRow,
       passwordRow,

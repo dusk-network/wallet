@@ -45,9 +45,9 @@ const overview = {
   selectedAccountIndex: 0,
 };
 
-const PUBLIC_NOTE = "People who send to alice.dusk reach this public account.";
-const SHIELDED_NOTE =
-  "People who pay alice.dusk choose public or shielded. Anyone can see this address belongs to alice.dusk.";
+const SHIELDED_NOTE = "Anyone can see this address belongs to alice.dusk.";
+// An account or address as every screen shortens it: its first and last six.
+const short = (address) => `${address.slice(0, 6)}…${address.slice(-6)}`;
 
 // DUSK's price now as CoinGecko gives it, the one place a mainnet screen reads it from (app-core's /prices):
 // nothing in these tests leaves the machine.
@@ -125,7 +125,7 @@ describe("receive", () => {
     expect(shielded.address.title).toBe(ADDRESS);
   });
 
-  it("shows the name and the whole account under the QR, and copies the account with a button that says Copied", async () => {
+  it("shows the name and the account short under the QR, the whole of it to screen readers, and copies it with a button that says Copied", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");
     const row = dom.document.body.querySelector(".row").children;
@@ -134,9 +134,9 @@ describe("receive", () => {
 
     expect(view.name()).toBe("alice.dusk");
     expect(view.nameField.querySelector(".receive-field__name").title).toBe("alice.dusk");
-    // All of it, to read and compare, its ends set off: for the eyes and for screen readers alike.
-    expect([visibleText(view.address), screenReaderText(view.address), view.address.title]).toEqual([ACCOUNT, ACCOUNT, ACCOUNT]);
-    expect(view.address.querySelectorAll("b").map((b) => b.textContent)).toEqual([ACCOUNT.slice(0, 6), ACCOUNT.slice(-6)]);
+    // Short, as every screen shows an account; whole in its tooltip, to screen readers, in the QR and on Copy.
+    expect([visibleText(view.address), screenReaderText(view.address), view.address.title]).toEqual([short(ACCOUNT), ACCOUNT, ACCOUNT]);
+    expect(dom.document.body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(ACCOUNT));
 
     // The name's icon and the address's words each say Copied on themselves, with no toast.
     expect(await view.copy("Copy name")).toEqual(["alice.dusk", "Copied", undefined]);
@@ -145,9 +145,9 @@ describe("receive", () => {
     expect(await view.copy("Copy address")).toEqual([ACCOUNT, "Copied", undefined]);
     expect(visibleText(copyAddress)).toBe("Copied");
 
-    // Beside Download, below the fields; nothing else is a big button.
+    // Beside Save QR, below the fields; nothing else is a big button.
     expect(dom.document.body.querySelector(".btn-primary")).toBeNull();
-    expect(dom.document.body.querySelector(".btnrow").children.map((b) => b.getAttribute("data-label") ?? b.textContent)).toEqual(["Copy address", "Download QR PNG"]);
+    expect(dom.document.body.querySelector(".btnrow").children.map((b) => b.getAttribute("data-label") ?? b.textContent)).toEqual(["Copy address", "Save QR"]);
   });
 
   it("draws the name's copy button as an SVG icon, centered in its button", async () => {
@@ -163,14 +163,18 @@ describe("receive", () => {
     expect(css).toMatch(/button\.acct-menu-copy,\s*button\.receive-copy \{\s*display: inline-grid;\s*place-items: center;\s*\}/);
   });
 
-  it("says what the name reaches right under it, with no ⓘ to press", async () => {
+  it("says nothing under the public account's name, and on the shielded address that anyone can see it's the name's, with no ⓘ to press", async () => {
     lookupPrimaryName.mockResolvedValue("alice.dusk");
     const view = await receive("public");
-    expect(view.shownNote()).toBe(PUBLIC_NOTE);
+    expect([view.name(), view.shownNote()]).toEqual(["alice.dusk", ""]);
+    expect(visibleText(dom.document.body)).not.toContain("reach this public account");
     expect(dom.document.body.querySelector(".receive-info")).toBeNull();
-    // It follows the fields it speaks of.
+    // The shielded address paid through the name: that it's public, right under the fields it speaks of.
+    lookupShieldedName.mockResolvedValue("alice.dusk");
+    const shielded = await receive("shielded");
+    expect(shielded.shownNote()).toBe(SHIELDED_NOTE);
     const row = dom.document.body.querySelector(".row").children;
-    expect(row.indexOf(view.note)).toBe(row.indexOf(view.addressField.parentNode) + 1);
+    expect(row.indexOf(shielded.note)).toBe(row.indexOf(shielded.addressField.parentNode) + 1);
   });
 
   it("names the shielded address only when the name's record is that address", async () => {
@@ -179,7 +183,7 @@ describe("receive", () => {
     let view = await receive("shielded", { state: { receive: { tab: "shielded" } } });
     expect(lookupShieldedName).toHaveBeenCalledWith(ACCOUNT, ADDRESS, { nodeUrl: overview.nodeUrl });
     expect([view.name(), view.shownNote()]).toEqual(["", ""]);
-    expect(visibleText(view.address)).toBe(ADDRESS);
+    expect([visibleText(view.address), view.address.title]).toEqual([short(ADDRESS), ADDRESS]);
     expect(await view.copy("Copy address")).toEqual([ADDRESS, "Copied", undefined]);
 
     lookupShieldedName.mockResolvedValue("alice.dusk");
@@ -240,7 +244,8 @@ describe("receive", () => {
     expect(copied).toBe(`You're asked to pay 1.5 DUSK\nPay here: https://apps.testnet.dusk.network/wallet/dashboard/send?to=${ACCOUNT}&amount=1.5&network=testnet`);
     // The QR holds the same request, for a wallet to read.
     expect(dom.document.body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(`dusk:public-${ACCOUNT}@dusk:2?amount=1.5`));
-    expect(visibleText(dom.document.body.querySelector(".receive-request"))).toContain("The link opens the web wallet's Send, filled in.");
+    // No note narrates what the QR and the link do.
+    expect(visibleText(dom.document.body.querySelector(".receive-request"))).not.toMatch(/The QR holds|web wallet/);
   });
 
   it("copies a shielded request with its memo, and the dusk: link where the network has no web wallet", async () => {
@@ -442,20 +447,21 @@ describe("receive", () => {
     ]);
     expect(body.querySelector(".tabs").hasAttribute("title")).toBe(false);
 
-    // Once the QR holds a request, Request payment says what it asks for.
+    // Open, with the QR holding a request: its fields say what it asks, and Request payment doesn't again.
     Object.assign(state.receive, { requestOpen: true, amountDusk: "1.5" });
     await receive("public", { state });
-    expect(summary()).toBe("Request payment1.5 DUSK");
+    expect(summary()).toBe("Request payment");
+    expect(body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(`dusk:public-${ACCOUNT}@dusk:2?amount=1.5`));
     Object.assign(state.receive, { amountDusk: "", memo: "Lunch" });
     await receive("public", { state });
-    expect(summary()).toBe("Request paymentWith memo");
+    expect(summary()).toBe("Request payment");
 
     // On a Dutch browser, an amount written the Dutch way is the amount it asks for.
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "nl-NL" });
     try {
       Object.assign(state.receive, { amountDusk: "1,25", memo: "" });
       await receive("public", { state });
-      expect(summary()).toBe("Request payment1,25 DUSK");
+      expect(body.querySelector(".qr-inner").innerHTML).toBe(qrSvgString(`dusk:public-${ACCOUNT}@dusk:2?amount=1.25`));
     } finally {
       vi.unstubAllGlobals();
     }
@@ -509,7 +515,7 @@ describe("receive", () => {
       ["Copy address", "btn-outline"],
       ["Share address", "btn-outline"],
       ["Copy app link", "btn-outline"],
-      ["Download QR PNG", "btn-outline"],
+      ["Save QR", "btn-outline"],
       ["Copy request", "btn-outline"],
       ["Share request", "btn-outline"],
     ]);
@@ -521,7 +527,7 @@ describe("receive", () => {
       ["Copy address", "btn-outline"],
       ["Share address", "btn-outline"],
       ["Copy app link", "btn-outline"],
-      ["Download QR PNG", "btn-outline"],
+      ["Save QR", "btn-outline"],
     ]);
     const names = buttons().map(([name]) => name);
     expect(new Set(names).size).toBe(names.length);
@@ -561,7 +567,7 @@ describe("receive", () => {
     const actions = { render: vi.fn(async () => {}), showToast: vi.fn() };
     dom.document.body.replaceChildren(...receiveView({ ...overview, networkName: "Testnet" }, { state, actions }));
     await settle();
-    dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === "Download QR PNG").click();
+    dom.document.body.querySelectorAll("button").find((b) => visibleText(b) === "Save QR").click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     const [, args] = invoke.mock.calls.find(([cmd]) => cmd === "save_download");
     expect(args.name).toBe("dusk-testnet-request-0.03-DUSK-Invoice-2026-114-2026-11-10-0412.png");
@@ -745,7 +751,7 @@ describe("the requests made here", () => {
   // request with the same invoice number, Waiting, which a client could pay again. Then Sofía's, Nandini's, Marek's
   // and Chen's: copying or sharing it said only "Copied", and the one toast that said more hid under Android's
   // clipboard preview.
-  it("asks on the form before a request paid already is copied or downloaded again, copies it only on Copy anyway, and keeps no second one", async () => {
+  it("asks on the form before a request paid already is copied or its QR saved again, copies it only on Copy anyway, and keeps no second one", async () => {
     items[KEY] = { [ACCOUNT]: [kept({ id: "a", lux: "10000000", memo: "Factura 2026-151" })] };
     const entries = [paidIn("a1".repeat(32), "10000000", "Factura 2026-151", T0 + HOUR)];
     const state = { receive: { tab: "public", requestOpen: true, amountDusk: "0.01", memo: "Factura 2026-151" }, activity: { key: activityKey(unlocked), entries, names: new Map() } };
@@ -781,10 +787,10 @@ describe("the requests made here", () => {
     expect(items[KEY][ACCOUNT].map((r) => r.id)).toEqual(["a"]);
     expect(shown().map((row) => row.state)).toEqual(["Paid"]);
     // Its QR too: asked first, under the buttons by the address, below the form.
-    press("Download QR PNG");
+    press("Save QR");
     await settle();
     const rowAsk = dom.document.body.querySelector(".receive-address-actions").nextSibling;
-    expect([rowAsk.classList.contains("request-paid-ask"), visibleText(rowAsk)]).toEqual([true, `${SAID}Download anywayCancel`]);
+    expect([rowAsk.classList.contains("request-paid-ask"), visibleText(rowAsk)]).toEqual([true, `${SAID}Save anywayCancel`]);
   });
 
   // Sofía's, Nandini's, Marek's and Chen's: a request in the list paid already said only "Copied" as its Copy link

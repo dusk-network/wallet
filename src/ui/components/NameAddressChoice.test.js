@@ -52,17 +52,17 @@ describe("name address choice", () => {
     expect(publicRadio.querySelector(".name-option__label").textContent).toBe("Public account");
     const addr = publicRadio.querySelector(".name-option__addr");
     expect([visibleText(addr), addr.title, screenReaderText(addr)]).toEqual(["21n5nc…fMMLNz", ACCOUNT, ACCOUNT]);
-    expect(publicRadio.querySelector(".name-option__line").textContent).toBe("Visible on chain");
+    expect(publicRadio.querySelector(".name-option__line").textContent).toBe("Anyone can see it");
     expect(shieldedRadio.querySelector(".name-option__label").textContent).toBe("Shielded address");
     expect(shieldedRadio.querySelector(".name-option__line").textContent).toBe("Private");
 
     // Each card shows its title, short address and one line, and no balance;
     // screen readers get the full address in place of the short one.
     expect([visibleText(publicRadio), visibleText(shieldedRadio)]).toEqual([
-      "Public account21n5nc…fMMLNzVisible on chain",
+      "Public account21n5nc…fMMLNzAnyone can see it",
       "Shielded address4QpZhL…i743QEPrivate",
     ]);
-    expect(screenReaderText(publicRadio)).toBe(`Public account${ACCOUNT}Visible on chain`);
+    expect(screenReaderText(publicRadio)).toBe(`Public account${ACCOUNT}Anyone can see it`);
     expect(screenReaderText(shieldedRadio)).toBe(`Shielded address${ADDRESS}Private`);
     expect(el.querySelector(".name-shortfall")).toBeNull();
     // Each radio shows its mark.
@@ -146,7 +146,7 @@ describe("name address choice", () => {
   });
 
   it.each([
-    ["only a public account", { address: undefined }, "Public account21n5nc…fMMLNzVisible on chain", ACCOUNT],
+    ["only a public account", { address: undefined }, "Public account21n5nc…fMMLNzAnyone can see it", ACCOUNT],
     ["only a shielded address", { account: undefined }, "Shielded address4QpZhL…i743QEPrivate", ADDRESS],
     [
       "only a shielded address the balance can't pay",

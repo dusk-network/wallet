@@ -95,10 +95,10 @@ export function requestSummary(kind, params = {}, { own = [] } = {}) {
       if (p.shieldedReceiveAddress) {
         return {
           title: p.currentAccountIndex == null ? "Connect and share your shielded address?" : "Share your shielded address?",
-          sub: "It asks for your shielded receive address.",
+          sub: "It asks for your shielded address.",
         };
       }
-      return { title: "Connect this site?", sub: "It asks to see your public address, .dusk name and balance." };
+      return { title: "Connect this site?", sub: "It asks to see your public account, .dusk name and balance." };
     case "switch_network": {
       // By the node's address (nodeNetwork.js), its host in large type: never
       // a network's name for a node that only says it's on that network.
@@ -114,7 +114,7 @@ export function requestSummary(kind, params = {}, { own = [] } = {}) {
       const preview = p.messagePreview;
       const text = preview?.kind === "text" ? String(preview.text ?? "") : "";
       return {
-        title: "Sign a message?",
+        title: "Sign this message?",
         sub: text ? startOf(text, 80) : `${Number(p.messageLen ?? 0) || 0} bytes, not readable text`,
       };
     }

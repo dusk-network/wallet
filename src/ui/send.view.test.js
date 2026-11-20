@@ -247,17 +247,17 @@ describe("send to a .dusk name with both addresses", () => {
     expect(dom.document.body.querySelector(".name-points-to").textContent).toBe("alice.dusk points to");
     expect(dom.document.body.querySelector("[role=radiogroup]")).not.toBeNull();
     expect(form.radios().map((r) => r.querySelector(".name-option__line").textContent)).toEqual([
-      "Visible on chain",
+      "Anyone can see it",
       "Private",
     ]);
     expect(form.picked()).toEqual(["true", "false"]);
     // The cards make the choice: no pill, and no balances or full address with them.
     expect(form.pill()).toBe("");
     expect(visibleText(form.nameBox())).toBe(
-      `alice.dusk points toPublic account${shortAddress(ALICE.account)}Visible on chain` +
+      `alice.dusk points toPublic account${shortAddress(ALICE.account)}Anyone can see it` +
         `Shielded address${shortAddress(ALICE.address)}Private`
     );
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.balanceLine()).toBe("Available 177.984 DUSK");
     expect(form.review.disabled).toBe(false);
     // The old Public account | Shielded address switch is gone.
     expect(dom.document.body.querySelector(".name-address-toggle")).toBeNull();
@@ -269,7 +269,7 @@ describe("send to a .dusk name with both addresses", () => {
     typeInto(form.amount, "1");
 
     // Sending that much more must be enough: the amount and the whole fee.
-    expect(form.amountError()).toBe("That's 1.0025 DUSK more than your public balance, with the network fee.");
+    expect(form.amountError()).toBe("Your public balance is 1.0025 DUSK short, fee included.");
   });
 
   it("follows the picked card in the balance line", () => {
@@ -280,12 +280,12 @@ describe("send to a .dusk name with both addresses", () => {
 
     expect(form.picked()).toEqual(["false", "true"]);
     expect(form.pill()).toBe("");
-    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
+    expect(form.balanceLine()).toBe("Available 24.95 DUSK");
     expect(state.draft.nameChoices).toEqual({ "alice.dusk": true });
 
     form.radios()[0].click();
     expect(form.picked()).toEqual(["true", "false"]);
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.balanceLine()).toBe("Available 177.984 DUSK");
   });
 
   // Lena's and Chen's: opened with no signal, the shielded balance said 0 where it couldn't be read.
@@ -295,7 +295,7 @@ describe("send to a .dusk name with both addresses", () => {
     expect(form.pill()).toBe("Shielded");
     expect(isShown(dom.document.body.querySelector(".amount-avail"))).toBe(false);
     typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.balanceLine()).toBe("Available 177.984 DUSK");
   });
 
   it("shows the pill for a pasted account or address, where it is the only sign of the transfer type", () => {
@@ -321,11 +321,11 @@ describe("send to a .dusk name with both addresses", () => {
     // The same name, as resolved.
     typeInto(form.to, " Alice.DUSK");
     expect(form.picked()).toEqual(["false", "true"]);
-    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
+    expect(form.balanceLine()).toBe("Available 24.95 DUSK");
 
     typeInto(form.to, "bob.dusk");
     expect(form.picked()).toEqual(["true", "false"]);
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(form.balanceLine()).toBe("Available 177.984 DUSK");
 
     // A pick for bob.dusk doesn't take alice.dusk's place.
     form.radios()[1].click();
@@ -375,7 +375,7 @@ describe("send to a .dusk name with both addresses", () => {
     form = mount(state);
     expect(form.to.value).toBe("alice.dusk");
     expect(form.picked()).toEqual(["false", "true"]);
-    expect(form.balanceLine()).toBe("Available after fees 24.95 DUSK");
+    expect(form.balanceLine()).toBe("Available 24.95 DUSK");
   });
 
   it.each([
@@ -430,7 +430,7 @@ describe("send to a .dusk name with one address", () => {
     const funded = mount(newState());
     typeInto(funded.to, "carol.dusk");
     expect(visibleText(funded.nameBox())).toBe(`carol.dusk points toShielded address${shortAddress(carol)}Private`);
-    expect(funded.balanceLine()).toBe("Available after fees 24.95 DUSK");
+    expect(funded.balanceLine()).toBe("Available 24.95 DUSK");
     expect(funded.review.disabled).toBe(false);
   });
 
@@ -443,7 +443,7 @@ describe("send to a .dusk name with one address", () => {
     const dave = NAMES["dave.dusk"].account;
     expect(form.radios()).toEqual([]);
     expect(form.pill()).toBe("");
-    expect(visibleText(form.nameBox())).toBe(`dave.dusk points toPublic account${shortAddress(dave)}Visible on chain`);
+    expect(visibleText(form.nameBox())).toBe(`dave.dusk points toPublic account${shortAddress(dave)}Anyone can see it`);
     // The full account shows on Review, not here.
     expect(form.nameBox().querySelector(".box")).toBeNull();
     expect(form.review.disabled).toBe(false);
@@ -453,7 +453,7 @@ describe("send to a .dusk name with one address", () => {
     await settle();
     expect(state.draft).toMatchObject({ to: dave, privacy: "public", duskName: { name: "dave.dusk" } });
     const review = mount(state, ov);
-    expect(review.visibleLine()).toBe("Visible to everyone: amount, your account, and the recipient's account.");
+    expect(review.visibleLine()).toBe("Anyone can see the amount and both accounts.");
     expect(review.reviewTo()).toBe(`dave.dusk${dave}`);
   });
 });
@@ -494,10 +494,10 @@ describe("a Review while offline", () => {
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
     const review = mount(state, ov);
     await settle();
-    const confirm = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const confirm = () => dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK");
     const offline = () => [...dom.document.body.querySelectorAll(".offline-note")].filter(isShown).map((n) => n.textContent);
     expect(confirm().disabled).toBe(true);
-    expect(offline()).toEqual(["You're offline. Confirm once you're back online."]);
+    expect(offline()).toEqual(["You're offline."]);
     confirm().click();
     await settle();
     expect(review.actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_SEND_TX")).toEqual([]);
@@ -536,6 +536,8 @@ describe("what Max fills in, with Hide balances", () => {
     mount(state, ov);
     expect(visibleText(dom.document.body.querySelector(".balance-amount"))).toBe("•••• DUSK");
     expect(visibleText(dom.document.body.querySelector(".gas-total-value"))).toBe("up to •••• DUSK");
+    // Its button says what it sends as Review shows it.
+    expect(dom.document.body.querySelector(".review-actions .btnrow > button").textContent).toBe("Send •••• DUSK");
   });
 
   it("shows what's typed over it", () => {
@@ -760,8 +762,8 @@ describe("send's amount", () => {
     const form = mount(state, overview(), async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {}));
     typeInto(form.to, ALICE.account);
     await settle();
-    expect(form.feeNote()).toBe("Network fee up to 0.005 DUSK");
-    expect(form.balanceLine()).toBe("Available after fees 177.9815 DUSK");
+    expect(form.feeNote()).toBe("Fee up to 0.005 DUSK");
+    expect(form.balanceLine()).toBe("Available 177.9815 DUSK");
 
     // Its Review: the same fee.
     typeInto(form.amount, "1");
@@ -769,7 +771,7 @@ describe("send's amount", () => {
     Object.assign(state.draft, { privacy: "public", amountLux: "1000000000" });
     mount(state, overview(), async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {}));
     await settle();
-    expect(visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Network feeup to 0.005 DUSKTotalup to 1.005 DUSK");
+    expect(visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Feeup to 0.005 DUSKTotalup to 1.005 DUSK");
   });
 
   it("says what's available after fees, fills Max, and says under the field what's wrong", () => {
@@ -778,8 +780,8 @@ describe("send's amount", () => {
     // No recipient yet: nothing to measure against.
     expect(isShown(dom.document.body.querySelector(".amount-avail"))).toBe(false);
     typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toBe("Available after fees 177.984 DUSK");
-    expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK");
+    expect(form.balanceLine()).toBe("Available 177.984 DUSK");
+    expect(form.feeNote()).toBe("Fee up to 0.0025 DUSK");
 
     // Max fills a fourth decimal where three would ask "1 or 1000?", so the field reads it back as it is.
     dom.document.body.querySelector(".amount-avail button").click();
@@ -787,7 +789,7 @@ describe("send's amount", () => {
     expect(form.amountError()).toBe("");
 
     typeInto(form.amount, "500");
-    expect(form.amountError()).toBe("That's 322.016 DUSK more than your public balance, with the network fee.");
+    expect(form.amountError()).toBe("Your public balance is 322.016 DUSK short, fee included.");
     expect(form.amount.getAttribute("aria-invalid")).toBe("true");
     typeInto(form.amount, "0");
     expect(form.amountError()).toBe("Enter an amount greater than 0.");
@@ -856,7 +858,7 @@ describe("send's amount", () => {
     // 2125: read as that, which is more than there is.
     choices()[1].click();
     expect([form.amount.value, choices().length]).toEqual(["2125", 0]);
-    expect(form.amountError()).toMatch(/^That's .* more than your public balance/);
+    expect(form.amountError()).toMatch(/^Your public balance is .* DUSK short, fee included\.$/);
     typeInto(form.amount, "2.125");
     choices()[0].click();
     expect([form.amount.value, form.amountError(), form.review.disabled]).toEqual(["2.1250", "", false]);
@@ -901,12 +903,12 @@ describe("send's amount", () => {
     const state = newState();
     const form = mount(state, ov);
     typeInto(form.to, "alice.dusk");
-    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 177.979 DUSK", "Network fee up to 0.0075 DUSK"]);
+    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available 177.979 DUSK", "Fee up to 0.0075 DUSK"]);
     form.radios()[1].click();
-    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available after fees 24.85 DUSK", "Network fee up to 0.15 DUSK"]);
+    expect([form.balanceLine(), form.feeNote()]).toEqual(["Available 24.85 DUSK", "Fee up to 0.15 DUSK"]);
     form.radios()[0].click();
     typeInto(form.amount, "177.98");
-    expect(form.amountError()).toBe("That's 0.001 DUSK more than your public balance, with the network fee.");
+    expect(form.amountError()).toBe("Your public balance is 0.001 DUSK short, fee included.");
     dom.document.body.querySelector(".amount-avail button").click();
     expect(form.amount.value).toBe("177.9790");
 
@@ -916,15 +918,15 @@ describe("send's amount", () => {
     expect(state.route).toBe("confirm");
     mount(state, ov);
     await settle();
-    expect(visibleText(dom.document.body.querySelector(".gas-fee"))).toBe("Network feeup to 0.0075 DUSKTotalup to 177.9865 DUSK");
+    expect(visibleText(dom.document.body.querySelector(".gas-fee"))).toBe("Feeup to 0.0075 DUSKTotalup to 177.9865 DUSK");
   });
 
   it("hides what's available with Hide balances, while Max still fills in the real amount", () => {
     const form = mount(newState(), overview({ hideBalances: true }));
     typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toBe("Available after fees •••• DUSK");
+    expect(form.balanceLine()).toBe("Available •••• DUSK");
     // The fee isn't a balance.
-    expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK");
+    expect(form.feeNote()).toBe("Fee up to 0.0025 DUSK");
     dom.document.body.querySelector(".amount-avail button").click();
     expect(form.amount.value).toBe("177.9840");
   });
@@ -954,9 +956,13 @@ describe("names on Send and Review", () => {
     const view = mount(state);
     await settle();
     const rows = () => dom.document.body.querySelectorAll(".send-review > .group > .kv").map(visibleText);
-    expect(rows()).toEqual([`ToBobby · bob.dusk${BOB.account}`, "Fromme.dusk · Public"]);
-    expect(view.visibleLine()).toBe("Visible to everyone: amount, your name me.dusk, and the recipient's account.");
-    // Saved already: no Save to Contacts.
+    // A contact's address by its short form, whole one tap away under Details.
+    expect(rows()).toEqual([`ToBobby · bob.dusk${shortAddress(BOB.account)}`, "Fromme.dusk · Public"]);
+    const details = dom.document.body.querySelector(".send-review > details");
+    expect([isShown(details), visibleText(details.querySelector("summary")), visibleText(details.querySelector(".kv"))]).toEqual([true, "Details", `To${BOB.account}`]);
+    expect(dom.document.body.querySelector(".review-to__address").getAttribute("title")).toBe(BOB.account);
+    expect(view.visibleLine()).toBe("Anyone can see the amount, me.dusk and the recipient.");
+    // Saved already: no Save contact.
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
   });
 
@@ -996,7 +1002,7 @@ describe("names on Send and Review", () => {
     expect(from()).toBe("Fromme.dusk · Public");
   });
 
-  it("names your other profile, on the form and on Review, and offers no Save to Contacts", async () => {
+  it("names your other profile, on the form and on Review, its address short, and offers no Save contact", async () => {
     const ov = overview({ accountNames: { 1: "Savings" } });
     const form = mount(newState(), ov);
     typeInto(form.to, OTHER_PROFILE);
@@ -1013,6 +1019,8 @@ describe("names on Send and Review", () => {
     );
     await settle();
     expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Your profile Savings");
+    expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(shortAddress(OTHER_PROFILE));
+    expect(visibleText(dom.document.body.querySelector(".review-to-details .kv"))).toBe(`To${OTHER_PROFILE}`);
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(false);
 
     // Marek's: a contact named like it, for someone else, never reads the same on Review.
@@ -1026,9 +1034,12 @@ describe("names on Send and Review", () => {
     );
     await settle();
     expect(visibleText(dom.document.body.querySelector(".review-to__names"))).toBe("Savings · looks like your profile's name");
+    // Its address whole, which tells it from your profile: nothing under Details.
+    expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(ALICE.account);
+    expect(isShown(dom.document.body.querySelector(".review-to-details"))).toBe(false);
   });
 
-  it("offers no Save to Contacts for this wallet's own account or address", () => {
+  it("offers no Save contact for this wallet's own account or address", () => {
     for (const to of [OWN.account, OWN.address]) {
       mount({
         route: "confirm",
@@ -1043,6 +1054,9 @@ describe("names on Send and Review", () => {
       draft: { to: ALICE.account, privacy: "public", amountDusk: "1", amountLux: "1000000000", memo: "" },
     });
     expect(isShown(dom.document.body.querySelector(".review-save-contact"))).toBe(true);
+    // Someone who's no contact: their address whole on Review, nothing under Details.
+    expect(visibleText(dom.document.body.querySelector(".review-to__address"))).toBe(ALICE.account);
+    expect(isShown(dom.document.body.querySelector(".review-to-details"))).toBe(false);
   });
 });
 
@@ -1203,14 +1217,14 @@ describe("review", () => {
     review({ to: ALICE.account, privacy: "public" }, ov, send);
     await settle();
     const body = dom.document.body;
-    const confirm = body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const confirm = body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK");
     const guard = body.querySelector(".pay-guard");
     expect([isShown(guard), confirm.disabled]).toEqual([false, false]);
 
     const editor = body.querySelector("dusk-gas-editor");
     editor.setGas({ limit: "2500000", price: "10" });
     await settle();
-    expect(guard.textContent).toBe("That's 0.015 DUSK more than your public balance, with the network fee.");
+    expect(guard.textContent).toBe("Your public balance is 0.015 DUSK short, fee included.");
     expect(isShown(guard)).toBe(true);
     expect(confirm.disabled).toBe(true);
 
@@ -1225,11 +1239,11 @@ describe("review", () => {
     review({ to: ALICE.address, privacy: "shielded" }, overview({ shieldedBalance: { value: "5000000000", spendable: "1000" } }), send);
     await settle();
     const body = dom.document.body;
-    expect(body.querySelector(".pay-guard").textContent).toContain("more than your shielded balance, with the network fee.");
+    expect(body.querySelector(".pay-guard").textContent).toMatch(/^Your shielded balance is .* DUSK short, fee included\.$/);
     review({ to: ALICE.account, privacy: "public" }, overview({ balance: null }), send);
     await settle();
     expect(isShown(body.querySelector(".pay-guard"))).toBe(false);
-    expect(body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(false);
+    expect(body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").disabled).toBe(false);
   });
 
   it("shows a memo in the order it was written, flags what it hides, and sends it as it is", async () => {
@@ -1248,7 +1262,7 @@ describe("review", () => {
     expect(row.querySelector(".safe-text__flag")).not.toBeNull();
     expect(visibleText(body)).not.toContain(rlo);
     pastClickGuard();
-    body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
     await settle();
     expect(sent[0].params.memo).toBe(memo);
   });
@@ -1266,7 +1280,7 @@ describe("review", () => {
     review({ to: ALICE.account, privacy: "public", memo: "Factura 141", replaces: "send-kept-1", reviewedFor }, here, send);
     await settle();
     pastClickGuard();
-    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
     await settle();
     expect(sent).toEqual([expect.objectContaining({ replaces: "send-kept-1", params: expect.objectContaining({ memo: "Factura 141" }) })]);
   });
@@ -1306,7 +1320,7 @@ describe("review", () => {
       const view = mount(state, { ...here, ...elsewhere }, send);
       expect([state.route, state.draft], JSON.stringify(elsewhere)).toEqual(["home", null]);
       expect(view.actions.showToast).toHaveBeenCalledWith("The wallet, profile or network changed. Check the send again.", 3000);
-      expect(dom.document.body.querySelectorAll("button").some((b) => b.textContent === "Confirm")).toBe(false);
+      expect(dom.document.body.querySelector(".review-actions")).toBeNull();
     }
     expect(sent).toEqual([]);
     // Back to the form from its Review, then another profile: Review again sends it as a payment of its own.
@@ -1326,7 +1340,7 @@ describe("review", () => {
     expect(row.querySelectorAll(".safe-text__flag").map((el) => el.textContent)).toEqual(["A number here mixes digits of different scripts. Check it digit by digit."]);
   });
 
-  it("shows the fee at the network's price and the total with Back and Confirm, and Custom fee for gas of your own", async () => {
+  it("shows the fee at the network's price and the total with Back and Send, and Custom fee for gas of your own", async () => {
     // The node asks 2 LUX; a transfer returns its hash.
     const send = async (message) =>
       message.type === "DUSK_UI_GET_CACHED_GAS_PRICE"
@@ -1337,16 +1351,16 @@ describe("review", () => {
     const body = dom.document.body;
     const shownButtons = () => body.querySelectorAll("button").filter(isShown).map((b) => b.textContent);
 
-    // Back is the way back to Send, so there is no Cancel; no presets either.
-    expect(shownButtons()).toEqual(["← Back", "Save to Contacts", "Confirm"]);
-    expect(visibleText(body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Network feeup to 0.005 DUSKTotalup to 1.005 DUSK");
+    // Back is the way back to Send, so there is no Cancel; no presets either. The button says what it sends.
+    expect(shownButtons()).toEqual(["← Back", "Save contact", "Send 1 DUSK"]);
+    expect(visibleText(body.querySelector("dusk-gas-editor .gas-fee"))).toBe("Feeup to 0.005 DUSKTotalup to 1.005 DUSK");
     expect(visibleText(body.querySelector("details.gas-custom summary"))).toBe("Custom fee");
 
-    // A gas price of your own, under Custom fee, is what Confirm sends.
+    // A gas price of your own, under Custom fee, is what Send sends.
     const price = body.querySelectorAll("dusk-gas-editor input")[1];
     typeInto(price, "1");
     const button = (text) => body.querySelectorAll("button").find((b) => b.textContent === text);
-    button("Confirm").click();
+    button("Send 1 DUSK").click();
     await settle();
     expect(view.actions.send).toHaveBeenLastCalledWith({
       type: "DUSK_UI_SEND_TX",
@@ -1373,7 +1387,7 @@ describe("review", () => {
     // A median of 900 over the ceiling of 5: the ceiling, and why.
     review({ to: ALICE.account, privacy: "public" }, overview(), at("900"));
     await settle();
-    expect(fee()).toBe("Network feeup to 0.0125 DUSKTotalup to 1.0125 DUSK");
+    expect(fee()).toBe("Feeup to 0.0125 DUSKTotalup to 1.0125 DUSK");
     expect(busy()).toBe("The network is busy. You can raise the gas price for it to go out sooner.");
     // Raised to the median or over: the price is theirs, and nothing more is said.
     typeInto(dom.document.body.querySelectorAll("dusk-gas-editor input")[1], "900");
@@ -1382,7 +1396,7 @@ describe("review", () => {
     // A median of 2: the median, nothing said.
     review({ to: ALICE.account, privacy: "public" }, overview(), at("2"));
     await settle();
-    expect([fee(), busy()]).toEqual(["Network feeup to 0.005 DUSKTotalup to 1.005 DUSK", ""]);
+    expect([fee(), busy()]).toEqual(["Feeup to 0.005 DUSKTotalup to 1.005 DUSK", ""]);
   });
 
   // Lena's, three rounds: a default worked out from the mempool's median made one waiting transaction everyone's
@@ -1401,7 +1415,7 @@ describe("review", () => {
       await settle();
       const busy = visibleText(dom.document.body.querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
       pastClickGuard();
-      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
       await settle();
       return [sent[0]?.params.gas?.price, busy];
     };
@@ -1410,13 +1424,13 @@ describe("review", () => {
     expect(await priceSent(full)).toEqual(["5", "The network is busy. You can raise the gas price for it to go out sooner."]);
   });
 
-  it("hides Use the network's price while the fee is the network's, custom gas from Settings that equals it too", async () => {
+  it("hides Use network price while the fee is the network's, custom gas from Settings that equals it too", async () => {
     // The node asks 2 LUX.
     const send = async (message) => (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE" ? { min: "1", median: "2", max: "5" } : {});
     const reset = () => dom.document.body.querySelector("button.gas-reset");
     review({ to: ALICE.account, privacy: "public" }, overview({ customGas: { limit: "2500000", price: "2" } }), send);
     await settle();
-    expect([reset().textContent, reset().hidden]).toEqual(["Use the network's price", true]);
+    expect([reset().textContent, reset().hidden]).toEqual(["Use network price", true]);
     // Hidden is hidden in the popup: no class's display shows it anyway.
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
     expect(css).toMatch(/\n\[hidden\] \{\s*display: none !important;\s*\}/);
@@ -1431,13 +1445,13 @@ describe("review", () => {
 
   it("says what a public send shows everyone, with only the parts that apply, and nothing for a shielded one", async () => {
     let view = review({ to: ALICE.account, privacy: "public" });
-    expect([view.kind(), view.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount, your account, and the recipient's account."]);
+    expect([view.kind(), view.visibleLine()]).toEqual(["Public transfer", "Anyone can see the amount and both accounts."]);
 
     // With a memo, and the profile's verified name.
     lookupPrimaryName.mockImplementation(async (account) => (account === OWN.account ? "me.dusk" : null));
     view = review({ to: ALICE.account, privacy: "public", memo: "Lunch" });
     await settle();
-    expect(view.visibleLine()).toBe("Visible to everyone: amount, memo, your name me.dusk, and the recipient's account.");
+    expect(view.visibleLine()).toBe("Anyone can see the amount, memo, me.dusk and the recipient.");
 
     view = review({ to: ALICE.address, privacy: "shielded", memo: "Lunch" });
     await settle();
@@ -1527,7 +1541,7 @@ describe("review", () => {
     const confirm = async (draft) => {
       const view = review(draft, overview(), send);
       await settle();
-      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+      dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
       await settle();
       return view.actions.send.mock.calls.find(([m]) => m.type === "DUSK_UI_SEND_TX")[0];
     };
@@ -1560,7 +1574,7 @@ describe("a send to the bridge's account", () => {
   const body = () => dom.document.body;
   const text = (selector) => visibleText(body().querySelector(selector));
   const callouts = () => body().querySelectorAll(".callout.warn .callout-title").map((t) => t.textContent);
-  const confirm = () => body().querySelectorAll("button").find((b) => b.textContent === "Confirm");
+  const confirm = () => body().querySelector(".review-actions .btnrow > button");
 
   it("shows the memo that carries the recipient's address exactly, unflagged", async () => {
     review();
@@ -1574,12 +1588,12 @@ describe("a send to the bridge's account", () => {
     const view = review();
     await settle();
     expect(view.kind()).toBe("Bridge to BNB Smart Chain");
-    expect(text(".review-bridge-fee")).toBe("2 DUSK sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain");
+    expect(text(".review-bridge-fee")).toBe("Bridge fee 1 DUSK · 1 DUSK arrives");
     expect(view.reviewTo()).toBe(`The bridge's account for BNB Smart Chain${mainnet.account}`);
-    expect(view.visibleLine()).toBe("Visible to everyone: amount, the recipient on BNB Smart Chain, and your account.");
+    expect(view.visibleLine()).toBe("Anyone can see the amount, the recipient on BNB Smart Chain and your account.");
     expect(body().querySelectorAll(".row > .group .kv").map(visibleText)).toContain(`Recipient on BNB Smart Chain${EVM}`);
     expect(callouts()).toEqual([]);
-    expect(confirm().disabled).toBe(false);
+    expect([confirm().textContent, confirm().disabled]).toEqual(["Send 2 DUSK", false]);
     // No name to look up for the bridge's account.
     expect(lookupPrimaryName.mock.calls.map(([account]) => account)).not.toContain(mainnet.account);
   });
@@ -1587,7 +1601,8 @@ describe("a send to the bridge's account", () => {
   it("keeps Confirm off when the fee takes the whole amount, as nothing would arrive", async () => {
     const view = review({ amountDusk: "1", amountLux: "1000000000" });
     await settle();
-    expect(text(".review-bridge-fee")).toBe("1 DUSK sent · 1 DUSK bridge fee · Nothing arrives on BNB Smart Chain");
+    // Its error says it, in place of the line.
+    expect(body().querySelector(".review-bridge-fee")).toBeNull();
     expect(body().querySelector(".review-actions > .field-error").textContent).toBe("Send more than the 1 DUSK bridge fee.");
     expect(confirm().disabled).toBe(true);
     confirm().click();
@@ -1609,20 +1624,19 @@ describe("a send to the bridge's account", () => {
     expect(view.actions.send.mock.calls.some(([m]) => m.type === "DUSK_UI_SEND_TX")).toBe(false);
   });
 
-  it("says the testnet bridge to Sepolia isn't running right now, and checks the memo is an address there", async () => {
+  it("says the testnet bridge to Sepolia isn't paying out now, and checks the memo is an address there", async () => {
     review({ to: testnet.account }, overview());
     await settle();
-    expect(callouts()).toEqual(["Not running on testnet right now"]);
-    expect(body().querySelector(".callout.warn .muted").textContent).toBe(
-      "The bridge isn't paying out on Sepolia at the moment, so DUSK sent to it doesn't arrive there."
-    );
-    expect(text(".review-bridge-fee")).toBe("2 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Sepolia");
+    expect(callouts()).toEqual(["Not paying out on Sepolia now"]);
+    expect(body().querySelector(".callout.warn .muted").textContent).toBe("Nothing sent to it would arrive.");
+    // The warning says nothing arrives, in place of the line.
+    expect(body().querySelector(".review-bridge-fee")).toBeNull();
 
     review({ memo: "Order 1042" });
     await settle();
     expect(callouts()).toEqual(["The memo isn't an address on BNB Smart Chain"]);
-    // Nothing arrives there without one: the line doesn't say it does.
-    expect(text(".review-bridge-fee")).toBe("2 DUSK sent · 1 DUSK bridge fee · Nothing arrives without a BNB Smart Chain address in the memo");
+    // Nothing arrives there without one: no line says it does.
+    expect(body().querySelector(".review-bridge-fee")).toBeNull();
   });
 
   it("is a plain transfer to another network's bridge account", async () => {
@@ -1677,12 +1691,12 @@ describe("a name and the recipient Contacts sets", () => {
     await settle();
     expect(state.draft).toMatchObject({ to: ALICE.address, privacy: "shielded" });
 
-    // Save to Contacts, with the address edited to a public account.
+    // Save contact, with the address edited to a public account.
     setFromContacts(state, BOB.account);
     const review = mount(state);
-    expect([review.kind(), review.visibleLine()]).toEqual(["Public transfer", "Visible to everyone: amount, your account, and the recipient's account."]);
+    expect([review.kind(), review.visibleLine()]).toEqual(["Public transfer", "Anyone can see the amount and both accounts."]);
 
-    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").click();
     await settle();
     expect(review.actions.send).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1861,7 +1875,7 @@ describe("a request for another network", () => {
   it("can't be confirmed, however it reached Review", () => {
     mount({ route: "confirm", draft: { to: ALICE.account, privacy: "public", amountLux: "1000000000", amountDusk: "1", memo: "", requestChainId: "dusk:1" } });
     const body = dom.document.body;
-    expect(body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(true);
+    expect(body.querySelectorAll("button").find((b) => b.textContent === "Send 1 DUSK").disabled).toBe(true);
     expect(visibleText(body.querySelector(".review-actions"))).toContain("This request is for Mainnet. You are on Testnet.");
   });
 
@@ -1895,7 +1909,7 @@ describe("the password on big sends", () => {
       return answers[message.type]?.(message) ?? {};
     });
     const body = dom.document.body;
-    const confirm = () => body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const confirm = () => body.querySelector(".review-actions .btnrow > button");
     const dialog = () => body.querySelector(".send-password");
     const password = () => dialog().querySelector("input[type=password]");
     const press = (name) => dialog().querySelectorAll("button").find((b) => b.textContent === name).click();
@@ -2014,7 +2028,7 @@ describe("the password on big sends", () => {
       return message.type === "DUSK_UI_SEND_TX" ? { ok: true, result: { hash: "ab".repeat(32) } } : {};
     });
     pastClickGuard();
-    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").click();
+    dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 6 DUSK").click();
     await settle();
     await settle();
     expect(sent.some((m) => m.type === "DUSK_UI_SEND_PASSWORD_ASKS")).toBe(false);
@@ -2910,11 +2924,11 @@ describe("a payment waiting to go out, as the network didn't answer", () => {
     const at = Date.now() - 60_000;
     const ov = overview({ waitingSends: [waiting({ at })] });
     mount({ route: "confirm", addressBook: contacts, draft: draft() }, ov);
-    expect(text(".review-again")).toBe(`The same payment is waiting to go out: 0.013 DUSK to Alice with this memo, made at ${clockText(at)}.`);
+    expect(text(".review-again")).toBe(`Already waiting: same amount and memo, made at ${clockText(at)}.`);
     expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again")).toBeTruthy();
 
     const form = mount({ route: "send", addressBook: contacts, draft: draft() }, ov);
-    expect(text(".send-again")).toBe(`The same payment is waiting to go out: 0.013 DUSK to Alice with this memo, made at ${clockText(at)}.`);
+    expect(text(".send-again")).toBe(`Already waiting: 0.013 DUSK with this memo, made at ${clockText(at)}.`);
     // Another memo is another payment.
     typeInto(dom.document.body.querySelector(".row > input"), "Order 1045");
     expect(text(".send-again")).toBe("");
@@ -2929,15 +2943,15 @@ describe("a payment waiting to go out, as the network didn't answer", () => {
     // 177.9865 DUSK public, the fee cap 0.0025: 0.013 and its fee wait.
     const form = mount(newState(), overview({ waitingSends: [waiting()] }));
     typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toBe("Available after fees 177.9685 DUSK");
-    expect(form.feeNote()).toBe("Network fee up to 0.0025 DUSK · After the payments waiting to go out");
+    expect(form.balanceLine()).toBe("Available 177.9685 DUSK");
+    expect(form.feeNote()).toBe("Fee up to 0.0025 DUSK · After the payments waiting to go out");
     dom.document.body.querySelector(".amount-avail button").click();
     expect(form.amount.value).toBe("177.9685");
 
     // Another profile's, or one not waiting any more, takes nothing.
     const other = mount(newState(), overview({ waitingSends: [waiting({ profileIndex: 1 }), waiting({ sendId: "s2", waiting: false, ended: "locked" })] }));
     typeInto(other.to, ALICE.account);
-    expect(other.balanceLine()).toBe("Available after fees 177.984 DUSK");
+    expect(other.balanceLine()).toBe("Available 177.984 DUSK");
   });
 
   // Astra's: Send it too opened Review for the held payment, which still counted as waiting till this one went in
@@ -2948,14 +2962,15 @@ describe("a payment waiting to go out, as the network didn't answer", () => {
     // As Send it too opens it (waiting.js againDraft): for this wallet, profile and network.
     const inPlace = draft({ replaces: "s1", reviewedFor: `${ov.accounts[0]} 0 ${ov.nodeUrl}` });
     mount({ route: "confirm", addressBook: contacts, draft: inPlace }, ov);
-    const confirm = dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm");
+    const confirm = dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK");
     expect([Boolean(confirm), confirm?.disabled, text(".review-again")]).toEqual([true, false, ""]);
     // Back on the form it came from: Available as the balance allows, the held one left out.
     const form = mount({ route: "send", addressBook: contacts, draft: inPlace }, ov);
-    expect([form.balanceLine(), text(".send-again")]).toEqual(["Available after fees 0.0175 DUSK", ""]);
-    // Any other payment of the account's: as before.
+    expect([form.balanceLine(), text(".send-again")]).toEqual(["Available 0.0175 DUSK", ""]);
+    // Any other payment of the account's: as before, its button saying it sends it again.
     mount({ route: "confirm", addressBook: contacts, draft: draft() }, ov);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm")).toBeUndefined();
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK")).toBeUndefined();
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again")).toBeTruthy();
   });
 });
 
@@ -2969,16 +2984,17 @@ describe("a payment made already", () => {
   };
 
   it("is said on Review, with when it went, and its button says it sends it again, as the web wallet's does", () => {
-    // Sofia's: the same request link paid, then pasted again; Amélie's: the button still said Confirm.
+    // Sofia's: the same request link paid, then pasted again; Amélie's: the button still said Confirm. The amount
+    // and the recipient are just above it: "same amount and memo".
     const at = Date.now() - 60_000;
     confirm(draft(), [sentRecord({ submittedAt: at })]);
-    expect(again()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
+    expect(again()).toBe(`Already sent: same amount and memo at ${clockText(at)}.`);
     const button = dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK again");
     expect(button.disabled).toBe(false);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm")).toBeUndefined();
-    // Not made before: Confirm.
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK")).toBeUndefined();
+    // Not made before: Send, without "again".
     confirm(draft({ memo: "Order 1045" }), [sentRecord({ submittedAt: at })]);
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm")).toBeTruthy();
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Send 0.013 DUSK")).toBeTruthy();
   });
 
   // Amélie's and Sofía's: a link paid already, opened again, said nothing until Review.
@@ -2990,16 +3006,16 @@ describe("a payment made already", () => {
       const el = dom.document.body.querySelector(".send-again");
       return el && isShown(el) ? visibleText(el) : "";
     };
-    expect(note()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
+    expect(note()).toBe(`Already sent: 0.013 DUSK with this memo at ${clockText(at)}.`);
     typeInto(form.amount, "0.014");
     expect(note()).toBe("");
     typeInto(form.amount, "0.013");
-    expect(note()).toBe(`You sent 0.013 DUSK to Alice with this memo at ${clockText(at)}.`);
+    expect(note()).toBe(`Already sent: 0.013 DUSK with this memo at ${clockText(at)}.`);
   });
 
   // Sofía's: a request link paid once, pasted again, said nothing on the form, and on
-  // Review "to Your profile Profile 1".
-  it("is said on the form as a pasted link fills it in, and names another profile of the wallet's by its name", async () => {
+  // Review "to Your profile Profile 1". It names no one now: the recipient is in To, just above.
+  it("is said on the form as a pasted link fills it in, and on Review, naming no one", async () => {
     const at = Date.now() - 60_000;
     // Profile 2's account, a key a link can pay.
     const twoProfiles = overview({ accounts: [OWN.account, BOB.account] });
@@ -3013,19 +3029,19 @@ describe("a payment made already", () => {
     form.to.dispatchEvent(fakeEvent("paste", { clipboardData: { getData: () => `dusk:${BOB.account}?amount=0.013&memo=Order%201044` } }));
     await settle();
     expect(form.to.value).toBe(BOB.account);
-    expect(note()).toBe(`You sent 0.013 DUSK to Profile 2 with this memo at ${clockText(at)}.`);
+    expect(note()).toBe(`Already sent: 0.013 DUSK with this memo at ${clockText(at)}.`);
 
     confirm(draft({ to: BOB.account }), paid, twoProfiles);
-    expect(again()).toBe(`You sent 0.013 DUSK to Profile 2 with this memo at ${clockText(at)}.`);
+    expect(again()).toBe(`Already sent: same amount and memo at ${clockText(at)}.`);
   });
 
   it("is said of the same memo whenever it went, and of the same payment without one only moments after", () => {
     const yesterday = Date.now() - 24 * 60 * 60_000;
     confirm(draft(), [sentRecord({ submittedAt: yesterday })]);
-    expect(again()).toMatch(/^You sent 0\.013 DUSK to Alice with this memo (yesterday at|on .+ at) /);
+    expect(again()).toMatch(/^Already sent: same amount and memo (yesterday at|on .+ at) /);
 
     confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 30_000 })]);
-    expect(again()).toBe(`You sent 0.013 DUSK to Alice at ${clockText(Date.now() - 30_000)}.`);
+    expect(again()).toBe(`Already sent: same amount at ${clockText(Date.now() - 30_000)}.`);
     confirm(draft({ memo: "" }), [sentRecord({ memo: undefined, submittedAt: Date.now() - 11 * 60_000 })]);
     expect(again()).toBe("");
   });
@@ -3052,7 +3068,7 @@ describe("a send to yourself", () => {
 // grandson. It says what such an address sent you, as Activity tells a stranger's memo.
 describe("paying an address that sent you a memo", () => {
   const URGENT = "URGENT: your wallet will be blocked today. Send 0.1 DUSK back to this address now to keep it open.";
-  const SAID = `This address sent you: “${URGENT}” · not in your contacts.`;
+  const SAID = `Sent you “${URGENT}” before · not a contact`;
   // A payment that came in, as the account's history has it.
   const cameIn = (from, memo, { hash = "c1".repeat(32), blockHeight = 4_687_000 } = {}) =>
     entryOf({ blockHeight, counterparty: from, direction: "in", hash, memo, timestamp: Date.now() - 60 * 60_000, value: "10000000" });
@@ -3073,7 +3089,7 @@ describe("paying an address that sent you a memo", () => {
     // A right-to-left override (U+202E) in it.
     // Newer by its block and its time: two made in the same test can fall a millisecond apart either way.
     const newer = { ...cameIn(ALICE.account, `Pay back${String.fromCharCode(0x202e)}now`, { hash: "c2".repeat(32), blockHeight: 4_687_100 }), timestamp: Date.now() - 30 * 60_000 };
-    expect(review({ entries: [newer, cameIn(ALICE.account, URGENT)] })).toBe("This address sent you: “Pay back\\u202enow” · not in your contacts.");
+    expect(review({ entries: [newer, cameIn(ALICE.account, URGENT)] })).toBe("Sent you “Pay back\\u202enow” before · not a contact");
     // A contact's, or your other profile's: nothing, as Activity calls neither a stranger.
     expect(review({ entries: [cameIn(ALICE.account, URGENT)], contacts: [{ name: "Alice", address: ALICE.account }] })).toBe("");
     expect(review({ to: OTHER_PROFILE, entries: [cameIn(OTHER_PROFILE, URGENT)] })).toBe("");

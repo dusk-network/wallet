@@ -127,7 +127,7 @@ describe("what a row says", () => {
       "Unstaked from Sozu",
       "Staking · 14:32",
       "",
-      "Pending",
+      "Sending",
     ]);
     expect(read({ kind: TX_KIND.UNSTAKE, status: "unknown" })).toEqual(["stake", "Unstake", "Staking · 14:32", "", "Not confirmed"]);
   });

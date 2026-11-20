@@ -8,17 +8,21 @@ import { focusOnOpen } from "../../lib/focusOnOpen.js";
 /** What the unlock screen says once the phone's fingerprints changed. */
 export const FINGERPRINTS_CHANGED_TEXT = "Your fingerprints changed, so fingerprint unlock is off. Unlock with your password.";
 
-// A wrong password says what to try: the password as typed, then the recovery phrase.
-export const WRONG_PASSWORD_TEXT = "Wrong password. Check Caps Lock, or restore with your recovery phrase below.";
+// A wrong password says what to check; Forgot password? under it is the way
+// back with the recovery phrase.
+export const WRONG_PASSWORD_TEXT = "Wrong password. Check Caps Lock.";
 // A phone's keyboard has no Caps Lock.
-const wrongPasswordText = () => (isPhone() ? "Wrong password. Try again, or restore with your recovery phrase below." : WRONG_PASSWORD_TEXT);
+const wrongPasswordText = () => (isPhone() ? "Wrong password." : WRONG_PASSWORD_TEXT);
 const unlockError = (message) => (/^Incorrect password$/.test(String(message ?? "")) ? wrongPasswordText() : message);
 
+// The password field and Unlock, with no title or label over them: next to
+// Unlock, the field's own "Password" says what it's for.
 export function lockedView({ state, actions } = {}) {
   const pwd = passwordInput({
     id: "unlock-password",
     autocomplete: "current-password",
     placeholder: "Password",
+    "aria-label": "Password",
     onEnter: () => btn.click(),
   });
 
@@ -37,8 +41,7 @@ export function lockedView({ state, actions } = {}) {
   };
   pwd.addEventListener("input", () => showError(""));
 
-  // The button says "Unlocking…" meanwhile.
-  const busyCallout = h("p", { class: "auth-note", style: "display:none", text: "This can take a moment." });
+  // The button says "Unlocking…" meanwhile, and nothing else needs to.
 
   // Fingerprint unlock, where it's on (the app on Android): its prompt comes
   // up by itself as this screen opens, and Use fingerprint asks again. The
@@ -106,7 +109,7 @@ export function lockedView({ state, actions } = {}) {
   const forgot = h("button", {
     class: "text-btn auth-forgot",
     type: "button",
-    text: "Forgot your password?",
+    text: "Forgot password?",
     onclick: () => {
       state.route = "restore";
       actions?.render?.()?.catch?.(() => {});
@@ -122,7 +125,6 @@ export function lockedView({ state, actions } = {}) {
     pwd.disabled = true;
     forgot.disabled = true;
     btn.textContent = "Unlocking…";
-    busyCallout.style.display = "block";
     showError("");
 
     try {
@@ -162,7 +164,6 @@ export function lockedView({ state, actions } = {}) {
       pwd.disabled = false;
       forgot.disabled = false;
       btn.textContent = "Unlock";
-      busyCallout.style.display = "none";
     }
   };
   const btn = h("button", {
@@ -172,11 +173,9 @@ export function lockedView({ state, actions } = {}) {
   });
   return [
     h("div", { class: "auth-page" }, [
-      h("h1", { class: "auth-title", text: "Unlock your wallet" }),
-      h("div", { class: "row" }, [h("label", { for: "unlock-password", text: "Password" }), pwd, errLine]),
+      h("div", { class: "row" }, [pwd, errLine]),
       btn,
       fingerBtn,
-      busyCallout,
       fingerNote,
       forgot,
     ]),

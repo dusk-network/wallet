@@ -23,10 +23,10 @@ import { whenAtText } from "./txRow.js";
 
 // After Confirm the popup shows the transaction's steps rather than going home
 // with a toast: Sending while the wallet signs it and hands it to the network,
-// Sent to the network once the network took it, then Completed or Failed as
-// the wallet's watcher reports. The watcher's events come through app.js,
-// which writes them on `state.sent`; the overview's record of the transaction
-// fills in what an event left out.
+// Sent once the network took it, then Completed or Failed as the wallet's
+// watcher reports. The watcher's events come through app.js, which writes
+// them on `state.sent`; the overview's record of the transaction fills in
+// what an event left out.
 
 const FINAL = new Set(["executed", "failed", "removed"]);
 
@@ -52,13 +52,25 @@ const offline = () => globalThis.navigator?.onLine === false;
 // A payment from Send waiting for the network it couldn't reach, before it
 // went out, as the web wallet says it: it goes out once the network answers.
 const waitingText = () =>
-  `${offline() ? "You're offline." : "The network isn't answering."} Nothing has left your wallet yet. It goes out once the network answers.`;
+  offline() ? "Offline. Nothing sent yet; it goes out once you're back online." : "Network not answering. Nothing sent yet; it goes out once it answers.";
 
 /** What's said of a payment from Send handed to the network without a clear answer: it's looked up, and sent once if it didn't go. */
-export const UNCLEAR_TEXT = "It may have gone out already. If it didn't, it goes out once the network answers.";
+export const UNCLEAR_TEXT = "It may have gone out already; if not, it goes out once the network answers.";
+
+// The same, offline: it's looked up once the connection is back.
+const UNCLEAR_OFFLINE_TEXT = "Offline. It may have gone out already; if not, it goes out once you're back online.";
 
 /** What's said of a payment the person chose not to send, in no colour: nothing left (Chen's: a red Send failed). */
 export const NOT_SENT_CHOSEN_TEXT = "Not sent. Nothing left your wallet.";
+
+/** What Don't send says where the wallet didn't answer it. */
+export const CANCEL_FAILED_TEXT = "Couldn't stop it. Try again.";
+
+/** What Don't send says of a payment that went out meanwhile. */
+export const WENT_ALREADY_TEXT = "It went out already.";
+
+// The Sent screens whose Details are open, kept as the screen redraws.
+const detailsOpen = new WeakSet();
 
 // A payment held for Send it too, as the overview keeps it, with what its
 // account sent meanwhile; and that said, the recipient named as the Sent
@@ -96,14 +108,14 @@ function heldText(sent, ov) {
  */
 export const appLeaveText = (ov) =>
   ov?.lockOnLeave === true
-    ? "If you leave Dusk Wallet, it locks and this isn't sent."
-    : "If you leave Dusk Wallet, it goes out when you open it again. If Android closes the app first, you'll be asked to send it.";
+    ? "If you leave the app, it locks and this isn't sent."
+    : "If you leave the app, it goes out when you reopen it, or asks first if Android closed it.";
 
 /**
  * What's said of one the person chose not to send whose hand-over had no clear
  * answer: it may still arrive, and is followed (Astra's: never "nothing left").
  */
-export const NOT_SENT_FOLLOWED_TEXT = "Not sent yet. If it still arrives, it will show here.";
+export const NOT_SENT_FOLLOWED_TEXT = "It won't be sent again. If it still arrives, it shows here.";
 
 /** What's said once one the person chose not to send arrived after all. */
 export const WENT_AFTER_ALL_TEXT = "A payment you chose not to send went out after all.";
@@ -161,30 +173,22 @@ export function sentStatus(sent, ov) {
  * @returns {Array<{ label: string, state: "done"|"current"|"upcoming"|"failed", sub: string }>}
  */
 export function sentSteps(sent, ov) {
-  const { phase, status, error, feePaid, blockHeight } = sentStatus(sent, ov);
-  const sentLine = [clock(sent?.sentAt || sent?.startedAt), sent?.from].filter(Boolean).join(" · ");
-  const capLux = safeBigInt(sent?.feeCapLux ?? 0, 0n);
-  const charged =
-    feePaid == null && capLux <= 0n
-      ? ""
-      : balancesHidden(ov)
-        ? "A fee was charged."
-        : feePaid != null
-          ? `Fee charged: ${formatDuskExact(feePaid)} DUSK.`
-          : `Fee charged: up to ${formatFee(capLux, { max: true })} DUSK.`;
+  const { phase, status, error, blockHeight } = sentStatus(sent, ov);
 
   if (phase === "not_sent") {
     // Called off by the person: said plainly, in no colour.
     if (String(error ?? "") === SEND_CANCELLED_TEXT) {
       return [
         { label: "Not sent", state: "upcoming", sub: "Nothing left your wallet." },
-        { label: "Sent to the network", state: "upcoming", sub: "" },
+        { label: "Sent", state: "upcoming", sub: "" },
         { label: "Completed", state: "upcoming", sub: "" },
       ];
     }
+    // Where the reason says nothing left the wallet, there's no fee to say.
+    const reason = reasonText(error);
     return [
-      { label: "Not sent", state: "failed", sub: [reasonText(error), "No fee was charged."].filter(Boolean).join(" ") },
-      { label: "Sent to the network", state: "upcoming", sub: "" },
+      { label: "Not sent", state: "failed", sub: /Nothing left your wallet\.$/.test(reason) ? reason : [reason, "No fee charged."].filter(Boolean).join(" ") },
+      { label: "Sent", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
   }
@@ -193,78 +197,78 @@ export function sentSteps(sent, ov) {
       {
         label: "Not confirmed",
         state: "unknown",
-        sub: [reasonText(error), "It may still have reached the network: check Activity before you send it again."]
-          .filter(Boolean)
-          .join(" "),
+        sub: [reasonText(error), "It may have gone out: check Activity before you send again."].filter(Boolean).join(" "),
       },
-      { label: "Sent to the network", state: "upcoming", sub: "" },
+      { label: "Sent", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
   }
   if (phase === "sending" && sent?.held) {
     // Its account sent something else while it waited: it goes only on Send it too.
     return [
-      { label: "Not sent yet", state: "unknown", sub: heldText(sent, ov) },
-      { label: "Sent to the network", state: "upcoming", sub: "" },
+      { label: "Held", state: "unknown", sub: heldText(sent, ov) },
+      { label: "Sent", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
   }
   if (phase === "sending") {
     // A payment from Send waits for the network; any other send is tried
     // once. One handed over may have gone out, whatever the network does now.
-    const sub = sent?.handedOver && (sent?.waits || offline())
-      ? `${offline() ? "You're offline. " : ""}${UNCLEAR_TEXT}`
-      : sent?.waits || (offline() && sent?.sendId)
+    const unclear = sent?.handedOver && (sent?.waits || offline());
+    const waits = !unclear && (sent?.waits || (offline() && sent?.sendId));
+    const sub = unclear
+      ? offline()
+        ? UNCLEAR_OFFLINE_TEXT
+        : UNCLEAR_TEXT
+      : waits
         ? waitingText()
         : offline()
           ? "You're offline, so it can't reach the network."
-          : "Signing it and handing it to the network";
+          : "";
     return [
-      { label: "Sending", state: "current", sub },
-      { label: "Sent to the network", state: "upcoming", sub: "" },
+      { label: waits ? "Waiting" : "Sending", state: "current", sub },
+      { label: "Sent", state: "upcoming", sub: "" },
       { label: "Completed", state: "upcoming", sub: "" },
     ];
   }
 
-  const sending = { label: "Sending", state: "done", sub: sentLine };
+  // When it was sent, and from which balance, are under Details (sentView).
+  const sending = { label: "Sending", state: "done", sub: "" };
   if (status === "executed") {
     const height = safeBigInt(blockHeight ?? 0, 0n);
     return [
       sending,
-      { label: "Sent to the network", state: "done", sub: "" },
+      { label: "Sent", state: "done", sub: "" },
       { label: "Completed", state: "done", sub: height > 0n ? `In block ${groupThousands(height.toString())}` : "" },
     ];
   }
   if (status === "failed") {
+    // The fee it was charged is said once, in its row (sentView).
     return [
       sending,
-      { label: "Sent to the network", state: "done", sub: "" },
-      {
-        label: "Failed",
-        state: "failed",
-        sub: [txErrorText(error) || reasonText(error) || "It didn't go through.", charged].filter(Boolean).join(" "),
-      },
+      { label: "Sent", state: "done", sub: "" },
+      { label: "Failed", state: "failed", sub: txErrorText(error) || reasonText(error) || "It didn't go through." },
     ];
   }
   if (status === "removed") {
     return [
       sending,
-      { label: "Sent to the network", state: "done", sub: "" },
-      { label: "Failed", state: "failed", sub: "The network dropped it before it ran. No fee was charged." },
+      { label: "Sent", state: "done", sub: "" },
+      { label: "Failed", state: "failed", sub: "The network dropped it before it ran. No fee charged." },
     ];
   }
   return [
     sending,
     {
-      label: "Sent to the network",
+      label: "Sent",
       state: "current",
       sub: offline()
         ? "No connection. It's looked up again once you're back online."
         : sent?.lookingUp
           ? "Looking it up again…"
           : status === "unknown"
-            ? "Taking longer than usual. It can still go through; the explorer shows where it is."
-            : "Waiting for a block, usually about 10 seconds",
+            ? "Taking longer than usual. It can still go through."
+            : "Waiting for a block, about 10 s",
     },
     { label: "Completed", state: "upcoming", sub: "" },
   ];
@@ -386,8 +390,8 @@ async function sendPasswordFor(message, { state, actions }) {
  *   goes to the wallet: false when what it was reviewed for changed, and then
  *   it isn't sent
  * @param {boolean} [opts.canWait] - a payment from Send: where it can't reach
- *   the network before it goes out, it waits for it, with Cancel, and goes
- *   out once it answers (shared/waitingSends.js)
+ *   the network before it goes out, it waits for it, with Don't send, and
+ *   goes out once it answers (shared/waitingSends.js)
  * @returns {Promise<object | null>} the Sent screen's state, or null when the
  *   password it needed wasn't given, and the Review stays
  */
@@ -498,13 +502,13 @@ export async function sendFromReview({ state, actions, message, summary, backRou
       actions?.showToast?.(NOT_SENT_CHOSEN_TEXT);
     } else {
       actions?.showToast?.({
-        text: `${sent.title || "Transaction"} failed. ${reason ? `${reason} ` : ""}No fee was charged.`,
+        text: `${sent.title || "Transaction"} failed. ${reason ? `${reason} ` : ""}No fee charged.`,
         tone: "bad",
       });
     }
   } else if (sent.phase === "unconfirmed") {
     actions?.showToast?.({
-      text: `${sent.title || "Transaction"} may not have gone through. Check Activity before you send it again.`,
+      text: `${sent.title || "Transaction"} may not have gone through. Check Activity before you send again.`,
       tone: "bad",
     });
   }
@@ -545,8 +549,13 @@ export const NOTICE_COMES_TEXT = "You'll get a notice when it arrives.";
  */
 export const FIREFOX_NOTICE_COMES_TEXT = "It goes on if you close the wallet, while its Keep open tab stays open; its notice comes only while the wallet stays open.";
 
-// That the send goes on with the wallet closed: in the extension.
-const CLOSE_WALLET_TEXT = "You can close the wallet; this continues in the background.";
+// That the send goes on with the wallet closed: in the extension. Kept on
+// purpose: a popup closes at any click outside it, and nothing else on the
+// screen says the send survives that.
+const CLOSE_WALLET_TEXT = "You can close the wallet.";
+
+// The same where there's no popup to close.
+const LEAVE_SCREEN_TEXT = "You can leave this screen.";
 
 /** The same in Firefox on a phone, whose wallet runs in its Keep open tab: closing that stops it. */
 export const KEEP_OPEN_TEXT = "You can close the wallet; this goes on while its Keep open tab stays open.";
@@ -690,25 +699,45 @@ export function sentView(ov, { state, actions, sozu } = {}) {
       })
     : null;
 
+  // The fee, said once. Where nothing went out, or the network dropped it,
+  // the step says no fee was charged; a failed one says what it was charged,
+  // at most the cap while that isn't known.
   const feeRow = (() => {
-    if (phase === "not_sent" || status === "removed") return ["Network fee", "None charged"];
-    if (phase === "unconfirmed") return capLux > 0n ? ["Network fee", ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK, if it went out"]] : null;
-    if (feePaid != null) return [status === "failed" ? "Fee charged" : "Network fee", [balance(hidden, formatDuskExact(feePaid)), " DUSK"]];
-    if (capLux > 0n) return ["Network fee", ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK"]];
+    if (phase === "not_sent" || status === "removed") return null;
+    if (phase === "unconfirmed") return capLux > 0n ? ["Fee", ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK, if it went out"]] : null;
+    const label = status === "failed" ? "Fee charged" : "Fee";
+    if (feePaid != null) return [label, [balance(hidden, formatDuskExact(feePaid)), " DUSK"]];
+    if (capLux > 0n) return [label, ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK"]];
     return null;
   })();
 
   const kv = (label, value) =>
     h("div", { class: "kv" }, [h("span", { class: "kv-label", text: label }), h("span", { class: "kv-value" }, [].concat(value))]);
 
-  const details = h("div", { class: "group" }, [
+  // What it got or gave back, and the fee.
+  const rows = h("div", { class: "group" }, [
     ...(sent.sozu && status === "executed" ? sozuLines(sent, sozu, hidden) : []).map(({ label, value }) => kv(label, value)),
+    feeRow ? kv(feeRow[0], feeRow[1]) : null,
+  ].filter(Boolean));
+
+  // What decides nothing once it's confirmed, under Details: its transaction
+  // ID, its memo, and when it was sent, from which balance.
+  const sentAt = phase === "sent" ? [clock(sent.sentAt || sent.startedAt), sent.from].filter(Boolean).join(" · ") : "";
+  const detailRows = [
     sent.hash
       ? kv("Transaction ID", [h("span", { class: "mono", title: sent.hash, text: shortAddress(sent.hash) }), copyBtn])
       : null,
     sent.memo ? kv("Memo", safeTextEl(sent.memo)) : null,
-    feeRow ? kv(feeRow[0], feeRow[1]) : null,
-  ].filter(Boolean));
+    sentAt ? kv("Sent at", sentAt) : null,
+  ].filter(Boolean);
+  // Open or closed as it was left: the screen redraws as the steps move on.
+  const details = detailRows.length
+    ? h("details", { class: "advanced", open: detailsOpen.has(sent) }, [
+        h("summary", { text: "Details" }),
+        h("div", { class: "advanced-body" }, [h("div", { class: "group group--inset" }, detailRows)]),
+      ])
+    : null;
+  details?.addEventListener("toggle", () => (details.open ? detailsOpen.add(sent) : detailsOpen.delete(sent)));
 
   // Nothing sent: Back to review leads, to fix it and try again. Not
   // confirmed: Done leads, and Back is there once Activity says it didn't go.
@@ -740,13 +769,14 @@ export function sentView(ov, { state, actions, sozu } = {}) {
     : null;
   // The phone's Back: back to review when nothing went, else Done.
   (notSent ? back : done).setAttribute("data-back", "");
-  // A payment waiting for the network: called off from here, until it's handed over.
+  // A payment waiting for the network: called off from here with Don't send,
+  // until it's handed over.
   const cancel =
     phase === "sending" && sent.sendId && (sent.waits || offline()) && !sent.handedOver
       ? h("button", {
           class: "btn-outline sent-secondary sent-cancel",
           type: "button",
-          text: "Cancel",
+          text: "Don't send",
           onclick: async (event) => {
             const button = event?.currentTarget;
             if (button) button.disabled = true;
@@ -754,7 +784,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
             // Called off, it says Not sent as the send's answer comes; gone out, it goes on.
             if (!res?.result?.cancelled) {
               if (button) button.disabled = false;
-              actions?.showToast?.(res?.error ? "Couldn't cancel it. Try again." : "It went out already, so it can't be cancelled.");
+              actions?.showToast?.(res?.error ? CANCEL_FAILED_TEXT : WENT_ALREADY_TEXT);
             }
           },
         })
@@ -796,7 +826,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
             // Called off, it says Not sent as the send's answer comes.
             if (!res?.result?.cancelled) {
               if (button) button.disabled = false;
-              actions?.showToast?.(res?.error ? "Couldn't cancel it. Try again." : "It went out already, so it can't be cancelled.");
+              actions?.showToast?.(res?.error ? CANCEL_FAILED_TEXT : WENT_ALREADY_TEXT);
             }
           },
         }),
@@ -813,24 +843,27 @@ export function sentView(ov, { state, actions, sozu } = {}) {
             if (!ok) actions?.showToast?.("Couldn't open the explorer");
           },
         },
-        [h("span", { text: "View in Dusk explorer" }), h("span", { class: "btn-ico", html: iconSvg("ext") })]
+        [h("span", { text: "View in explorer" }), h("span", { class: "btn-ico", html: iconSvg("ext") })]
       )
     : null;
 
   // That it goes on: in Firefox on a phone with what's said of its notice
-  // (noticeOffer). In the app on a phone, one waiting for the network goes
-  // out only while the app's open, which it says.
+  // (noticeOffer). A payment waiting for the network, or handed over without
+  // a clear answer, says in its step that it goes out by itself; in the app
+  // on a phone, one waiting goes out only while the app's open, which it says.
   const waitsHere = phase === "sending" && (sent.waits || offline()) && !sent.handedOver;
-  const note = final || held || (isPhone() && !isTauriRuntime())
-    ? null
-    : h("p", {
-        class: "sent-note",
-        text: isExtensionRuntime()
-          ? CLOSE_WALLET_TEXT
-          : isPhone() && waitsHere
-            ? appLeaveText(ov)
-            : "You can leave this screen; this continues in the background.",
-      });
+  const goesOutLater = phase === "sending" && Boolean(sent.sendId) && (sent.waits || offline());
+  const noteText =
+    final || held || (isPhone() && !isTauriRuntime())
+      ? ""
+      : !isExtensionRuntime() && isPhone() && waitsHere
+        ? appLeaveText(ov)
+        : goesOutLater
+          ? ""
+          : isExtensionRuntime()
+            ? CLOSE_WALLET_TEXT
+            : LEAVE_SCREEN_TEXT;
+  const note = noteText ? h("p", { class: "sent-note", text: noteText }) : null;
 
   return [
     h("div", { class: "sent", "data-phase": phase, "data-status": status }, [
@@ -838,7 +871,8 @@ export function sentView(ov, { state, actions, sozu } = {}) {
       note,
       final || held ? null : noticeOffer({ state, actions }),
       stepper,
-      details.children.length ? details : null,
+      rows.children.length ? rows : null,
+      details,
       h("div", { class: "sent-actions" }, (notSent ? [back, done] : unconfirmed ? [done, back] : held ? [...heldActions, done] : cancel ? [cancel, done] : [done, explorer]).filter(Boolean)),
     ].filter(Boolean)),
   ];

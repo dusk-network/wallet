@@ -1,4 +1,4 @@
-// Boxes for "Check your recovery words": one for each word asked, named by
+// Boxes for "Check your recovery phrase": one for each word asked, named by
 // its place (Word 4), as Import's boxes are made: no password manager, no
 // keyboard learning, hidden on a phone till Show words (and again the moment
 // the page is out of sight: pageAway.js; in Firefox for Android shown only
@@ -9,7 +9,9 @@
 // word and Enter in the first box said "That doesn't match" with two boxes
 // empty). Check waits till every box holds a recovery word (`onReady`), and
 // Enter in the last box checks (`onDone`) only then; a word taken there with
-// Enter is only taken (Amélie's: it checked before she'd looked).
+// Enter is only taken (Amélie's: it checked before she'd looked). The boxes
+// are one group, named as the page is, with no line of their own over them:
+// the page's title says it.
 
 import { RECOVERY_WORDS_MISMATCH, RECOVERY_WORDS_SHOW, isRecoveryWord } from "@dusk-network/app-core/recovery-words";
 import { wordlist } from "@scure/bip39/wordlists/english";
@@ -18,6 +20,12 @@ import { h } from "../lib/dom.js";
 import { isFirefoxAndroid, isPhone } from "../lib/device.js";
 import { HOLD_TO_SHOW_TEXT, holdToShow, onPageAway } from "../lib/pageAway.js";
 import { createWordSuggestions, underBox } from "./WordSuggestions.js";
+
+/** What a check that matched says, in setup's toast and in Settings. */
+export const PHRASE_MATCHES_TEXT = "Your recovery phrase matches.";
+
+/** The page the boxes are on, and their group's name. */
+const CHECK_TITLE = "Check your recovery phrase";
 
 /**
  * A check that didn't match: it says so, with Try again, the one button, and
@@ -117,7 +125,7 @@ export function createWordCheck({ places, masked = isPhone(), passwordBoxes = ma
   const showBtn = masked ? h("button", { class: "text-btn srp-show", type: "button", text: hold ? HOLD_TO_SHOW_TEXT : "Show words", "aria-pressed": "false" }) : null;
   if (showBtn && hold) holdToShow(showBtn, setShown);
   else if (showBtn) showBtn.onclick = () => setShown(!shown);
-  const el = h("form", { class: "mnemonic-input", novalidate: "" }, [h("div", { class: "box srp-box" }, [grid]), showBtn].filter(Boolean));
+  const el = h("form", { class: "mnemonic-input", novalidate: "", role: "group", "aria-label": CHECK_TITLE }, [h("div", { class: "box srp-box" }, [grid]), showBtn].filter(Boolean));
   el.addEventListener("submit", (e) => e.preventDefault?.());
   // Shown words hide again the moment the page is out of sight, till Show words again.
   if (masked) {

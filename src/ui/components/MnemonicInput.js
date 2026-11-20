@@ -42,9 +42,9 @@ function phraseProblem(words, { pasted = 0 } = {}) {
   if (last < 0) return "";
   const typed = words.slice(0, last + 1);
   const unknown = typed.flatMap((w, i) => (w && !isWord(w) ? [i + 1] : []));
-  if (unknown.length > 3) return `${unknown.length} words aren't recovery words. Check the marked ones.`;
-  if (unknown.length === 1) return `${wordsNamed(unknown)} isn't a recovery word. Check its spelling.`;
-  if (unknown.length) return `${wordsNamed(unknown)} aren't recovery words. Check their spelling.`;
+  if (unknown.length > 3) return `${unknown.length} words aren't in the word list. Check the marked ones.`;
+  if (unknown.length === 1) return `${wordsNamed(unknown)} isn't in the word list. Check its spelling.`;
+  if (unknown.length) return `${wordsNamed(unknown)} aren't in the word list. Check their spelling.`;
   const missing = typed.flatMap((w, i) => (w ? [] : [i + 1]));
   if (missing.length > 3) return `${missing.length} words are missing.`;
   if (missing.length) return `${wordsNamed(missing)} ${missing.length === 1 ? "is" : "are"} missing.`;
@@ -67,8 +67,8 @@ function phraseProblem(words, { pasted = 0 } = {}) {
  *   is composing is taken once it's done.
  * - From two letters typed, the words of the list they start, as chips under
  *   the box typed in, which a tap, Enter or Tab takes (WordSuggestions.js).
- * - Letters that start no recovery word are marked as they're typed, Not a
- *   recovery word under their box; a word not finished, once a paste puts
+ * - Letters that start no recovery word are marked as they're typed, Not in
+ *   the word list under their box; a word not finished, once a paste puts
  *   it in or its box is left. The mark clears once it's a word.
  * - Words pasted in are taken off the clipboard, which any app or page can
  *   read, in the paste's own tap, and a whole phrase a phone's keyboard puts

@@ -622,7 +622,7 @@ describe("a payment from Send that can't reach the network before it goes out", 
     const response = localSend({ type: "DUSK_UI_SEND_TX", sendId: "send-0003", walletId: "account of wallet A", params });
     await vi.waitFor(() => expect(heard()).toHaveLength(1));
     await localSend({ type: "DUSK_UI_LOCK" });
-    await expect(response).resolves.toMatchObject({ error: { message: "The wallet locked before the network answered, so nothing was sent." } });
+    await expect(response).resolves.toMatchObject({ error: { message: "The wallet locked first. Nothing left your wallet." } });
 
     engine.unlocked = true;
     statusChecks.nodeAnswers = true;
@@ -1404,7 +1404,8 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     const { render } = await import("../ui/popup/app.js");
     await render();
     await flush();
-    expect(page.textContent).not.toContain("Unlock your wallet");
+    // The unlock form, by its password field: it has no heading.
+    expect(page.querySelector("#unlock-password")).toBeNull();
 
     // The first wallet's profile, picked from the menu; the engine fails the switch.
     engine.switchFails = true;
@@ -1415,7 +1416,7 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
     rows[0].click();
     await flush();
     expect(engine.unlocked).toBe(false);
-    expect(page.textContent).toContain("Unlock your wallet");
+    expect(page.querySelector("#unlock-password")).not.toBeNull();
   });
 
   it("renames a wallet, and gives it its number back", async () => {
@@ -1587,7 +1588,7 @@ describe("arrival notices in the app on a phone", () => {
           nodeUrl,
           title: `0.01 DUSK to ${ACCOUNT.slice(0, 6)}…${ACCOUNT.slice(-6)} is waiting`,
           publicTitle: "A payment is waiting",
-          away: "It goes out when you open Dusk Wallet again. If Android closes the app first, you'll be asked to send it.",
+          away: "Goes out when you reopen Dusk Wallet, or asks first if Android closed it.",
           back: "Open Dusk Wallet to send it.",
         })
       );

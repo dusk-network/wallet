@@ -105,35 +105,33 @@ const filledText = (from, nodeUrl) =>
   FILLED_FROM[from] ? `Filled in from ${FILLED_FROM[from]}, to pay on ${networkTextOf(String(nodeUrl ?? "")) || "this network"}. Check it before you send.` : "";
 
 /**
- * "You sent 0.02 DUSK to Alice with this memo at 08:53.": a payment made
- * already, for the form and Review, the amount hidden as balances are where
- * Max filled it in.
+ * "Already sent: 0.02 DUSK with this memo at 08:53.": a payment made already,
+ * to the recipient in To, for the form, the amount hidden as balances are
+ * where Max filled it in. On Review, under the amount and the recipient:
+ * "Already sent: same amount and memo at 08:53."
  * @param {object} ov
- * @param {{ lux: bigint, masked: boolean, to: string, memo: string, name?: string, time: number }} payment
+ * @param {{ lux: bigint, masked: boolean, memo: string, time: number }} payment
+ * @param {{ review?: boolean }} [opts]
  */
-function sentAgainWords(ov, { lux, masked, to, memo, name = "", time }) {
-  const own = to === String(ov?.accounts?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "") || to === String(ov?.addresses?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "");
-  return [
-    "You sent ",
-    balance(balancesHidden(ov) && masked, formatDuskExact(lux)),
-    ` DUSK to ${own ? "yourself" : name || shortAddress(to)}${memo.trim() ? " with this memo" : ""} ${whenAtText(time)}.`,
-  ];
+function sentAgainWords(ov, { lux, masked, memo, time }, { review = false } = {}) {
+  const withMemo = Boolean(memo.trim());
+  if (review) return [`Already sent: same amount${withMemo ? " and memo" : ""} ${whenAtText(time)}.`];
+  return ["Already sent: ", balance(balancesHidden(ov) && masked, formatDuskExact(lux)), ` DUSK${withMemo ? " with this memo" : ""} ${whenAtText(time)}.`];
 }
 
 /**
- * "The same payment is waiting to go out: 0.01 DUSK to Lucas with this memo,
- * made at 02:34.": one made already that waits for the network, for the form
- * and Review, the amount hidden as balances are where Max filled it in.
+ * "Already waiting: 0.01 DUSK with this memo, made at 02:34.": one made
+ * already that waits for the network and goes out by itself, for the form,
+ * the amount hidden as balances are where Max filled it in. On Review:
+ * "Already waiting: same amount and memo, made at 02:34."
  * @param {object} ov
- * @param {{ lux: bigint, masked: boolean, to: string, memo: string, name?: string, time: number }} payment
+ * @param {{ lux: bigint, masked: boolean, memo: string, time: number }} payment
+ * @param {{ review?: boolean }} [opts]
  */
-function waitingAgainWords(ov, { lux, masked, to, memo, name = "", time }) {
-  const own = to === String(ov?.accounts?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "") || to === String(ov?.addresses?.[Number(ov?.selectedAccountIndex ?? 0) || 0] ?? "");
-  return [
-    "The same payment is waiting to go out: ",
-    balance(balancesHidden(ov) && masked, formatDuskExact(lux)),
-    ` DUSK to ${own ? "yourself" : name || shortAddress(to)}${memo.trim() ? " with this memo" : ""}, made ${whenAtText(time)}.`,
-  ];
+function waitingAgainWords(ov, { lux, masked, memo, time }, { review = false } = {}) {
+  const withMemo = Boolean(memo.trim());
+  if (review) return [`Already waiting: same amount${withMemo ? " and memo" : ""}, made ${whenAtText(time)}.`];
+  return ["Already waiting: ", balance(balancesHidden(ov) && masked, formatDuskExact(lux)), ` DUSK${withMemo ? " with this memo" : ""}, made ${whenAtText(time)}.`];
 }
 
 // A shared request whose .dusk names are being looked up before it's read
@@ -352,15 +350,12 @@ export function sendFormView(ov, { state, actions } = {}) {
       checkAmount();
       return;
     }
+    // What Max fills in, the fee on the line under it left out already.
     const feeLux = feeLuxForRecipientType(detectedRecipientType);
-    availText.replaceChildren(
-      feeLux > 0n ? "Available after fees " : "Available ",
-      balance(hidden, formatDusk(maxLux)),
-      " DUSK"
-    );
+    availText.replaceChildren("Available ", balance(hidden, formatDusk(maxLux)), " DUSK");
     available.hidden = false;
     const notes = [];
-    if (feeLux > 0n) notes.push(`Network fee up to ${formatFee(feeLux, { max: true })} DUSK`);
+    if (feeLux > 0n) notes.push(`Fee up to ${formatFee(feeLux, { max: true })} DUSK`);
     if (detectedRecipientType === "address" && shSpendLux != null && shValueLux > shSpendLux) {
       notes.push("Part of your shielded DUSK waits on a pending transaction");
     }
@@ -684,7 +679,7 @@ export function sendFormView(ov, { state, actions } = {}) {
         kind: "contact",
         label: name,
         seed: addr,
-        title: hit?.name ? `Saved contact: ${name}` : `Your profile: ${name}`,
+        title: hit?.name ? `Contact: ${name}` : `Your profile: ${name}`,
         className: "to-chip",
       });
       sayAlike(hit ? contactAlikeText(ov, hit, Array.isArray(state.addressBook?.items) ? state.addressBook.items : []) : "");
@@ -1106,14 +1101,13 @@ export function sendFormView(ov, { state, actions } = {}) {
       // Not an amount yet: nothing to say.
     }
     const payment = lux ? { lux: BigInt(lux), memo: String(memo.value ?? ""), to: recipient } : null;
-    // The same payment waiting to go out, else made already.
+    // The same payment waiting to go out, else made already: to the recipient in To.
     const waiting = payment ? sameWaiting(ov, payment, { except: instead }) : undefined;
     const made = payment && !waiting ? sentAlready(activityRows(ov, state), payment) : null;
-    const name = ownProfileName(ov, recipient) || contactNameText(contactsIndex?.get(recipient.toLowerCase())?.name) || waiting?.toName || "";
     const words = waiting
-      ? waitingAgainWords(ov, { ...payment, masked: field.isMasked(), name, time: Number(waiting.at) })
+      ? waitingAgainWords(ov, { ...payment, masked: field.isMasked(), time: Number(waiting.at) })
       : made && made.time !== null
-        ? sentAgainWords(ov, { ...payment, masked: field.isMasked(), name, time: made.time })
+        ? sentAgainWords(ov, { ...payment, masked: field.isMasked(), time: made.time })
         : null;
     setChildren(againNote, words ? [h("div", { class: "callout-title" }, words)] : []);
     againNote.hidden = !againNote.children.length;
@@ -1457,24 +1451,28 @@ const notSentNotice = (actions) => actions?.showToast?.("The wallet, profile or 
 const reviewedFor = reviewContextOf;
 
 /**
- * What a public send shows everyone, for Review: "Visible to everyone:
- * amount, memo, your name alice.dusk, and the recipient's account." Without a memo it leaves memo
- * out, and without a verified name it says "your account". `memoAs` names
- * the memo by what it is, as the recipient on another chain a bridge pays.
+ * What a public send shows everyone, for Review, under "Public transfer":
+ * "Anyone can see the amount, memo, alice.dusk and the recipient." Without a
+ * memo it leaves memo out, and without a verified name it says "both
+ * accounts". `memoAs` names the memo by what it is, as the recipient on
+ * another chain a bridge pays: then "your account" where there's no name.
  * @param {{ memo?: string, name?: string|null, memoAs?: string }} parts
  * @returns {string}
  */
 export function publicSendLine({ memo, name, memoAs = "memo" } = {}) {
   // Sent to the bridge, what shows of the recipient is the memo.
-  const to = memoAs === "memo" ? "the recipient's account" : "";
-  const items = ["amount", memo ? memoAs : "", name ? `your name ${name}` : "your account", to].filter(Boolean);
-  const list = items.length > 2 ? `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}` : items.join(" and ");
-  return `Visible to everyone: ${list}.`;
+  const bridge = memoAs !== "memo";
+  const items = ["the amount", memo ? memoAs : "", ...(name ? [name, bridge ? "" : "the recipient"] : [bridge ? "your account" : "both accounts"])].filter(Boolean);
+  const list = items.length > 1 ? `${items.slice(0, -1).join(", ")} and ${items.at(-1)}` : items[0];
+  return `Anyone can see ${list}.`;
 }
 
 // What Review read of every payment kept here for what a recipient sent you,
 // by the draft it's drawn for: once, however often it's drawn (readTheirs).
 const theirsRead = new WeakMap();
+
+// The drafts whose Review has its Details open, kept as Review redraws.
+const toDetailsOpen = new WeakSet();
 
 export function sendConfirmView(ov, { state, actions } = {}) {
   const d = state.draft;
@@ -1530,8 +1528,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   });
 
   const own = toAddr === ownAccount || toAddr === ownAddress;
-  // Who it goes to: a saved contact's label and the recipient's .dusk name,
-  // both when there are both, over the full address.
+  // Who it goes to: a contact's label and the recipient's .dusk name, both
+  // when there are both, over its address.
   const contactName = () => {
     const key = toAddr.toLowerCase();
     const hit = (Array.isArray(state.addressBook?.items) ? state.addressBook.items : []).find(
@@ -1542,17 +1540,38 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     const profile = own ? "" : ownProfileName(ov, toAddr);
     return profile ? `Your profile ${profile}` : contactNameText(hit?.name);
   };
-  // A contact whose name looks like another's says so beside it, over the address.
-  const alike = own || ownProfileName(ov, toAddr) ? "" : contactAlikeOf(ov, state.addressBook?.items)(toAddr).toLowerCase();
+  // A contact whose name looks like another's says so beside it, over the
+  // address, once Contacts is read.
+  const alikeOf = () => (own || ownProfileName(ov, toAddr) ? "" : contactAlikeOf(ov, state.addressBook?.items)(toAddr).toLowerCase());
   let verifiedName = "";
   const toNames = h("div", { class: "review-to__names" });
   const toNameNote = nameCheckNoteEl(ov?.nodeUrl, { hidden: true });
+  // The address in full, for anyone who isn't a contact or a profile of the
+  // wallet's; theirs as "26FCH7…ck927" by their name, whole under Details.
+  // One whose name looks like another contact's keeps it whole: its address
+  // is what tells them apart.
+  const toAddress = h("span", { class: "mono review-to__address", text: toAddr });
+  const toDetails = h("details", { class: "advanced review-to-details", hidden: true, open: toDetailsOpen.has(d) }, [
+    h("summary", { text: "Details" }),
+    h("div", { class: "advanced-body" }, [
+      h("div", { class: "group group--inset" }, [
+        h("div", { class: "kv kv--wrap" }, [h("span", { class: "kv-label", text: "To" }), h("span", { class: "kv-value" }, [h("span", { class: "mono", text: toAddr })])]),
+      ]),
+    ]),
+  ]);
+  toDetails.addEventListener("toggle", () => (toDetails.open ? toDetailsOpen.add(d) : toDetailsOpen.delete(d)));
   const showToNames = () => {
+    const alike = alikeOf();
     const names = service ? [`The bridge's account for ${service.chain}`] : [contactName(), alike, duskName?.name || verifiedName].filter(Boolean);
     const unique = names.filter((n, i) => names.findIndex((m) => m.toLowerCase() === n.toLowerCase()) === i);
     toNames.textContent = unique.join(" · ");
     toNames.hidden = !unique.length;
     if (toNameNote) toNameNote.hidden = Boolean(service) || !(duskName?.name || verifiedName);
+    const known = !service && !alike && Boolean(contactName());
+    toAddress.textContent = known ? shortAddress(toAddr) : toAddr;
+    if (known) toAddress.setAttribute("title", toAddr);
+    else toAddress.removeAttribute("title");
+    toDetails.hidden = !known;
   };
 
   // The same payment waiting to go out, as the network didn't answer; else
@@ -1563,16 +1582,15 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   const rows = activityRows(ov, state);
   const madeAgain = waitingTwin ? null : sentAlready(rows, payment);
   const repeat = Boolean(waitingTwin || (madeAgain && madeAgain.time !== null));
-  // Another profile of this wallet's by its own name, as the form says it: "to Profile 1".
-  const againName = own ? "" : ownProfileName(ov, toAddr) || contactName() || duskName?.name || "";
+  // Under the amount and the recipient it's to: "same amount and memo".
   const againNote = repeat
     ? h("div", { class: "callout warn review-again", role: "alert" }, [
         h(
           "div",
           { class: "callout-title" },
           waitingTwin
-            ? waitingAgainWords(ov, { ...payment, masked: Boolean(d.amountMasked), name: againName, time: Number(waitingTwin.at) })
-            : sentAgainWords(ov, { ...payment, masked: Boolean(d.amountMasked), name: againName, time: madeAgain.time })
+            ? waitingAgainWords(ov, { ...payment, masked: Boolean(d.amountMasked), time: Number(waitingTwin.at) }, { review: true })
+            : sentAgainWords(ov, { ...payment, masked: Boolean(d.amountMasked), time: madeAgain.time }, { review: true })
         ),
       ])
     : null;
@@ -1587,7 +1605,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // suspended" of 3 and 6 days ago said nothing, yesterday's memo did).
   // Amber, with its sign, and their whole memo, quoted and wrapped, in a
   // memo's small style (Amélie's: a dark box with no sign, the memo cut at
-  // "renvo…"), as the web wallet shows it.
+  // "renvo…"), as the web wallet shows it, in one line: "Sent you “…” before
+  // · not a contact".
   const theirsNote = h("div", { class: "callout review-theirs", role: "alert", hidden: true });
   let theirRows = rows;
   const showTheirs = () => {
@@ -1600,9 +1619,9 @@ export function sendConfirmView(ov, { state, actions } = {}) {
         ? [
             h("span", { class: "review-theirs__sign", "aria-hidden": "true", html: iconSvg("alert") }),
             h("div", { class: "review-theirs__body" }, [
-              h("div", { class: "callout-title review-theirs__title", text: "This address sent you: " }),
+              h("span", { class: "callout-title review-theirs__title", text: "Sent you " }),
               h("span", { class: "memo-theirs__text review-theirs__memo", text: `“${safeText(memo.trim()).text}”` }),
-              h("span", { class: "review-theirs__who", text: " · not in your contacts." }),
+              h("span", { class: "review-theirs__who", text: " before · not a contact" }),
             ]),
           ]
         : []
@@ -1610,11 +1629,11 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     theirsNote.hidden = !memo;
   };
 
-  // Save to Contacts, unless it's saved already or it's this wallet's own.
+  // Save contact, unless it's saved already or it's this wallet's own.
   const saveContactBtn = h("button", {
     class: "text-btn text-btn--inline review-save-contact",
     type: "button",
-    text: "Save to Contacts",
+    text: "Save contact",
     hidden: true,
     onclick: async () => {
       try {
@@ -1710,10 +1729,11 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     }
   }
 
-  // Back returns to Send with the draft, so Review has no Cancel. A payment
-  // made already says on its button that it sends it again, as the web wallet's does.
+  // Back returns to Send with the draft, so Review has no Cancel. Its button
+  // says what it sends, the amount as Review shows it: "Send 0.1 DUSK"; a
+  // payment made already says it sends it again, as the web wallet's does.
   const amountShown = balancesHidden(ov) && Boolean(d.amountMasked) ? HIDDEN_BALANCE : formatDuskExact(d.amountLux);
-  const confirmBtn = h("button", { class: "btn-primary", text: repeat ? `Send ${amountShown} DUSK again` : "Confirm", disabled: nothingArrives });
+  const confirmBtn = h("button", { class: "btn-primary", text: `Send ${amountShown} DUSK${repeat ? " again" : ""}`, disabled: nothingArrives });
 
   // What Max filled in stays hidden with the balances; an amount typed shows.
   const amountMasked = balancesHidden(ov) && Boolean(d.amountMasked);
@@ -1826,17 +1846,22 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           h("span", { class: "balance-unit", text: " DUSK" }),
         ]),
         reviewInCurrency.el,
-        // To the bridge: what arrives on the other chain, once it takes its fee.
-        service && !amountMasked ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
+        // To the bridge: what arrives on the other chain, once it takes its
+        // fee; where nothing would, the warning or the error under it says so.
+        service && !amountMasked && service.running && service.recipientOk && service.arrivesLux > 0n
+          ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) })
+          : null,
         // What a public send shows everyone; a shielded one has no such line.
         privacy === "public" ? visibleLine : null,
       ].filter(Boolean)),
       h("div", { class: "group" }, [
-        kv("To", h("span", { class: "review-to" }, [toNames, h("span", { class: "mono review-to__address", text: toAddr })]), "kv--wrap"),
+        kv("To", h("span", { class: "review-to" }, [toNames, toAddress]), "kv--wrap"),
         // With more than one wallet, the wallet first: "Wallet 2 · alice.dusk · Public".
         kv("From", h("span", {}, [withReviewWallet(fromName, actions?.review), h("span", { class: "kv-muted", text: privacy === "shielded" ? " · Shielded" : " · Public" })])),
         d.memo ? kv(service ? `Recipient on ${service.chain}` : "Memo", safeTextEl(d.memo), "kv--wrap") : null,
       ].filter(Boolean)),
+      // A contact's or a profile's address whole, under its short form.
+      toDetails,
       // As the form said it: it goes, for a fee.
       own ? h("div", { class: "send-self-note review-self-note", text: `This is your own ${toAddr === ownAccount ? "account" : "shielded address"}. Sending to yourself only costs a fee.` }) : null,
       theirsNote,

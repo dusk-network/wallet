@@ -220,10 +220,10 @@ describe("Activity's Export", () => {
       "Q1 2025",
       "Choose dates",
     ]);
-    // On Testnet: no value to add, and that's said where it would be.
-    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual(["Period", "Add my contact names", "For Excel: keep accents as it opens"]);
-    expect(visibleText(panel())).toContain("Test DUSK has no value, so the file gives none.");
-    expect(visibleText(panel())).toContain("One profile's file for tax tools such as Koinly: exact amounts, times in UTC, transfers between your profiles marked.");
+    // On Testnet: no value to add, and nothing said of it: the test-network strip says test DUSK has none.
+    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toEqual(["Period", "Add contact names", "Keep accents for Excel"]);
+    expect(visibleText(panel())).not.toContain("Test DUSK");
+    expect(visibleText(panel())).toContain("One profile, exact amounts, times in UTC.");
     // Before the list and its filters.
     expect(body().querySelector(".activity-page").children[0]).toBe(panel());
   });
@@ -560,7 +560,7 @@ describe("Activity's Export", () => {
     const { actions } = setup(ON_MAINNET);
     button("Export").click();
     // A British browser's would say pounds: this one's, in euros.
-    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toContain("Add each payment's value in euros, from CoinGecko's prices");
+    expect(panel().querySelectorAll("label").map((l) => l.textContent)).toContain("Add EUR value (CoinGecko)");
     button("Save CSV").click();
     await settle();
     expect(asked).toEqual([]);
@@ -614,7 +614,7 @@ describe("Activity's Export", () => {
     );
     const { actions } = setup({ ...ON_MAINNET, entries: WHOLE.slice(0, 1) });
     button("Export").click();
-    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain(`Add each payment's value in ${name}, from CoinGecko's prices`);
+    expect(dom.document.body.querySelectorAll("label").map((l) => l.textContent)).toContain(`Add ${vs.toUpperCase()} value (CoinGecko)`);
     choose("activity-export-value");
     button("Save CSV").click();
     await settle();
@@ -624,7 +624,7 @@ describe("Activity's Export", () => {
   });
 
   // Amélie's: a testnet export, euros ticked, gave test DUSK a euro value in a file for her tax return.
-  it("gives test DUSK no value: none to add on Testnet, said so, and none in the file, ticked on Mainnet before or not", async () => {
+  it("gives test DUSK no value: none to add on Testnet, and none in the file, ticked on Mainnet before or not", async () => {
     page("/full.html");
     vi.stubGlobal("navigator", { ...globalThis.navigator, language: "fr-FR" });
     const asked = [];
@@ -634,7 +634,8 @@ describe("Activity's Export", () => {
     // Ticked before, as on Mainnet: Testnet's file has none all the same.
     state.activityExport.fiat = true;
     expect(body().querySelector("#activity-export-value")).toBeNull();
-    expect(visibleText(panel())).toContain("Test DUSK has no value, so the file gives none.");
+    // The test-network strip says test DUSK has no value; the panel doesn't say it again.
+    expect(visibleText(panel())).not.toContain("value");
     button("Save CSV").click();
     await settle();
     expect(asked).toEqual([]);
@@ -937,7 +938,8 @@ describe("Activity's Export", () => {
     page("/popup.html");
     setup();
     button("Export").click();
-    expect(visibleText(panel())).toContain("The file is saved from a new tab.");
+    // Nothing narrates the new tab it's saved from.
+    expect(visibleText(panel())).not.toContain("new tab");
     pickPeriod("2026-3");
     choose("activity-export-contacts");
     button("Save CSV").click();

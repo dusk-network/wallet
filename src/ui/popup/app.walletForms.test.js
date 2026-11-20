@@ -74,7 +74,7 @@ async function popupAt(route, extra = {}, answer = async () => ({}), over = {}) 
 // The form's fields, by their names, and what each holds.
 const fieldsOf = (app, names) => app.querySelectorAll("input").filter((i) => names.includes(accessibleName(i)));
 const typeAll = (fields) => fields.forEach((f, i) => typeInto(f, accessibleName(f).startsWith("Word") ? WORDS[i] : "typed password"));
-const SHARED_PASSWORD = "Password you unlock with";
+const SHARED_PASSWORD = "Password";
 const button = (app, text) => app.querySelectorAll("button").find((b) => b.textContent === text);
 
 // Each wallet form, with the fields it's filled in by.
@@ -213,7 +213,9 @@ describe("the password on big sends, in Settings", () => {
   it("says what it asks on in the app without sites, which only the extension has", async () => {
     const note = (app) => app.querySelector(".settings-note").textContent;
     const ext = await popupAt("send_password");
-    expect(note(ext.app)).toMatch(/^On sends, stakes, shielding and what sites ask, network fee included\./);
+    // The switch is the title's, and says only On.
+    expect(ext.app.querySelector("label[for=send-password-on]").textContent).toBe("On");
+    expect(note(ext.app)).toBe("Counts sends, stakes, shielding and site requests, network fee included. Token transfers and unknown contracts always ask.");
     vi.stubGlobal("browser", undefined);
     globalThis.window.__TAURI_INTERNALS__ = { invoke: vi.fn(async () => null), transformCallback: () => 0 };
     // Opened again in the app: Settings, then the page.
@@ -222,7 +224,7 @@ describe("the password on big sends, in Settings", () => {
     ext.state.route = "send_password";
     await ext.render({ forceRefresh: true });
     await flush();
-    expect(note(ext.app)).toMatch(/^On sends, stakes and shielding, network fee included\./);
+    expect(note(ext.app)).toBe("Counts sends, stakes and shielding, network fee included. Token transfers and unknown contracts always ask.");
     expect(note(ext.app)).not.toContain("site");
   });
 
@@ -258,12 +260,12 @@ describe("the password on big sends, in Settings", () => {
     expect(errorsOf(app)).toEqual(["Enter your password."]);
     expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD")).toEqual([]);
 
-    typed(app, "Password you unlock with", "not it");
+    typed(app, "Password", "not it");
     pressed(app, "Save");
     await flush();
     expect(errorsOf(app)).toEqual(["Wrong password."]);
 
-    typed(app, "Password you unlock with", "the password");
+    typed(app, "Password", "the password");
     pressed(app, "Save");
     await flush();
     expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD").at(-1)).toMatchObject({ password: "the password", limitLux: "1000500000000" });
@@ -289,7 +291,7 @@ describe("the password on big sends, in Settings", () => {
     pressed(app, "Turn off");
     await flush();
     expect(errorsOf(app)).toEqual(["Enter your password."]);
-    typed(app, "Password you unlock with", "the password");
+    typed(app, "Password", "the password");
     pressed(app, "Turn off");
     await flush();
     expect(answers.filter((m) => m.type === "DUSK_UI_SET_SEND_PASSWORD").at(-1)).toMatchObject({ limitLux: null });

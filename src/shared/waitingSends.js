@@ -50,11 +50,11 @@ export { SEND_CANCELLED_TEXT };
 /** How long a waiting payment waits before the network is asked again, where the browser doesn't say first that it's back. */
 export const ASK_AGAIN_AFTER_MS = 5_000;
 
-/** Why a waiting payment wasn't sent, as the wallet stopped waiting for it. */
+/** Why a waiting payment wasn't sent, as the wallet stopped waiting for it before the network answered. */
 export const NOT_SENT_TEXT = Object.freeze({
-  closed: "The wallet closed before the network answered, so nothing was sent.",
-  locked: "The wallet locked before the network answered, so nothing was sent.",
-  switched: "Another wallet was opened before the network answered, so nothing was sent.",
+  closed: "The wallet closed first. Nothing left your wallet.",
+  locked: "The wallet locked first. Nothing left your wallet.",
+  switched: "Another wallet was opened first. Nothing left your wallet.",
 });
 
 // Why the wallet stopped waiting on a payment that may have gone out.
@@ -425,8 +425,8 @@ async function sentWhileHeld(item, host, now) {
 }
 
 // Out of the queue, its record kept as `how` says: kept as went once it went
-// out; forgotten once it was called off with Cancel, or is followed by its
-// transaction's ID; kept as not sent otherwise. One called off that took the place of a
+// out; forgotten once it was called off with Don't send, or is followed by
+// its transaction's ID; kept as not sent otherwise. One called off that took the place of a
 // payment Home said wasn't sent gives that payment its place back; one sent
 // in the place of a held one (`replacing`) that never went out, called off or
 // turned down, gives it back held; one that went, that one goes.
@@ -820,10 +820,10 @@ export async function sendWhenReachable({ sendId, record, attempt, host, replace
 }
 
 /**
- * Cancel on a payment from Send: called off unless it was handed to the node
- * already, which the engine settles. One waiting here says so to whoever
- * waits on it; one not waiting here any more (not sent, from before) is
- * forgotten. Whether it was called off.
+ * Don't send on a waiting payment from Send: called off unless it was handed
+ * to the node already, which the engine settles. One waiting here says so to
+ * whoever waits on it; one not waiting here any more (not sent, from before)
+ * is forgotten. Whether it was called off.
  * @param {string} sendId
  * @param {WaitingHost} host
  * @returns {Promise<boolean>}
@@ -1124,8 +1124,8 @@ export async function followHandedOver(host, { every = 0 } = {}) {
 
 /**
  * Don't send on Home, or Send it now, for a payment that wasn't sent:
- * forgotten. One still waiting here isn't: Cancel calls that off; nor one
- * handed over that may have gone, which the node is asked of.
+ * forgotten. One still waiting here isn't: its own Don't send calls that
+ * off; nor one handed over that may have gone, which the node is asked of.
  * @param {string} sendId
  */
 export async function dropUnsent(sendId) {

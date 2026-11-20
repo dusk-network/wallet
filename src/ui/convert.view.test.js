@@ -52,8 +52,8 @@ describe("shield and unshield", () => {
     ];
     expect(read()).toEqual([
       "From your public balance to your shielded balance.",
-      "Available after fees 1,482.8883 DUSK",
-      "Network fee up to 0.05 DUSK",
+      "Available 1,482.8883 DUSK",
+      "Fee up to 0.05 DUSK",
     ]);
     // The switch says which is picked, and the arrow keys move it.
     const tabs = body().querySelector("[role=tablist]");
@@ -66,8 +66,8 @@ describe("shield and unshield", () => {
     expect(state.draft.kind).toBe(TX_KIND.UNSHIELD);
     expect(read()).toEqual([
       "From your shielded balance to your public balance.",
-      "Available after fees 24.95 DUSK",
-      "Network fee up to 0.05 DUSK",
+      "Available 24.95 DUSK",
+      "Fee up to 0.05 DUSK",
     ]);
   });
 
@@ -89,7 +89,7 @@ describe("shield and unshield", () => {
     button("Max").click();
     expect(input.value).toBe("24.95");
     typeInto(input, "30");
-    expect(error()).toBe("That's 5.05 DUSK more than your shielded balance, with the network fee.");
+    expect(error()).toBe("Your shielded balance is 5.05 DUSK short, fee included.");
     typeInto(input, "");
     button("Review").click();
     expect([error(), state.route]).toEqual(["Enter an amount.", "convert"]);
@@ -110,16 +110,16 @@ describe("shield and unshield", () => {
         })
       );
     show();
-    expect(visibleText(body().querySelector(".amount-avail__text"))).toBe("Available after fees 1,482.7883 DUSK");
-    expect(visibleText(body().querySelector(".amount-fee-note"))).toBe("Network fee up to 0.15 DUSK");
+    expect(visibleText(body().querySelector(".amount-avail__text"))).toBe("Available 1,482.7883 DUSK");
+    expect(visibleText(body().querySelector(".amount-fee-note"))).toBe("Fee up to 0.15 DUSK");
     button("Max").click();
     expect(body().querySelector("input.amount-field__input").value).toBe("1482.7883");
     button("Review").click();
     await settle();
-    expect(visibleText(body().querySelector(".gas-fee"))).toBe("Network feeup to 0.15 DUSKTotalup to 1,482.9383 DUSK");
+    expect(visibleText(body().querySelector(".gas-fee"))).toBe("Feeup to 0.15 DUSKTotalup to 1,482.9383 DUSK");
   });
 
-  it("reviews the amount, the profile it moves within, and the fee, with Back and Confirm", async () => {
+  it("reviews the amount, the profile it moves within, and the fee, with Back and a button that says what it does", async () => {
     const state = { route: "convert_confirm", draft: { kind: TX_KIND.SHIELD, amountLux: "1000000000", amountDusk: "1" } };
     draw(state);
     await settle();
@@ -129,7 +129,11 @@ describe("shield and unshield", () => {
       "Toalice.dusk · Shielded",
     ]);
     const shown = () => body().querySelectorAll("button").filter(isShown).map((b) => b.textContent);
-    expect(shown()).toEqual(["← Back", "Confirm"]);
+    expect(shown()).toEqual(["← Back", "Shield 1 DUSK"]);
+    // Unshield's says so.
+    draw({ route: "convert_confirm", draft: { kind: TX_KIND.UNSHIELD, amountLux: "2500000000", amountDusk: "2.5" } });
+    await settle();
+    expect(shown()).toEqual(["← Back", "Unshield 2.5 DUSK"]);
     expect(visibleText(body().querySelector("details.gas-custom summary"))).toBe("Custom fee");
   });
 
@@ -151,7 +155,7 @@ describe("shield and unshield", () => {
       await settle();
       const busy = visibleText(body().querySelector("dusk-gas-editor .gas-busy") ?? { textContent: "" });
       pastClickGuard();
-      button("Confirm").click();
+      button(`${kind === TX_KIND.SHIELD ? "Shield" : "Unshield"} 1 DUSK`).click();
       await settle();
       return [sent[0]?.params.gas?.price, busy];
     };
@@ -174,7 +178,7 @@ describe("shield and unshield", () => {
     expect(review.disabled).toBe(false);
   });
 
-  it("says on Review how much is missing once the fee takes it past the balance, and keeps Confirm off", async () => {
+  it("says on Review how much is missing once the fee takes it past the balance, and keeps its button off", async () => {
     const dusk = (n) => (BigInt(n) * 1_000_000_000n).toString();
     const { convertConfirmView } = await import("./popup/views/convert.js");
     const state = { route: "convert_confirm", draft: { kind: "unshield", amountDusk: "1", amountLux: dusk(1), gas: { limit: "50000000", price: "1" } } };
@@ -182,8 +186,8 @@ describe("shield and unshield", () => {
     const ov = { isUnlocked: true, accounts: ["a"], addresses: ["b"], selectedAccountIndex: 0, balance: { value: dusk(100) }, shieldedBalance: { value: dusk(2), spendable: dusk(1) } };
     dom.document.body.replaceChildren(...convertConfirmView(ov, { state, actions }));
     await settle();
-    expect(dom.document.body.querySelector(".pay-guard").textContent).toBe("That's 0.05 DUSK more than your shielded balance, with the network fee.");
-    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Confirm").disabled).toBe(true);
+    expect(dom.document.body.querySelector(".pay-guard").textContent).toBe("Your shielded balance is 0.05 DUSK short, fee included.");
+    expect(dom.document.body.querySelectorAll("button").find((b) => b.textContent === "Unshield 1 DUSK").disabled).toBe(true);
   });
 
   it("names the wallet beside the profile with more than one wallet, as the Review was drawn for", async () => {

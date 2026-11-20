@@ -73,7 +73,8 @@ describe("profile switcher", () => {
   it("is a menu: profiles to pick, the active one checked and focused, the arrow keys move, Escape goes back", () => {
     menu.open(anchor, overview);
     const list = dom.document.body.querySelector(".acct-menu [role=menu]");
-    expect(dom.document.getElementById(list.getAttribute("aria-labelledby")).textContent).toBe("Select profile");
+    // No title over it, which hangs from the profile's chip: named for screen readers alone.
+    expect([list.getAttribute("aria-label"), dom.document.body.querySelector(".net-menu-title")]).toEqual(["Profile", null]);
     const items = list.querySelectorAll("[role=menuitem], [role=menuitemradio]");
     expect(items.map((el) => [el.getAttribute("role"), el.getAttribute("aria-checked")])).toEqual([
       ["menuitemradio", "true"],
@@ -90,7 +91,8 @@ describe("profile switcher", () => {
     press(dom.document.activeElement, "ArrowDown");
     expect(dom.document.activeElement).toBe(items[2]);
     press(dom.document.activeElement, "End");
-    expect(visibleText(dom.document.activeElement)).toBe("Profile namesSettings");
+    // Where it goes is the row's chevron's to say.
+    expect(visibleText(dom.document.activeElement)).toBe("Profile names");
     press(dom.document.activeElement, "Escape");
     expect([menu.isOpen, dom.document.activeElement]).toEqual([false, anchor]);
   });
@@ -219,7 +221,7 @@ describe("profile switcher", () => {
     it("adds a wallet from the menu, after the wallets", async () => {
       menu.open(anchor, two);
       const items = dom.document.body.querySelectorAll(".acct-menu [role=menu] > [role=menuitem]");
-      expect(items.map(visibleText)).toEqual(["Add wallet", "Profile namesSettings"]);
+      expect(items.map(visibleText)).toEqual(["Add wallet", "Profile names"]);
       items[0].click();
       await settle();
       expect(onAddWallet).toHaveBeenCalledTimes(1);

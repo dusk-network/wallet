@@ -45,6 +45,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ### Changed
 
+- Cut the wallet's text to what each step needs, every warning kept, one line each: buttons say what they do and how much ("Send 0.1 DUSK", "Pay 1 DUSK", "Approve 10 stDUSK"), technical lines sit under Details, and every screen uses the same words: recovery phrase, account, Fee, contact, View in explorer, Waiting and Held for a payment that hasn't gone out, and Don't send to call one off. A recipient who isn't a contact shows in full on Review and on a site's request to pay; a contact's address sits under Details.
 - Named how much and to whom in the Android app's notice of a payment waiting for the network, where the phone shows a notice whole, and said under Tell me when money comes in that Android checks about every 15 minutes.
 - Showed on Review the whole memo an address that isn't a contact sent you, quoted and wrapped, in an amber warning with its sign, as the web wallet does.
 - Dropped a Send left with Back, Leave this payment? asking first when anything's in it, rather than opening the next Send on it; one kept through a reload, a lock, the popup closing or the app closing says Your unfinished payment.

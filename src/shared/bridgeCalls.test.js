@@ -42,10 +42,10 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
     expect([mainnet.chain.name, testnet.chain.name]).toEqual(["BNB Smart Chain", "Sepolia"]);
   });
 
-  it("say what's sent, the fee and what arrives, in one line", () => {
+  it("say the fee and what arrives, in one line", () => {
     const paid = bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "2000000000" });
     expect(paid).toMatchObject({ chain: "BNB Smart Chain", network: "mainnet", recipientOk: true, running: true, sentLux: 2_000_000_000n, feeLux: 1_000_000_000n, arrivesLux: 1_000_000_000n });
-    expect(bridgeServiceLine(paid)).toBe("2 DUSK sent · 1 DUSK bridge fee · 1 DUSK arrives on BNB Smart Chain");
+    expect(bridgeServiceLine(paid)).toBe("Bridge fee 1 DUSK · 1 DUSK arrives");
     expect(bridgeServiceWarnings(paid)).toEqual([]);
 
     // The fee takes all of 1 DUSK, and more than that of less.
@@ -55,27 +55,21 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
       expect(bridgeServiceWarnings(all).map((w) => w.kind)).toEqual(["fee"]);
     }
     expect(bridgeServiceLine(bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "1000000001" }))).toBe(
-      "1.000000001 DUSK sent · 1 DUSK bridge fee · 0.000000001 DUSK arrives on BNB Smart Chain"
+      "Bridge fee 1 DUSK · 0.000000001 DUSK arrives"
     );
 
     // Without an address there in the memo, nothing arrives, whatever the amount.
     for (const memo of [undefined, "", "Order 1042", EVM.replace(/[a-f]/, (c) => c.toUpperCase())]) {
       expect(bridgeServiceLine(bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo, amount: "2000000000" }))).toBe(
-        "2 DUSK sent · 1 DUSK bridge fee · Nothing arrives without a BNB Smart Chain address in the memo"
+        "Bridge fee 1 DUSK · Nothing arrives without a BNB Smart Chain address in the memo"
       );
     }
   });
 
-  it("say testnet's route to Sepolia isn't running right now", () => {
+  it("say testnet's route to Sepolia isn't paying out now", () => {
     const paid = bridgeServiceTransfer({ nodeUrl: TESTNET, to: testnet.account, memo: EVM, amount: "5000000000" });
-    expect(bridgeServiceWarnings(paid)).toEqual([
-      {
-        kind: "off",
-        title: "Not running on testnet right now",
-        text: "The bridge isn't paying out on Sepolia at the moment, so DUSK sent to it doesn't arrive there.",
-      },
-    ]);
-    expect(bridgeServiceLine(paid)).toBe("5 DUSK sent · 1 DUSK bridge fee · Nothing arrives on Sepolia");
+    expect(bridgeServiceWarnings(paid)).toEqual([{ kind: "off", title: "Not paying out on Sepolia now", text: "Nothing sent to it would arrive." }]);
+    expect(bridgeServiceLine(paid)).toBe("Bridge fee 1 DUSK · Nothing arrives on Sepolia");
     // Another account, or another network's, is no bridge transfer.
     expect(bridgeServiceTransfer({ nodeUrl: TESTNET, to: mainnet.account, amount: "5000000000" })).toBeNull();
   });

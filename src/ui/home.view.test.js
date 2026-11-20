@@ -186,7 +186,7 @@ describe("home balance", () => {
     // A section head, its brackets drawn and not read.
     expect(visibleText(card.querySelector(".bracket-title"))).toBe("[Get your first DUSK]");
     expect(screenReaderText(card.querySelector(".bracket-title"))).toBe("Get your first DUSK");
-    expect(card.querySelector("p").textContent).toBe("Ask someone to send you test DUSK. They need your account, from Receive.");
+    expect(card.querySelector("p").textContent).toBe("Ask someone for test DUSK: they send it to your account.");
     card.querySelector("button").click();
     expect(state.route).toBe("receive");
 
@@ -199,7 +199,7 @@ describe("home balance", () => {
     expect(draw({ txs: [{ hash: "ab".repeat(32), kind: TX_KIND.TRANSFER, amount: "1", status: "executed" }] })).toBeNull();
     // On Mainnet, from an exchange too.
     expect(draw({ nodeUrl: "https://nodes.dusk.network" }).querySelector("p").textContent).toBe(
-      "Withdraw DUSK from an exchange, or ask someone to send you some. Both start with your account, from Receive."
+      "Get DUSK from an exchange or a friend: they send it to your account."
     );
   });
 
@@ -349,7 +349,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     vi.unstubAllGlobals();
   });
 
-  it("says what each pays, to whom, its memo and when it was made, to tell them apart, with Cancel", async () => {
+  it("says what each pays, to whom, its memo and when it was made, to tell them apart, with Don't send", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -364,13 +364,14 @@ describe("payments from Send waiting for the network, on Home", () => {
       }),
     };
     document.body.replaceChildren(...homeView(ov([send(), send({ sendId: "s2", memo: "Hors ligne deux", at: at(2, 36), waits: false })]), { state, actions }));
-    // Chen's and Lena's: "Not sent yet … It's being sent. Cancel" as it went out. One state at a time: Sending.
+    // Chen's and Lena's: "Not sent yet … It's being sent. Cancel" as it went out. One state at a time: Waiting, then
+    // Sending.
     expect(boxes(document)).toEqual([
-      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers.Cancel",
-      "Sending: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36Cancel",
+      "Waiting: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · 02:34Goes out once the network answers.Don't send",
+      "Sending: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · 02:36Don't send",
     ]);
 
-    // Cancel on the second: that one alone, and said.
+    // Don't send on the second: that one alone, and said.
     document.body.querySelectorAll(".home-waiting button")[1].click();
     await vi.waitFor(() => expect(actions.showToast).toHaveBeenCalled());
     expect(sent).toEqual([{ type: "DUSK_UI_CANCEL_SEND", sendId: "s2" }]);
@@ -380,7 +381,7 @@ describe("payments from Send waiting for the network, on Home", () => {
 
     // Hidden balances hide what it pays; another profile's aren't this one's to list.
     document.body.replaceChildren(...homeView(ov([send()], { hideBalances: true }), { state, actions }));
-    expect(boxes(document)[0]).toMatch(/^Not sent yet: •••• DUSK to Lucas/);
+    expect(boxes(document)[0]).toMatch(/^Waiting: •••• DUSK to Lucas/);
     document.body.replaceChildren(...homeView(ov([send({ profileIndex: 1 })]), { state, actions }));
     expect(boxes(document)).toEqual([]);
   });
@@ -396,15 +397,15 @@ describe("payments from Send waiting for the network, on Home", () => {
     const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
     document.body.replaceChildren(...homeView(ov([send()]), { state, actions }));
     expect(boxes(document)).toEqual([
-      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It goes out once the network answers. If you leave Dusk Wallet, it goes out when you open it again. If Android closes the app first, you'll be asked to send it.Cancel",
+      "Waiting: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · 02:34Goes out once the network answers. If you leave the app, it goes out when you reopen it, or asks first if Android closed it.Don't send",
     ]);
     // With Lock when I leave the app on, the wallet locks as it's left, and the payment isn't sent.
     document.body.replaceChildren(...homeView(ov([send()], { lockOnLeave: true }), { state, actions }));
-    expect(boxes(document)[0]).toContain("It goes out once the network answers. If you leave Dusk Wallet, it locks and this isn't sent.");
+    expect(boxes(document)[0]).toContain("Goes out once the network answers. If you leave the app, it locks and this isn't sent.");
   });
 
   // Chen's: one handed over as the Wi-Fi died showed as sent in Activity, though the node never had it.
-  it("says one handed over without a clear answer may have gone out, with no Cancel, until the node's asked", async () => {
+  it("says one handed over without a clear answer may have gone out, with no Don't send, until the node's asked", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -415,9 +416,9 @@ describe("payments from Send waiting for the network, on Home", () => {
     const going = send({ sendId: "s3", memo: "Trois", at: at(2, 38), waits: false, unclear: true });
     document.body.replaceChildren(...homeView(ov([waits, checks, going]), { state, actions }));
     expect(boxes(document)).toEqual([
-      "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34It may have gone out already. If it didn't, it goes out once the network answers.",
-      "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:36It may have gone out already. The wallet checks once the network answers.",
-      "Sending: 0.01 DUSK to Lucas (petit-fils)“Trois” · made at 02:38",
+      "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · 02:34It may have gone out already; if not, it goes out once the network answers.",
+      "Not confirmed: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · 02:36It may have gone out already; checking once the network answers.",
+      "Sending: 0.01 DUSK to Lucas (petit-fils)“Trois” · 02:38",
     ]);
     expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
   });
@@ -434,8 +435,8 @@ describe("payments from Send waiting for the network, on Home", () => {
     const failed = send({ sendId: "s2", memo: "", waiting: false, waits: false, ended: "failed", error: "Failed to fetch" });
     document.body.replaceChildren(...homeView(ov([closed, failed]), { state, actions }));
     expect(boxes(document)).toEqual([
-      "Not sent: 0.01 DUSK to lucas-…jWmUdk“Hors ligne un” · made at 02:34The wallet closed before the network answered, so nothing was sent.Send it nowDon't send",
-      "Not sent: 0.01 DUSK to lucas-…jWmUdkmade at 02:34Couldn't reach the network. Nothing was sent and no fee was charged.Send it nowDon't send",
+      "Not sent: 0.01 DUSK to lucas-…jWmUdk“Hors ligne un” · 02:34The wallet closed first. Nothing left your wallet.Send it nowDon't send",
+      "Not sent: 0.01 DUSK to lucas-…jWmUdk02:34Couldn't reach the network. No fee charged.Send it nowDon't send",
     ]);
 
     // Send it now: straight to Review, the same amount, recipient and memo, sent there in its place; nothing dropped.
@@ -461,7 +462,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     const actions = { render: vi.fn(async () => {}), showToast: vi.fn(), send: vi.fn(async () => ({ ok: true })) };
     const went = send({ waiting: false, waits: false, went: at(2, 39), hash: "w1".repeat(32) });
     document.body.replaceChildren(...homeView(ov([went]), { state, actions }));
-    expect(boxes(document)).toEqual(["Sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34"]);
+    expect(boxes(document)).toEqual(["Sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · 02:34"]);
     expect(document.body.querySelectorAll(".home-waiting button")).toEqual([]);
   });
 
@@ -481,11 +482,11 @@ describe("payments from Send waiting for the network, on Home", () => {
       return [visibleText(box.querySelector(".home-waiting__note")), box.querySelectorAll("button").map((b) => [b.textContent, b.className.split(" ")[0]])];
     };
     expect(shown([other])).toEqual([
-      "Your account sent 0.001 DUSK to your Profile 2 at 02:36 while this waited.",
+      "While it waited, your account sent 0.001 DUSK to your Profile 2 at 02:36.",
       [["Send it too", "btn-primary"], ["Don't send", "btn-outline"]],
     ]);
     expect(shown([same, other])).toEqual([
-      "Your account sent 0.01 DUSK to Lucas (petit-fils) at 02:37 with the memo “Hors ligne un”, and 1 more, while this waited. That looks like this same payment.",
+      "While it waited, your account sent 0.01 DUSK to Lucas (petit-fils) at 02:37 (“Hors ligne un”), and 1 more. Looks like the same payment.",
       [["Send it too", "btn-outline"], ["Don't send", "btn-primary"]],
     ]);
     // Nothing named: the plain sentence.
@@ -523,8 +524,8 @@ describe("payments from Send waiting for the network, on Home", () => {
     const stopped = send({ sendId: "s2", memo: "Hors ligne deux", waiting: false, waits: false, ended: "locked", held: true });
     document.body.replaceChildren(...homeView(ov([held, stopped]), { state, actions }));
     expect(boxes(document)).toEqual([
-      "Not sent yet: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
-      "Not sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · made at 02:34Your account sent something else while this waited.Send it tooDon't send",
+      "Held: 0.01 DUSK to Lucas (petit-fils)“Hors ligne un” · 02:34Your account sent something else while this waited.Send it tooDon't send",
+      "Not sent: 0.01 DUSK to Lucas (petit-fils)“Hors ligne deux” · 02:34Your account sent something else while this waited.Send it tooDon't send",
     ]);
 
     // Send it too: its Review, in its place; nothing goes before Confirm there.

@@ -145,10 +145,10 @@ export function checksMeanwhile(send, now = Date.now()) {
 
 /**
  * What a payment held for Send it too says of what its account sent while it
- * waited, from the chain: "Your account sent 0.001 DUSK to your Profile 2 at
- * 10:02 while this waited." with its memo, and "That looks like this same
- * payment." where it's this one (Marek's, Lena's, Chen's: "something else"
- * was the very same payment, from another device). "Checking what your
+ * waited, from the chain: "While it waited, your account sent 0.001 DUSK to
+ * your Profile 2 at 10:02." with its memo in brackets, and "Looks like the
+ * same payment." where it's this one (Marek's, Lena's, Chen's: "something
+ * else" was the very same payment, from another device). "Checking what your
  * account sent…" while it's read; the plain sentence where the node named
  * nothing.
  * @param {object} send - a held payment, with `meanwhile`
@@ -163,7 +163,7 @@ export function sentMeanwhileText(send, { toText, whenText, hidden = false }) {
   const amount = hidden ? "••••" : formatDuskExact(String(first.lux ?? "0"));
   const when = Number(first.at) > 0 ? ` ${whenText(Number(first.at))}` : "";
   const memo = sayable(first.memo);
-  const more = sent.length > 1 ? `, and ${sent.length - 1} more,` : "";
-  const what = `Your account sent ${amount} DUSK to ${toText(String(first.to ?? ""))}${when}${memo ? ` with the memo “${memo}”` : ""}${more} while this waited.`;
-  return sameSentMeanwhile(send) ? `${what} That looks like this same payment.` : what;
+  const more = sent.length > 1 ? `, and ${sent.length - 1} more` : "";
+  const what = `While it waited, your account sent ${amount} DUSK to ${toText(String(first.to ?? ""))}${when}${memo ? ` (“${memo}”)` : ""}${more}.`;
+  return sameSentMeanwhile(send) ? `${what} Looks like the same payment.` : what;
 }

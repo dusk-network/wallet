@@ -381,7 +381,7 @@ describe("settings", () => {
       "Testnet",
       "Devnet · Experimental",
       "Local · 127.0.0.1:8080",
-      "Custom · Any node URL",
+      "Custom node",
     ]);
     expect(network.querySelectorAll(".muted").filter(isShown)).toEqual([]);
   });
@@ -393,15 +393,16 @@ describe("settings", () => {
       "alice.dusk · 26FCH7…Tck927",
       "Profile 2 · 21n5nc…fMMLNz",
     ]);
-    expect(visibleText(profile.querySelector(".settings-subtitle"))).toBe("Names on this device");
+    // "Only on this device" said once, over the names, not in each field too.
+    expect(visibleText(profile.querySelector(".settings-subtitle"))).toBe("Names (only on this device)");
     expect(profile.querySelectorAll(".settings-profile-line").map(visibleText)).toEqual([
       "alice.dusk · 26FCH7…Tck927",
       "Profile 2 · 21n5nc…fMMLNz",
     ]);
     const inputs = profile.querySelectorAll("input");
     expect(inputs.map((i) => [i.getAttribute("aria-label"), i.getAttribute("placeholder")])).toEqual([
-      ["Profile 1 name", "Name, only on this device"],
-      ["Profile 2 name", "Name, only on this device"],
+      ["Profile 1 name", "Name"],
+      ["Profile 2 name", "Name"],
     ]);
   });
 
@@ -420,6 +421,7 @@ describe("settings", () => {
       { at: AT - 3, what: "transfer", answer: "failed" },
       { at: AT - 4, what: "transfer", answer: "unconfirmed" },
       { at: AT - 5, what: "contract_call", method: "depositETHToWithValue", asked: "Bridge to DuskEVM", answer: "approved" },
+      { at: AT - 6, what: "withdraw_reward", answer: "approved" },
     ];
     const siteRecords = { [ACCOUNTS[0]]: { [SITE]: { lastUsedAt: AT + 60_000, asked } } };
     const details = (el) => el.querySelector("details.settings-site__details");
@@ -447,6 +449,8 @@ describe("settings", () => {
         ["Pay", "Approved, not sent", dateText(AT - 3)],
         ["Pay", "Approved, not confirmed", dateText(AT - 4)],
         ["Bridge to DuskEVM", "Approved", dateText(AT - 5)],
+        // As Staking and Activity name it.
+        ["Claim rewards", "Approved", dateText(AT - 6)],
       ]);
       // Nothing a site chose reads as something else.
       expect(row.textContent).not.toContain("\u202E");
@@ -537,6 +541,8 @@ describe("settings", () => {
     const sites = view.section("Connected sites");
     expect(sites.querySelectorAll(".settings-site__host").map(visibleText)).toEqual(["app.example", "shop.example"]);
     expect(sites.querySelector('select[aria-label="Profile for app.example"]').value).toBe("1");
+    // Each profile by its name alone in a site's choice: Active profile shows the accounts.
+    expect(sites.querySelector('select[aria-label="Profile for app.example"]').querySelectorAll("option").map((o) => o.textContent)).toEqual(["alice.dusk", "Profile 2"]);
     const disconnect = sites.querySelectorAll("button").find((b) => accessibleName(b) === "Disconnect app.example");
     disconnect.click();
     await settle();
@@ -554,10 +560,9 @@ describe("settings", () => {
     const local = (await settings({ permissions: [{ origin: "http://127.0.0.1:5354", accountIndex: 0 }] })).section("Connected sites");
     expect(local.querySelectorAll(".settings-site__host").map(visibleText)).toEqual(["http://127.0.0.1:5354"]);
     expect(view.shownButtons(view.section("Reset"))).toEqual(["Reset wallet"]);
-    // One line on what it removes, and that the funds stay on Dusk.
-    expect(visibleText(view.section("Reset").querySelector(".settings-note"))).toBe(
-      "Removes every wallet, with its contacts, names, activity and connected sites, from this browser, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again."
-    );
+    // What it removes is said once, on Reset's own page, where it's done: not here too.
+    expect(view.section("Reset").querySelector(".settings-note")).toBeNull();
+    expect(visibleText(view.section("Reset"))).toBe("[Reset]Reset wallet");
   });
 
   // Chen's and Lena's: two taps, and every wallet was gone, with no password or fingerprint.
@@ -576,8 +581,9 @@ describe("settings", () => {
     await settle();
     const body = dom.document.body;
     const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
+    // Irreversible: every wallet goes, and only each one's recovery phrase gets the funds back.
     expect(visibleText(body.querySelector(".auth-lead"))).toBe(
-      "This removes every wallet here, with its contacts, names, activity and connected sites. Your funds stay on Dusk. You need each recovery phrase to use them again."
+      "Removes every wallet here, with its contacts, names, activity and sites. Funds stay on Dusk; you need each wallet's recovery phrase to get them back."
     );
     // Nothing typed: said, and nothing asked of the wallet.
     press("Reset wallet");
@@ -586,12 +592,12 @@ describe("settings", () => {
     expect(resets()).toEqual([]);
     // A wrong one: the wallet says so, under the field.
     view.actions.send.mockImplementation(async (m) => (m.type === "DUSK_UI_RESET_WALLET" && m.password !== "the password" ? { error: { message: "Incorrect password" } } : {}));
-    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "not it");
+    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password"), "not it");
     press("Reset wallet");
     await settle();
     expect(visibleText(body)).toContain("Incorrect password");
     expect(view.state.route).toBe("wallet_reset");
-    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "the password");
+    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password"), "the password");
     press("Reset wallet");
     await settle();
     expect(resets().at(-1)[0]).toEqual({ type: "DUSK_UI_RESET_WALLET", password: "the password" });
@@ -632,9 +638,9 @@ describe("settings", () => {
     expect(asked.filter((action) => action !== "status" && action !== "keyboard")).toEqual(["unlock", "disable"]);
   });
 
-  // Chen's, Lena's and Sofía's, in the app: on Unlock, Check your recovery words and Reset wallet the password box
+  // Chen's, Lena's and Sofía's, in the app: on Unlock, Check your recovery phrase and Reset wallet the password box
   // wasn't focused, and the keyboard stayed down till it was tapped.
-  it("focuses the password box with the keyboard up as Check your recovery words and Reset wallet open, in the app", async () => {
+  it("focuses the password box with the keyboard up as Check your recovery phrase and Reset wallet open, in the app", async () => {
     const asked = [];
     dom.window.__TAURI_INTERNALS__ = {
       invoke: vi.fn(async (cmd, args) => {
@@ -648,7 +654,7 @@ describe("settings", () => {
     for (const screen of [checkWordsView, resetWalletView]) {
       asked.length = 0;
       dom.document.body.replaceChildren(...screen(view.ov, { state: view.state, actions: view.actions }));
-      const password = dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with");
+      const password = dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Password");
       await vi.waitFor(() => expect(dom.document.activeElement).toBe(password));
       await vi.waitFor(() => expect(asked).toContain("keyboard"));
     }
@@ -677,7 +683,7 @@ describe("settings", () => {
     await settle();
     const { resetWalletView } = await import("./popup/views/wallets.js");
     dom.document.body.replaceChildren(...resetWalletView(view.ov, { state: view.state, actions: view.actions }));
-    typeInto(dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "the password");
+    typeInto(dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === "Password"), "the password");
     buttonOf("Reset wallet").click();
     await settle();
     expect(asked.map(([type, context]) => [type, context?.reason])).toEqual([
@@ -704,12 +710,12 @@ describe("settings", () => {
     expect(select().value).toBe("5");
   });
 
-  it("keeps custom gas under Advanced, off until it's turned on, as the web wallet does", async () => {
+  it("keeps a custom fee under Advanced, off until it's turned on, as the web wallet does", async () => {
     const view = await settings();
     const advanced = dom.document.body.querySelector("details.settings-advanced");
     expect(visibleText(advanced.querySelector("summary"))).toBe("Advanced");
     const toggle = advanced.querySelector("#custom-gas");
-    expect(toggle.checked).toBe(false);
+    expect([toggle.checked, visibleText(toggle.closest("label"))]).toEqual([false, "Custom fee"]);
     expect(visibleText(advanced.querySelector(".settings-note"))).toBe(
       "The wallet uses the network's gas price, and a gas limit that suits each transaction."
     );
@@ -717,12 +723,10 @@ describe("settings", () => {
     toggle.dispatchEvent({ type: "change", bubbles: true, target: toggle, preventDefault() {}, stopPropagation() {} });
     await settle();
     expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_SET_CUSTOM_GAS", customGas: { limit: "2500000", price: "1" } });
-    expect(visibleText(advanced.querySelector(".settings-note"))).toBe(
-      "Each transaction costs at most 0.0025 DUSK. One that needs more gas than this limit keeps its own."
-    );
+    expect(visibleText(advanced.querySelector(".settings-note"))).toBe("Fee up to 0.0025 DUSK per transaction. One that needs a higher gas limit keeps its own.");
   });
 
-  it("keeps custom gas being typed through a redraw, until it's saved", async () => {
+  it("keeps a custom fee being typed through a redraw, until it's saved", async () => {
     const view = await settings({ customGas: { limit: "3000000", price: "2" } });
     const field = (name) => dom.document.body.querySelectorAll("input").find((i) => accessibleName(i) === name);
     typeInto(field("Gas limit"), "4500000");
@@ -747,9 +751,9 @@ describe("settings", () => {
     const advanced = dom.document.body.querySelector("details.settings-advanced");
     const remove = advanced.querySelectorAll("button").find((b) => b.textContent === "Delete all contacts");
     expect(remove).toBeTruthy();
-    // Not near the Contacts row.
-    const contacts = view.section("Contacts");
-    expect(contacts.querySelectorAll("button").map(visibleText)).toEqual(["Contacts"]);
+    // Not near the Contacts row, a section of its own with no title over it: the row says it.
+    const contacts = dom.document.body.querySelectorAll(".settings-section").find((s) => s.querySelectorAll(".settings-row").some((row) => visibleText(row) === "Contacts"));
+    expect([contacts.querySelector(".bracket-title__text"), contacts.querySelectorAll("button").map(visibleText)]).toEqual([null, ["Contacts"]]);
 
     vi.stubGlobal("confirm", vi.fn(() => false));
     remove.click();
@@ -759,10 +763,10 @@ describe("settings", () => {
     vi.stubGlobal("confirm", vi.fn(() => true));
     remove.click();
     await settle();
-    expect(confirm).toHaveBeenCalledWith("Delete all saved contacts from this wallet? This can't be undone.");
+    expect(confirm).toHaveBeenCalledWith("Delete all contacts from this wallet? This can't be undone.");
     expect(clearAddressBook).toHaveBeenCalledTimes(1);
     expect(view.state.addressBook).toMatchObject({ loaded: false, items: null });
-    expect(view.actions.showToast).toHaveBeenCalledWith("Deleted all contacts");
+    expect(view.actions.showToast).toHaveBeenCalledWith("All contacts deleted.");
   });
 });
 
@@ -922,12 +926,14 @@ describe("about", () => {
     dom.window.__TAURI_INTERNALS__ = { invoke: vi.fn() };
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     const app = await settings({}, { app: true });
-    expect(visibleText(app.section("Reset").querySelector(".settings-note"))).toBe(
-      "Removes every wallet, with its contacts, names and activity, from this phone, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again."
-    );
+    // Said on Reset's own page, not in Settings too.
+    expect(app.section("Reset").querySelector(".settings-note")).toBeNull();
     const { resetWalletView } = await import("./popup/views/wallets.js");
     dom.document.body.replaceChildren(...resetWalletView(app.ov, { state: app.state, actions: app.actions }));
-    expect(visibleText(dom.document.body.querySelector(".auth-lead"))).not.toMatch(/browser|connected sites/);
+    expect(visibleText(dom.document.body.querySelector(".auth-lead"))).toBe(
+      "Removes every wallet here, with its contacts, names and activity. Funds stay on Dusk; you need each wallet's recovery phrase to get them back."
+    );
+    expect(visibleText(dom.document.body.querySelector(".auth-lead"))).not.toMatch(/browser|sites/);
   });
 
   it("keeps them on a custom node, and in the desktop app, which has no version to show", async () => {
@@ -1023,27 +1029,26 @@ describe("wallets", () => {
     expect(view.actions.send).toHaveBeenCalledWith({ type: "DUSK_UI_RENAME_WALLET", walletKey: "k2", name: "Rainy day fund" });
   });
 
-  it("says Lock wallet for one wallet and Lock for more, and that a new password is every wallet's", async () => {
+  it("says Lock wallet for one wallet and Lock for more, and under Auto-lock that it's every wallet's", async () => {
     const one = await drawn({ wallets: fresh().slice(0, 1) });
     expect(one.shownButtons(one.section("Wallets"))).toEqual(["Rename", expect.stringContaining("Add wallet")]);
     const security = one.section("Security");
-    expect(security.querySelectorAll("p.settings-note").map(visibleText)).toEqual([
-      "Locks the wallet after this long without use.",
-      "Changes the password for every wallet here.",
-    ]);
+    const notes = (section) => section.querySelectorAll("p.settings-note").filter(isShown).map(visibleText);
+    // One wallet: nothing under the choice, which says it, nor under Change password, whose page says the rest.
+    expect(notes(security)).toEqual([]);
     expect(dom.document.body.querySelectorAll("button").map((b) => b.textContent)).toContain("Lock wallet");
     security.querySelectorAll("button").find((b) => b.textContent === "Change password").click();
     await settle();
     expect(one.state.route).toBe("change_password");
 
     const two = await drawn({ wallets: fresh() });
-    expect(two.section("Security").querySelector("p.settings-note").textContent).toBe("Locks every wallet after this long without use.");
+    expect(notes(two.section("Security"))).toEqual(["For every wallet here."]);
     const buttons = dom.document.body.querySelectorAll("button").map((b) => b.textContent);
     expect([buttons.includes("Lock"), buttons.includes("Lock wallet")]).toEqual([true, false]);
 
     // One wallet open, and another in the vault that another password opens.
     const sealed = await drawn({ wallets: fresh().slice(0, 1), walletsHere: 2 });
-    expect(sealed.section("Security").querySelector("p.settings-note").textContent).toBe("Locks every wallet after this long without use.");
+    expect(notes(sealed.section("Security"))).toEqual(["For every wallet here."]);
     expect(dom.document.body.querySelectorAll("button").map((b) => b.textContent)).toContain("Lock");
   });
 
@@ -1243,9 +1248,11 @@ describe("security in the app on a phone", () => {
     const { recoveryPhraseView } = await import("./popup/views/wallets.js");
     dom.document.body.replaceChildren(...recoveryPhraseView(view.ov, { state: view.state, actions: view.actions }));
     const body = dom.document.body;
-    const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with");
+    const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password");
     const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
     expect(body.querySelector(".srp-grid")).toBeNull();
+    // The password, with nothing said over it, as on Check your recovery phrase.
+    expect(body.querySelector(".auth-lead")).toBeNull();
     typeInto(password(), "not it");
     press("Show recovery phrase");
     await settle();
@@ -1255,6 +1262,11 @@ describe("security in the app on a phone", () => {
     press("Show recovery phrase");
     await settle();
     expect(body.querySelectorAll(".srp-word-text").map((w) => w.textContent)).toEqual(MNEMONIC.split(" "));
+    // Said over the words as setup says it: what they are, and who can take the funds.
+    expect([visibleText(body.querySelector(".auth-lead")), visibleText(body.querySelector(".phrase-warning"))]).toEqual([
+      "This wallet's 12 words, in order.",
+      "Anyone with it can take your funds. Never share it.",
+    ]);
     expect(view.actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RECOVERY_PHRASE", password: "the password" });
     // Marek's: words in clear stayed in Android's app switcher and Firefox's tab list. Hidden the moment the page is
     // hidden, left or loses the focus, and with Hide; shown again only with Reveal.
@@ -1292,7 +1304,7 @@ describe("security in the app on a phone", () => {
     const { recoveryPhraseView } = await import("./popup/views/wallets.js");
     dom.document.body.replaceChildren(...recoveryPhraseView(view.ov, { state: view.state, actions: view.actions }));
     const body = dom.document.body;
-    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with"), "the password");
+    typeInto(body.querySelectorAll("input").find((i) => accessibleName(i) === "Password"), "the password");
     body.querySelectorAll("button").find((b) => b.textContent === "Show recovery phrase").click();
     await settle();
     const blurred = () => body.querySelector(".srp-grid").classList.contains("srp-grid--blur");
@@ -1311,7 +1323,7 @@ describe("security in the app on a phone", () => {
   it("checks three of the recovery words behind the password, in the extension too, and says no more than that they don't match", async () => {
     const view = await settings();
     const security = view.section("Security");
-    security.querySelectorAll("button").find((b) => b.textContent.includes("Check your recovery words")).click();
+    security.querySelectorAll("button").find((b) => b.textContent.includes("Check your recovery phrase")).click();
     await settle();
     expect(view.state.route).toBe("check_words");
 
@@ -1329,17 +1341,24 @@ describe("security in the app on a phone", () => {
     const draw = () => dom.document.body.replaceChildren(...checkWordsView(view.ov, { state: view.state, actions: view.actions }));
     draw();
     const body = dom.document.body;
-    const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password you unlock with");
+    const password = () => body.querySelectorAll("input").find((i) => accessibleName(i) === "Password");
     const press = (name) => body.querySelectorAll("button").find((b) => b.textContent === name).click();
     const boxes = () => body.querySelectorAll("input").filter((i) => /^Word \d+$/.test(accessibleName(i)));
+    // The title and the password: nothing over the field, nor under it.
+    expect(visibleText(body)).toBe("← BackCheck your recovery phrasePasswordStart check");
     typeInto(password(), "not it");
-    press("Next");
+    press("Start check");
     await settle();
     expect(visibleText(body)).toContain("Incorrect password");
     expect(boxes()).toEqual([]);
     typeInto(password(), "the password");
-    press("Next");
+    press("Start check");
     await settle();
+    // The boxes, named as the page is, with no line or label over them.
+    expect([visibleText(body.querySelector(".onboard-form")), accessibleName(body.querySelector(".mnemonic-input"))]).toEqual([
+      boxes().map((i) => accessibleName(i).slice(5)).join("") + "Check",
+      "Check your recovery phrase",
+    ]);
     // Three of its twelve words, by their places, as Import's boxes are.
     expect(boxes()).toHaveLength(3);
     const places = boxes().map((i) => Number(accessibleName(i).slice(5)));
@@ -1360,17 +1379,17 @@ describe("security in the app on a phone", () => {
     expect(check.disabled).toBe(false);
     press("Check");
     await settle();
-    expect(visibleText(body)).toContain("Your recovery words match.");
+    expect(visibleText(body)).toContain("Your recovery phrase matches.");
     expect(body.querySelector(".srp-grid")).toBeNull();
     expect(asked).toEqual(["count", "count", places]);
 
     // Again: one word wrong, then three made up. Said, and nothing else: no word of the phrase.
     draw();
     typeInto(password(), "the password");
-    press("Next");
+    press("Start check");
     await settle();
     const again = boxes().map((i) => Number(accessibleName(i).slice(5)));
-    const MISMATCH = "← BackCheck your recovery wordsThat doesn't match your recovery words. Check the words you wrote down.Try againShow my recovery words";
+    const MISMATCH = "← BackCheck your recovery phraseThat doesn't match your recovery words. Check the words you wrote down.Try againShow my recovery words";
     for (const typed of [again.map((p, i) => (i === 0 ? "zoo" : MNEMONIC.split(" ")[p - 1])), ["kiwi", "lemon", "cabin"]]) {
       boxes().forEach((input, i) => typeInto(input, typed[i]));
       press("Check");

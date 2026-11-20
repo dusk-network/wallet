@@ -98,7 +98,7 @@ export function askSendPassword({ limit, always = false, check }) {
     const modal = h("div", { class: "send-password", role: "dialog", "aria-modal": "true", "aria-labelledby": "send-password-title" }, [
       title,
       h("p", { class: "settings-note", text: sendPasswordWhy({ limit, always }) }),
-      fieldLabel(input, "Password you unlock with"),
+      fieldLabel(input, "Password"),
       input,
       error.el,
       fingerBtn,

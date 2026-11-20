@@ -14,7 +14,8 @@ const ASKED = Object.freeze({
   unshield: "Unshield",
   stake: "Stake",
   unstake: "Unstake",
-  withdraw_reward: "Withdraw rewards",
+  // As Staking and Activity name it.
+  withdraw_reward: "Claim rewards",
   contract_call: "Contract call",
   sign_message: "Sign a message",
   sign_auth: "Sign in",

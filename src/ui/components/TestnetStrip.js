@@ -2,8 +2,10 @@ import { isLocalNode, listedNetwork, networkOf, nodeHost, outsideEndpoints, outs
 import { h } from "../lib/dom.js";
 
 // What the top of a page says about the node it's on. A test network says so,
-// in violet, as the bridge and the web wallet do: "Testnet · Test DUSK has no
-// value". A node that isn't a network's own says which it is, in neutral words:
+// in violet, as the bridge and the web wallet do: "Test DUSK, no value", its
+// name being in the pill beside it; with another's prover or archiver the
+// pill says Custom, so the strip names it: "Testnet · Test DUSK, no value".
+// A node that isn't a network's own says which it is, in neutral words:
 // "Custom node · my-node.example", and where what's signed there counts when
 // that's another network. A prover or an archiver that isn't the network's own
 // says whose it is: "Proofs and history from x.example". A node contradicting
@@ -29,7 +31,7 @@ function stripOf(name, { nodeUrl, chainId, refusal, proverUrl, archiverUrl }) {
   const outside = outsideText(outsideEndpoints({ nodeUrl, proverUrl, archiverUrl }));
   const join = (...parts) => parts.filter(Boolean).join(" · ");
   // Whose prover or archiver it uses wraps rather than being cut: the host is what it says.
-  if (isTestNetwork(nodeUrl, chainId)) return { text: join(`${label} · Test DUSK has no value`, outside), role: "note", className: outside ? "testnet-strip testnet-strip--wrap" : "testnet-strip" };
+  if (isTestNetwork(nodeUrl, chainId)) return { text: join(outside ? label : "", "Test DUSK, no value", outside), role: "note", className: outside ? "testnet-strip testnet-strip--wrap" : "testnet-strip" };
   if (listedNetwork(nodeUrl) || !nodeHost(nodeUrl)) return outside ? { text: join(label, outside), role: "note", className: "testnet-strip node-strip" } : null;
   const counts = signsOnNetwork(nodeUrl, chainId);
   return {

@@ -35,7 +35,8 @@ async function account(page) {
 async function lock(page) {
   await page.getByTitle("Settings").click();
   await page.getByRole("button", { name: "Lock wallet" }).click();
-  await expect(page.getByText("Unlock your wallet")).toBeVisible();
+  // The unlock form: its password field, with no heading over it.
+  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
 }
 
 // The words the page showed, pasted into its first box.
@@ -52,13 +53,13 @@ test("makes a wallet from new words, unlocks it, and restores the same one from 
   await page.getByLabel("Password", { exact: true }).fill(PASSWORD);
   await page.getByLabel("Confirm password", { exact: true }).fill(PASSWORD);
   await page.getByRole("checkbox").check();
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Set password" }).click();
   await expect(page.locator(".srp-word-text")).toHaveCount(12);
   await page.evaluate(() => {
     window.shownWords = [...document.querySelectorAll(".srp-word-text")].map((n) => n.textContent);
   });
   await page.getByRole("button", { name: "I wrote it down" }).click();
-  // Check your recovery words: the three asked, from what was shown (each box a combobox, for its suggestions).
+  // Check your recovery phrase: the three asked, from what was shown (each box a combobox, for its suggestions).
   for (const box of await page.getByRole("combobox", { name: /^Word \d+$/ }).all()) {
     const place = Number((await box.getAttribute("aria-label")).slice(5));
     await box.fill(await page.evaluate((i) => window.shownWords[i], place - 1));
@@ -75,7 +76,7 @@ test("makes a wallet from new words, unlocks it, and restores the same one from 
 
   // A forgotten password: the words and a new one make the same wallet.
   await lock(page);
-  await page.getByRole("button", { name: "Forgot your password?" }).click();
+  await page.getByRole("button", { name: "Forgot password?" }).click();
   await pasteWords(page);
   await page.getByLabel("New password", { exact: true }).fill("another password");
   await page.getByLabel("Confirm password", { exact: true }).fill("another password");

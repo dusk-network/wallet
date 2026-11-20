@@ -81,13 +81,13 @@ test("a payment shows its amount, recipient, fee and both buttons without scroll
   await open(page, pendingFor("send_tx", pay));
   await expect(page.locator(".ap-amount")).toHaveText("1 DUSK");
   await expect(page.locator(".ap-recipient__lead")).toHaveText("wallet-both.dusk");
-  await expect(page.locator(".ap-recipient__tag")).toHaveText("WB shop · saved contact");
+  await expect(page.locator(".ap-recipient__tag")).toHaveText("WB shop · contact");
   for (const locator of [
     page.locator(".ap-amount"),
     page.locator(".ap-recipient__lead"),
-    page.getByText("Network fee", { exact: true }),
+    page.getByText("Fee", { exact: true }),
     page.getByRole("button", { name: "Reject", exact: true }),
-    page.getByRole("button", { name: "Approve", exact: true }),
+    page.getByRole("button", { name: "Pay 1 DUSK", exact: true }),
   ]) {
     expect(await inView(page, locator)).toBe(true);
   }
@@ -96,7 +96,7 @@ test("a payment shows its amount, recipient, fee and both buttons without scroll
 
   // The buttons stay put while the page scrolls under them.
   await page.locator(".panel-content").evaluate((el) => el.scrollTo(0, el.scrollHeight));
-  expect(await inView(page, page.getByRole("button", { name: "Approve", exact: true }))).toBe(true);
+  expect(await inView(page, page.getByRole("button", { name: "Pay 1 DUSK", exact: true }))).toBe(true);
   await page.getByText("Details", { exact: true }).click();
   await expect(page.getByText("dusk:2", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Reject", exact: true }).click();
@@ -107,8 +107,8 @@ test("what keeps Approve off is in view with it, under a long request", async ({
   const highFee = { ...pay, gas: { limit: "10000000", price: "50" }, feeFromSite: { limit: true, price: true } };
   await open(page, pendingFor("send_tx", highFee, { payBalance: "1000" }));
   const reason = page.locator(".pay-guard");
-  await expect(reason).toHaveText("That's 1.5 DUSK more than your public balance, with the network fee.");
-  await expect(page.getByRole("button", { name: "Approve", exact: true })).toBeDisabled();
+  await expect(reason).toHaveText("Your public balance is 1.5 DUSK short, fee included.");
+  await expect(page.getByRole("button", { name: "Pay 1 DUSK", exact: true })).toBeDisabled();
   expect(await inView(page, reason)).toBe(true);
   expect(await inView(page, page.getByRole("button", { name: "Reject", exact: true }))).toBe(true);
 });
@@ -141,9 +141,9 @@ test("a Review keeps Confirm, and what stops it, in view at the popup's size as 
     document.getElementById("app").replaceChildren(...sendConfirmView(ov, { state, actions }));
   }, { from: ALICE, to: SHOP });
 
-  const confirm = page.getByRole("button", { name: "Confirm", exact: true });
+  const confirm = page.getByRole("button", { name: "Send 1 DUSK", exact: true });
   const reason = page.locator(".pay-guard");
-  await expect(reason).toHaveText("That's 0.0025 DUSK more than your public balance, with the network fee.");
+  await expect(reason).toHaveText("Your public balance is 0.0025 DUSK short, fee included.");
   await expect(confirm).toBeDisabled();
   const scroller = page.locator(".panel-content");
   // It does go on under the fold.
@@ -212,9 +212,10 @@ test("a DRC20 standard transfer shows its exact amount and its recipient without
   );
   await expect(page.locator(".ap-amount")).toHaveText("9,007,199.254740993 TKN");
   await expect(page.locator(".ap-recipient__lead")).toHaveText("wallet-both.dusk");
-  await expect(page.locator(".ap-recipient__tag")).toHaveText("WB shop · saved contact");
-  await expect(page.getByText("9007199254740993", { exact: true })).toBeVisible();
-  for (const locator of [page.locator(".ap-amount"), page.locator(".ap-recipient__lead"), page.getByRole("button", { name: "Approve transfer", exact: true })]) {
+  await expect(page.locator(".ap-recipient__tag")).toHaveText("WB shop · contact");
+  // The raw units sit under Details.
+  await expect(page.getByText("9007199254740993", { exact: true })).toBeHidden();
+  for (const locator of [page.locator(".ap-amount"), page.locator(".ap-recipient__lead"), page.getByRole("button", { name: "Send 9,007,199.254740993 TKN", exact: true })]) {
     expect(await inView(page, locator)).toBe(true);
   }
 });
@@ -222,7 +223,7 @@ test("a DRC20 standard transfer shows its exact amount and its recipient without
 test("a gas limit under the transaction's minimum, or a price of 0, keeps Approve off, saying why", async ({ page }) => {
   await open(page, pendingFor("send_tx", pay), { held: true });
   await page.getByText("Custom fee", { exact: true }).click();
-  const approve = page.getByRole("button", { name: "Approve", exact: true });
+  const approve = page.getByRole("button", { name: "Pay 1 DUSK", exact: true });
   await page.getByLabel("Gas limit", { exact: true }).fill("1500000");
   await expect(page.getByText("The gas limit can't be under 2,000,000 for this transaction.", { exact: true })).toBeVisible();
   await expect(approve).toBeDisabled();
@@ -234,7 +235,7 @@ test("a gas limit under the transaction's minimum, or a price of 0, keeps Approv
   await page.getByLabel("Gas price (LUX)", { exact: true }).fill("1");
   await expect(page.getByText("At most 0.002 DUSK", { exact: true })).toBeVisible();
   await page.clock.runFor(500);
-  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.getByRole("button", { name: "Pay 1 DUSK", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.decisions.map((d) => [d.decision, d.approvedParams?.gas?.limit]))).toEqual([
     ["approve", "2000000"],
   ]);
@@ -242,7 +243,7 @@ test("a gas limit under the transaction's minimum, or a price of 0, keeps Approv
 
 test("Approve ignores a click as the window shows, where a double-click on the site lands, and takes one half a second on", async ({ page }) => {
   await open(page, pendingFor("send_tx", pay), { held: true });
-  const approve = page.getByRole("button", { name: "Approve", exact: true });
+  const approve = page.getByRole("button", { name: "Pay 1 DUSK", exact: true });
   const decisions = () => page.evaluate(() => window.decisions.map((d) => d.decision));
   // It looks as it always does meanwhile.
   await expect(approve).toBeEnabled();
@@ -260,7 +261,7 @@ test("a locked wallet shows what the site asks, with Reject beside Unlock", asyn
   await open(page, pendingFor("send_tx", pay, { isUnlocked: false, accounts: [], duskNames: {} }));
   await expect(page.getByRole("heading", { name: "Pay" })).toBeVisible();
   await expect(page.locator(".ap-amount")).toHaveText("1 DUSK");
-  await expect(page.getByLabel("Unlock to answer")).toBeVisible();
+  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
   const reject = page.getByRole("button", { name: "Reject", exact: true });
   const unlock = page.getByRole("button", { name: "Unlock", exact: true });
   const [r, u] = [await reject.boundingBox(), await unlock.boundingBox()];

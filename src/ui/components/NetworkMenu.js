@@ -109,9 +109,9 @@ export function createNetworkMenuController({
       );
     });
 
+    // No title over it: it hangs from the network's pill. Named for screen readers.
     const menu = h("div", { class: "net-menu" }, [
-      h("div", { class: "net-menu-title", id: "net-menu-title", text: "Select network" }),
-      h("div", { class: "net-menu-items", role: "menu", "aria-labelledby": "net-menu-title" }, items),
+      h("div", { class: "net-menu-items", role: "menu", "aria-label": "Network" }, items),
     ]);
 
     document.body.appendChild(menu);

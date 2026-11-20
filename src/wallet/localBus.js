@@ -947,7 +947,7 @@ export async function localSend(message) {
       return { ok: true, result: reconciled };
     }
 
-    // Cancel on a payment from Send, waiting for the network or being sent:
+    // Don't send on a payment from Send, waiting for the network or being sent:
     // whether it was called off before it went out.
     if (message?.type === "DUSK_UI_CANCEL_SEND") {
       return { ok: true, result: { cancelled: await cancelWaitingSend(String(message.sendId ?? ""), waitingHost) } };

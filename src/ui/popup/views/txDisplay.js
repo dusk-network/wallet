@@ -4,31 +4,31 @@ import { formatDuskExact } from "../../../shared/amount.js";
 import { balance } from "../../components/Balance.js";
 
 /**
- * A status in one word, the same in Activity and a transaction's details:
- * Pending until the network runs it, then Completed or Failed. Dropped (the
- * node took it out of its queue) and Not confirmed (the wallet stopped
- * waiting) are uncertain, so they tone as pending. Unknown is final on chain,
- * its outcome not looked up yet: nothing waits on it, so it tones neutral.
- * Not sent yet: handed over, the node never had it, and it can go as it was
- * signed (unsent); Not sent: another of its account's transactions took its
- * place, and it never will (not_sent). Never Pending for either.
+ * A status in one word, the same in Activity and a transaction's details, and
+ * in the words the Sent screen uses: Sending until the network runs it, then
+ * Completed or Failed. One the node dropped from its queue before it ran
+ * (removed) is Failed, as Sent says it; it and Not confirmed (the wallet
+ * stopped waiting) still tone as pending. Unknown is final on chain, its
+ * outcome not looked up yet: nothing waits on it, so it tones neutral. Held:
+ * handed over, the node never had it, and it goes as it was signed only with
+ * Send it now (unsent); Not sent: another of its account's transactions took
+ * its place, and it never will (not_sent). Never Sending for either.
  * @param {string} status
  * @param {{ final?: boolean }} [opts] - `final`: the chain has it, final
- * @returns {"Pending"|"Completed"|"Failed"|"Dropped"|"Not confirmed"|"Unknown"|"Not sent yet"|"Not sent"}
+ * @returns {"Sending"|"Completed"|"Failed"|"Not confirmed"|"Unknown"|"Held"|"Not sent"}
  */
 export function txStatusWord(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "Completed";
-  if (s === "failed") return "Failed";
-  if (s === "removed") return "Dropped";
-  if (s === "unsent") return "Not sent yet";
+  if (s === "failed" || s === "removed") return "Failed";
+  if (s === "unsent") return "Held";
   if (s === "not_sent") return "Not sent";
   if (s === "unknown") return final ? "Unknown" : "Not confirmed";
-  return "Pending";
+  return "Sending";
 }
 
 // Chain errors with a plain meaning, in the words Activity uses. The raw
-// error stays under a transaction's Technical details.
+// error stays under a transaction's Details.
 const KNOWN_ERRORS = [
   [/phoenix is not enabled/i, "Shielded transactions are paused on the network."],
   [/\bout\s*of\s*gas\b|\bOutOfGas\b/i, "It ran out of gas. A higher gas limit lets it finish."],

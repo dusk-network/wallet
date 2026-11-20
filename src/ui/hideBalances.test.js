@@ -179,20 +179,20 @@ describe("hidden balances", () => {
     typeInto(to, OTHER_ACCOUNT);
     await settle();
     expect(seen(body.querySelector(".amount-avail__text"))).toEqual([
-      "Available after fees •••• DUSK",
-      "Available after fees hidden DUSK",
+      "Available •••• DUSK",
+      "Available hidden DUSK",
     ]);
     // The fee isn't a balance.
-    expect(body.querySelector(".amount-fee-note").textContent).toBe("Network fee up to 0.0025 DUSK");
+    expect(body.querySelector(".amount-fee-note").textContent).toBe("Fee up to 0.0025 DUSK");
     max().click();
     expect(amount.value).toBe("1482.9358");
 
     // Shielded: what's spendable now, the rest held for a pending transaction.
     typeInto(to, ADDRESS);
     await settle();
-    expect(visibleText(body.querySelector(".amount-avail__text"))).toBe("Available after fees •••• DUSK");
+    expect(visibleText(body.querySelector(".amount-avail__text"))).toBe("Available •••• DUSK");
     expect(body.querySelector(".amount-fee-note").textContent).toBe(
-      "Network fee up to 0.05 DUSK · Part of your shielded DUSK waits on a pending transaction"
+      "Fee up to 0.05 DUSK · Part of your shielded DUSK waits on a pending transaction"
     );
     max().click();
     expect(amount.value).toBe("19.95");
@@ -206,8 +206,8 @@ describe("hidden balances", () => {
     const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
     await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
     const lines = () => [".amount-avail__text", ".amount-fee-note"].map((sel) => visibleText(body.querySelector(sel)));
-    expect(lines()).toEqual(["Available after fees •••• DUSK", "Network fee up to 0.05 DUSK"]);
-    expect(screenReaderText(body.querySelector(".amount-avail__text"))).toBe("Available after fees hidden DUSK");
+    expect(lines()).toEqual(["Available •••• DUSK", "Fee up to 0.05 DUSK"]);
+    expect(screenReaderText(body.querySelector(".amount-avail__text"))).toBe("Available hidden DUSK");
     body.querySelector(".amount-avail button").click();
     expect(body.querySelector("input.amount-field__input").value).toBe("1482.8883");
 
@@ -216,12 +216,12 @@ describe("hidden balances", () => {
     button("Review").click();
     await settle();
     expect(body.querySelector(".amount-field__error").textContent).toBe(
-      "That's •••• DUSK more than your public balance, with the network fee."
+      "Your public balance is •••• DUSK short, fee included."
     );
 
     state.draft = { kind: TX_KIND.UNSHIELD };
     await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
-    expect(lines()).toEqual(["Available after fees •••• DUSK", "Network fee up to 0.05 DUSK"]);
+    expect(lines()).toEqual(["Available •••• DUSK", "Fee up to 0.05 DUSK"]);
   });
 
   it("hide token balances on the dashboard and on the token's page", async () => {
@@ -273,8 +273,8 @@ describe("hidden balances", () => {
     const state = { route: "stake", staking: staking(owner(), "native") };
     await draw(state);
     expect(seen(body.querySelector(".amount-avail span"))).toEqual([
-      "Available •••• DUSK from your public balance",
-      "Available hidden DUSK from your public balance",
+      "Available •••• DUSK",
+      "Available hidden DUSK",
     ]);
     button("Max").click();
     expect(state.staking.stakeAmountDusk).toBe("1482.8383");
@@ -282,7 +282,7 @@ describe("hidden balances", () => {
     // Too much: the check holds, under the field, and doesn't give the balance away.
     typeInto(body.querySelector("input.amount-field__input"), "5000");
     expect(body.querySelector(".amount-field__error").textContent).toBe(
-      "That's •••• DUSK more than your public balance, with the network fee."
+      "Your public balance is •••• DUSK short, fee included."
     );
     expect(act.showToast).not.toHaveBeenCalled();
 
@@ -308,7 +308,7 @@ describe("hidden balances", () => {
       ["•••• DUSK", "hidden DUSK"],
     ]);
     expect(visibleText(body.querySelector(".stake-sum .stake-cap"))).toBe("Locked: •••• DUSK. It's still yours, and unstaking returns it.");
-    expect(visibleText(body.querySelector(".stake-avail"))).toBe("•••• DUSK available to stake, from your public balance");
+    expect(visibleText(body.querySelector(".stake-avail"))).toBe("Available •••• DUSK");
     // Advanced keeps what isn't a balance.
     expect(body.querySelectorAll("details.advanced .kv").map(visibleText)).toContain("Active fromActive now");
   });
@@ -344,7 +344,7 @@ describe("hidden balances", () => {
     expect(st.depositAmountDusk).toBe("1482.9233");
     // What Max filled in gets a share of the balance: hidden too.
     expect(visibleText(body.querySelector(".stake-estimate .stake-estimate__main"))).toBe(
-      "You get about •••• stDUSK, worth about •••• DUSK now."
+      "You get about •••• stDUSK, worth about •••• DUSK."
     );
     // Sozu's fee off it in DUSK gives the amount away: hidden, its rate shown.
     expect(seen(body.querySelector(".sozu-terms"))).toEqual(["Deposit fee 0.25% · •••• DUSK", "Deposit fee 0.25% · hidden DUSK"]);
@@ -352,9 +352,12 @@ describe("hidden balances", () => {
     // So on its Review.
     button("Review stake").click();
     await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));
+    // Its row says it isn't refunded, once: no line under it says it again.
     const fee = body.querySelectorAll(".kv").find((row) => visibleText(row).startsWith("Deposit fee"));
-    expect(seen(fee)).toEqual(["Deposit fee0.25% · •••• DUSK", "Deposit fee0.25% · hidden DUSK"]);
-    expect(seen(body.querySelector(".sozu-fee-gone"))).toEqual(["The deposit fee of •••• DUSK doesn't come back.", "The deposit fee of hidden DUSK doesn't come back."]);
+    expect(seen(fee)).toEqual(["Deposit fee•••• DUSK (0.25%), not refunded", "Deposit feehidden DUSK (0.25%), not refunded"]);
+    expect(body.querySelector(".sozu-fee-gone")).toBeNull();
+    // Its button, as its head: the amount Max filled in, hidden.
+    expect(seen(body.querySelector(".review-actions .btn-primary"))).toEqual(["Stake •••• DUSK", "Stake hidden DUSK"]);
   });
 });
 

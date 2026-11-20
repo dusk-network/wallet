@@ -3,14 +3,18 @@ import { describe, expect, it } from "vitest";
 import { txErrorText, txRecoveryReasonLabel, txStatusTone, txStatusWord } from "./txDisplay.js";
 
 describe("tx display helpers", () => {
-  it("says each status in one plain word", () => {
-    expect(txStatusWord("submitted")).toBe("Pending");
-    expect(txStatusWord("mempool")).toBe("Pending");
+  it("says each status in one plain word, the Sent screen's", () => {
+    expect(txStatusWord("submitted")).toBe("Sending");
+    expect(txStatusWord("mempool")).toBe("Sending");
     expect(txStatusWord("executed")).toBe("Completed");
     expect(txStatusWord("failed")).toBe("Failed");
-    expect(txStatusWord("removed")).toBe("Dropped");
+    // Dropped before it ran: Failed, as Sent says it.
+    expect(txStatusWord("removed")).toBe("Failed");
     expect(txStatusWord("unknown")).toBe("Not confirmed");
-    expect(txStatusWord(undefined)).toBe("Pending");
+    // The network never had it, and it waits for Send it now or Don't send.
+    expect(txStatusWord("unsent")).toBe("Held");
+    expect(txStatusWord("not_sent")).toBe("Not sent");
+    expect(txStatusWord(undefined)).toBe("Sending");
   });
 
   it("puts known chain errors in plain words, and leaves others alone", () => {

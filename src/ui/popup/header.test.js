@@ -94,16 +94,18 @@ describe("the network at the top", () => {
     const [label, strip] = [pill(dom), panel(dom)];
     const own = { ...overview, proverUrl: "https://testnet.provers.dusk.network", archiverUrl: "https://testnet.nodes.dusk.network" };
     renderHeader(own);
-    expect([label(), strip()]).toEqual(["Testnet", "Testnet · Test DUSK has no value"]);
+    // The pill names the network, so the strip doesn't again.
+    expect([label(), strip()]).toEqual(["Testnet", "Test DUSK, no value"]);
 
+    // The pill says Custom: the strip names the network.
     renderHeader({ ...own, proverUrl: "http://hostile-node.example", archiverUrl: "https://hostile-node.example" });
-    expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK has no value · Proofs and history from hostile-node.example"]);
+    expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK, no value · Proofs and history from hostile-node.example"]);
     // It wraps, as a custom node's does, rather than cut off the host.
     expect(dom.document.body.querySelector(".testnet-strip").classList.contains("testnet-strip--wrap")).toBe(true);
     const css = await readFile(path.resolve(process.cwd(), "public", "ui.css"), "utf8");
     expect(css).toMatch(/\.testnet-strip\.testnet-strip--wrap \{\s*white-space: normal;/);
     renderHeader({ ...own, archiverUrl: "https://archive.example" });
-    expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK has no value · History from archive.example"]);
+    expect([label(), strip()]).toEqual(["Custom", "Testnet · Test DUSK, no value · History from archive.example"]);
 
     // Mainnet's own node says nothing, unless what it uses with it is someone else's.
     const mainnet = { ...overview, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network", proverUrl: "https://provers.dusk.network", archiverUrl: "https://nodes.dusk.network" };
@@ -267,7 +269,8 @@ describe("header", () => {
     renderHeader(overview);
     chip().click();
     expect(acctMenu.isOpen).toBe(true);
-    expect(menu().textContent).toContain("Select profile");
+    // No title over it: named for screen readers alone.
+    expect([menu().querySelector("[role=menu]").getAttribute("aria-label"), menu().textContent.includes("Select profile")]).toEqual(["Profile", false]);
     expect(menu().querySelectorAll(".acct-menu-row")).toHaveLength(2);
     expect(chip().getAttribute("aria-expanded")).toBe("true");
 
@@ -354,13 +357,14 @@ describe("header", () => {
     const strips = () => panel.querySelectorAll(".testnet-strip");
 
     renderHeader(overview);
-    expect(strips().map((s) => [s.textContent, s.getAttribute("role")])).toEqual([["Testnet · Test DUSK has no value", "note"]]);
+    // The pill beside it names the network.
+    expect(strips().map((s) => [s.textContent, s.getAttribute("role")])).toEqual([["Test DUSK, no value", "note"]]);
     expect(panel.children[0]).toBe(strips()[0]);
     // Locked, it still says so; a redraw keeps the one strip.
     renderHeader({ ...overview, isUnlocked: false });
     expect(strips()).toHaveLength(1);
     renderHeader({ ...overview, networkName: "Devnet" });
-    expect(strips().map((s) => s.textContent)).toEqual(["Devnet · Test DUSK has no value"]);
+    expect(strips().map((s) => s.textContent)).toEqual(["Test DUSK, no value"]);
 
     renderHeader({ ...overview, networkName: "Mainnet", nodeUrl: "https://nodes.dusk.network" });
     expect(strips()).toHaveLength(0);
@@ -386,7 +390,7 @@ describe("header", () => {
       renderHeader({ ...custom, chainId });
       expect(label.textContent).toBe("Custom");
       expect(visibleText(strip())).toContain("Custom node · nodes.dusk.network.evil.example");
-      expect(visibleText(strip())).not.toContain("Test DUSK has no value");
+      expect(visibleText(strip())).not.toContain("Test DUSK");
       expect(dot().classList.contains("net-status--online")).toBe(false);
     }
     // Where what's signed there counts, when that's a network's chain.
@@ -406,7 +410,7 @@ describe("header", () => {
     dom.document.body.appendChild(panel);
     const local = { ...overview, networkName: "Local", nodeUrl: "http://127.0.0.1:8080" };
     renderHeader({ ...local, chainId: 0 });
-    expect(visibleText(panel.querySelector(".testnet-strip"))).toBe("Local · Test DUSK has no value");
+    expect(visibleText(panel.querySelector(".testnet-strip"))).toBe("Test DUSK, no value");
     renderHeader({ ...local, chainId: 1 });
     expect(visibleText(panel.querySelector(".testnet-strip"))).toBe("Local node · 127.0.0.1:8080 · What you sign here counts on Mainnet.");
   });

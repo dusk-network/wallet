@@ -27,7 +27,7 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
   await page.goto("/");
 
   await expect(page).toHaveTitle("Dusk Wallet");
-  await expect(page.getByText("Set up your Dusk Wallet")).toBeVisible();
+  await expect(page.getByText("Set up Dusk Wallet")).toBeVisible();
   await page.getByRole("button", { name: "Import wallet" }).click();
 
   await expect(page.getByText("Recovery phrase", { exact: true })).toBeVisible();
@@ -66,7 +66,8 @@ test("import wallet, name + switch default accounts", async ({ page }) => {
 
   // Open the profile switcher from the account chip and switch
   await page.locator("#header-actions .account-chip").click();
-  await expect(page.getByText("Select profile")).toBeVisible();
+  // No title over it: the menu is named for screen readers alone.
+  await expect(page.getByRole("menu", { name: "Profile", exact: true })).toBeVisible();
   const menu = page.locator(".acct-menu");
   await expect(menu.getByText("Main")).toBeVisible();
   await expect(menu.getByText("Spending")).toBeVisible();
