@@ -7,6 +7,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-21
+
 ### Added
 
 - Suggested the recovery words that start with what's typed, from the wallet's own list, under the box being typed in on Import, Restore, Add wallet and Check your recovery words, a tap, Enter or Tab taking one, and marked letters that start no word at once with Not a recovery word.
@@ -42,6 +44,57 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Added a search to Activity: by name, address, memo, transaction ID or amount.
 - Gave the export's values in the currency of the browser's region where CoinGecko prices DUSK in it, as Singapore dollars, and in US dollars elsewhere.
 - Made a release's zips rebuild byte for byte from its tag, with their SHA-256 in the release notes.
+- Added more than one recovery phrase, all unlocked with one password: Add wallet creates or imports another, says which wallet it becomes, and refuses one that's already here.
+- Grouped the profile switcher by wallet, as Wallet 1 and Wallet 2, and switched to another wallet's profile without the password.
+- Named the open wallet under the profile in the header, and beside it on Reviews and site requests, when there's more than one wallet.
+- Added Wallets to Settings, to rename a wallet or remove it with the password.
+- Added Change password to Settings, for every wallet here.
+- Named the wallet of each site in Settings' Connected sites when there's more than one wallet.
+- Added a Bridge filter to Activity, which now holds bridge transfers instead of Sent and Received.
+- Said when a deposit to DuskEVM arrived, and added View in DuskEVM explorer to its details.
+- Said Arrived on a deposit to DuskEVM once it's there, and linked its transaction on DuskEVM's explorer.
+- Offered alice.dusk for a recipient typed as alice or alice.dusk.
+- Linked Dusk's Terms of use and Privacy policy in Settings, under About.
+- Said about what each way of staking pays a year, beside the choice: native staking across the network lately, and Sozu after its fee.
+- Warned about a recipient listed as compromised or a scam, on Send and in a site's request, and sent it nothing.
+- Added Activity to the full view's sidebar.
+- Added Forgot your password? to the unlock screen: a restore from the recovery phrase that keeps the same wallet's contacts.
+- Showed Sozu's fees on Liquid staking as its contract has them: its share of rewards, the deposit fee and no fee to unstake.
+- Showed Sozu's deposit fee on each stake as it's typed and on Review, and took it off what the stake gets.
+- Turned staking with Sozu off while Sozu has paused deposits or they can't be checked, and warned while its pool is synchronizing.
+- Read Sozu's terms again before sending a stake, and showed them for another Confirm when they changed.
+- Showed the 1 DUSK bridge fee and what arrives on BNB Smart Chain when paying the bridge's account, in its approval and on Send's Review.
+- Said that the testnet bridge to Sepolia isn't running right now, in its approval and on Send's Review.
+- Added Export to Activity: the rows listed as a CSV file with the web wallet's columns, your contact names only when asked.
+- Showed a site's payment to the bridge's account as a bridge to BNB Smart Chain, or Ethereum (Sepolia) on Testnet, with the memo as the recipient there, and a warning when the memo isn't an address there.
+- Said at the top of a test network, in the popup, the full view and site approvals, that test DUSK has no value.
+- Read the DuskEVM bridge's deposit, prove and claim calls on Testnet in their approvals: amount and recipient, marked as a known bridge call.
+- Accepted a gas limit without a price from sites, at the node's gas price.
+- Added a Sent screen after Confirm that follows the transaction: Sending, Sent to the network, then Completed or Failed with the reason and the fee charged, with its ID, Copy and the Dusk explorer link.
+- Showed the profile's full public history in Activity, including received transfers.
+- Showed the profile's shielded history in Activity.
+- Named Activity's counterparties by their verified `.dusk` names.
+- Added day groups and All, Sent, Received and Staking filters to Activity's full list.
+- Labelled DuskEVM bridge transfers in Activity.
+- Suggested a close `.dusk` name from contacts and past transfers when a typed one isn't registered.
+- Showed a pasted public account's verified `.dusk` name on Send.
+- Named the profile that pays on Send's Review, and a contact by both its label and its verified name.
+- Said on a public send's Review what everyone can see: the amount, the memo and your name.
+- Saved contacts from `.dusk` names, keeping the name and checking it again before it's an hour old.
+- Added a Disconnect for each connected site, and custom gas under Settings' Advanced.
+- Showed a new wallet how to get its first DUSK, with Receive, instead of empty Tokens and NFTs.
+- Added a spinner on the network pill while the wallet switches network.
+- Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
+- Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
+- Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
+- Named the recipient of a site's transfer under its address: your profile, a saved contact, or its verified `.dusk` name. ([#127])
+- Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address. ([#125])
+- Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive. ([#125])
+- Added a warning when sending to your own account or address. ([#125])
+- Showed on Review whether the transfer is visible on chain. ([#125])
+- Added a full escaped typed-data request view alongside the bounded approval preview. ([#113])
+- Displayed the installed extension version in Settings. ([#80])
+- Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and bounded, potentially truncated message previews with declared field types — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
 
 ### Changed
 
@@ -134,6 +187,135 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Made Activity's Export a file for accountants and tax tools, in Koinly's universal CSV: a quarter or any dates, your profile's name on it, transfers between your profiles marked, stDUSK and fees for staking, and values in your currency and Excel's accents when asked.
 - Showed an amount and its fee to the last lux in a transaction's details, on Sent and on every Review; rows and balance lines stay short.
 - Made a request link the https form, which opens the web wallet's Send filled in; Send also reads it pasted or scanned.
+- Followed DUSK bridged to BNB Smart Chain or Ethereum to its end: On its way, then Arrived, with the bridge fee, what was received and its transaction there
+- Listed DUSK bridged out under Sent and in under Received, as well as under Bridge
+- Wrote and read amounts in the browser's language, so 1,001 doesn't read as about one on a Dutch browser
+- Showed a migration's payout with its transaction on the other chain, not as a memo
+- Link to the explorer at its own domain
+- Opened and closed sections the same way, said Copied on the copy button instead of a toast, faded messages in place, and had Confirm and Approve ignore a click for half a second as they appear.
+- Showed a turning ring beside the words while staking, Sozu, tokens, contacts or activity load.
+- Opened the popup faster.
+- Read a balance, Sozu's status or a token's balance once for a few seconds, checked the network's endpoints at most every 5 minutes unless one fails, and checked the .dusk lens once a session.
+- Found where a deposit to DuskEVM arrived in fewer requests.
+- Kept site connections, sends and DuskEVM arrivals per wallet: a site connected to one wallet sees nothing of another.
+- Filled every word box from a whole recovery phrase pasted into any of them, with 24 boxes for 24 words.
+- Said what's wrong with a recovery phrase after a paste or on leaving its boxes: a word that isn't one, a missing word, the count or the checksum.
+- Gave the recovery phrase's word boxes a visible edge.
+- Said on Forgot your password? and Reset wallet that they remove every recovery phrase here.
+- Said Lock in Settings, and that auto-lock locks every wallet, when there's more than one wallet.
+- Called a profile's label its name in Settings.
+- Named a send's recipient in Activity by its verified `.dusk` name before the name typed when sending.
+- Showed a failed shield's details as a shield's, from the public balance to the shielded one.
+- Dropped Submitted and Shielded reservation from a send's Technical details once the chain's history has all of it.
+- Named DUSK bridged to and from BNB Smart Chain and Ethereum in Activity by their routes, To BNB Smart Chain and From Ethereum, under Bridge, with the bridge's account it went through.
+- Named a `.dusk` name's reservation in Activity by the name its registration reveals, else Name reservation (step 1 of 2).
+- Said on Send that a pasted 0x address is an EVM address, not a Dusk account, and kept Review off.
+- Called a failed shield Shield attempt (failed) in Activity, and one that went through Shield, not Call convert.
+- Named Dusk Domains' contracts in Technical details, and every named contract in approvals, as the explorer does.
+- Said under Reset what it removes, and that your funds stay on Dusk.
+- Hid Sozu's deposit fee in DUSK while balances are hidden, on the stake form and its Review.
+- Worked out Sozu's yearly estimate from native staking's figure as shown, as the web wallet does, and added Not promised.
+- Moved Sozu's contract from the stake form to its Review, under Custom fee.
+- Dropped the note that a failed call is charged its whole gas limit.
+- Said what's visible to everyone only on sends, not on staking Reviews or the bridge, allowance and other contract approvals.
+- Shortened EVM addresses and transactions to 0x and four characters at each end, addresses with their checksum, and Dusk IDs to six at each end in approvals and notifications too.
+- Renamed Exact fee to Fee paid under Technical details, and Function to Method in approvals.
+- Showed stDUSK estimates to 4 decimals.
+- Said only that native staking needs your own Dusk node, with Run a node to Dusk's docs on running one.
+- Wrote dates and times as every Dusk app does: in English, on the language's clock, as "Mon 26 Oct 2026, 2:32 PM CET", in the export too.
+- Wrote Dusk contract IDs without 0x, and an ellipsis as one character.
+- Wrote fees under 0.01 DUSK to 2 significant digits, a maximum still rounded up.
+- Said "no fee" on a failed row that paid none, not "fee 0 DUSK paid".
+- Found the network by the chain ID its node gives, not its address: a custom node gets its network's names, Sozu, bridge, explorer and history, and one that hasn't said is Custom, not Mainnet.
+- Named the contracts and accounts the network's file names, in Activity and Technical details.
+- Named the bridge's chains as the network's routes do: BNB Smart Chain, and Sepolia on Testnet.
+- Led a withdrawal's prove and claim approvals with what they cost, then the withdrawal.
+- Named the connected site in the popup as its approval did: with its port, and http:// for a local one.
+- Marked the popup's top row as its header and its page as main, for screen readers.
+- Showed a profile's `.dusk` name beside its short account in the profile switcher.
+- Said that native staking's Max keeps both fees: this stake's and the one to unstake later.
+- Named a `.dusk` name's registration in Activity by the name it registered.
+- Moved a contract call's contract from under its title to Technical details, with Copy.
+- Hid a failed row's fee in Activity while balances are hidden.
+- Said that unstaking from Sozu returns the DUSK in the same transaction, with no fee and no waiting.
+- Gave stakes with Sozu a 5M gas limit and unstakes 10M, at the network's price, never under 2.5M and 4M.
+- Showed a deposit to DuskEVM as To its DuskEVM address in Activity and its details, with Copy.
+- Put the test network strip across the top of the full view, and kept it and the sidebar in place as the page scrolls.
+- Asked to unlock before showing Contacts.
+- Set section heads and balance labels in small capitals, the heads between grey brackets.
+- Showed links and a transaction's ID in blue.
+- Set addresses, IDs and block heights in Söhne Mono.
+- Wrote times of day in the browser's own format, as the web wallet does.
+- Shortened Staking's section head to Stake.
+- Warned on a contact's page when its saved `.dusk` name has expired, isn't registered or has no address any more.
+- Named whom a token approval lets spend in Activity, showed an allowance of 0 as a revoke, and listed approvals in the spender's contact Activity.
+- Named the eye button Show balances while balances are hidden.
+- Moved what a site's payment makes visible to everyone up, under the amount, in its approval window.
+- Set every extension page's language to English.
+- Showed the time zone with full dates and times in a transaction's details, the Sent screen and approvals.
+- Moved Delete all contacts to Settings' Advanced, asking first, and showed each contact by its first letter.
+- Kept Confirm and Approve off while a custom gas limit is under the minimum or the gas price is 0, with the reason under the field.
+- Showed under Custom fee what the gas limit and price come to in DUSK.
+- Showed a transaction's exact fee under Technical details.
+- Said plainly that staking needs some public DUSK for the network fee, without an error before anything is typed.
+- Kept Max on Staking to 4 decimals, and left the fee to unstake later.
+- Named the profile on both staking Reviews by its `.dusk` name, and repeated before Confirm that it needs your own Dusk node.
+- Showed on Sozu's Review what the stDUSK is worth now, and said why a contract call's fee cap is higher.
+- Led Activity and a transaction's details with a saved contact's own name, its `.dusk` name beside it.
+- Named Dusk Domains calls in Activity by what they did, such as "Registered a .dusk name", and Sozu's as "Staked with Sozu".
+- Kept a deposit to DuskEVM's recipient with the transaction and showed it in its details.
+- Stopped offering Add token and Import NFT on a contract call's details.
+- Gave the site approval windows the calm look, with Reject and the approve button always in view, and the chain, node, function, call data and the site's own details under Details.
+- Led a site's payment approval with the amount, the recipient's name and the fee.
+- Said in the connect approval what a site sees and that it can't move funds without your approval, with its own wording for a request for the shielded address.
+- Showed a saved contact's label beside the recipient's verified `.dusk` name in approvals, instead of in its place.
+- Said on a public transfer's approval what becomes visible to everyone, and under which name.
+- Showed what a site asks while the wallet is locked, with Reject beside Unlock.
+- Showed the exact amount a site asks to send, every decimal.
+- Refused `dusk_signMessage` strings that aren't hex or `base64:`-prefixed, instead of reading plain text as base64.
+- Gave the popup a calmer look: lists on one surface, pill buttons, round home actions and plain section titles, in each system's own fonts.
+- Reworked Staking into an overview with native and liquid staking as two equal choices, an amount screen that checks the 1,000 DUSK minimum as you type, and the owner and stake account under Advanced.
+- Named Sozu as a third party wherever liquid staking shows, and said how much stDUSK a stake gets and what it's worth now.
+- Showed toasts at the bottom of the popup, outside the page that scrolls, long enough to reach their action, and announced to screen readers.
+- Showed errors under their field instead of only in a toast.
+- Hid amounts in toasts and on the Sent screen while balances are hidden.
+- Showed every amount and fee in one format: at most 4 decimals, no trailing zeros, thousands grouped, with DUSK; a fee's maximum rounds up, a fee paid to the nearest.
+- Set fees at the network's gas price, with one Custom fee for your own limit and price, and a warning under the minimum gas limit as you type.
+- Restyled Send, Shield and Unshield: one large amount field, what's available after fees with Max, and errors under the field.
+- Stopped offering Save to Contacts for your own account or address.
+- Restyled Receive, Contacts and Settings, and showed what a `.dusk` name reaches under it on Receive.
+- Restyled the token and NFT screens, onboarding and Unlock, and kept the full view's pages to one readable column.
+- Shortened every Dusk address, contract ID and transaction ID the same way, to its first and last six characters.
+- Named a profile without a `.dusk` name by its label in the header, with its account in the tooltip and the profile switcher.
+- Named profiles by their verified `.dusk` names in Settings and its profile pickers.
+- Offered auto-lock after 5 or 15 minutes, 15 by default, or Off; an open popup nobody uses locks too.
+- Asked before disconnecting all sites, and moved Reset wallet to the end of Settings.
+- Showed Activity's rows with a direction icon and the other side's name first; a failed one says nothing was sent and the fee paid.
+- Showed a synced transaction's time from its block, or Syncing… until its outcome comes.
+- Reworked a transaction's details into a summary of who, how much and its status, then its date, memo, fee, profile and ID, with block and gas under Technical details.
+- Hid Activity's amounts and a transaction's amount while balances are hidden; fees stay visible.
+- Said known chain errors in plain words, with the chain's own under Technical details.
+- Moved the account's explorer link from Home's History ↗ to the end of Activity, on the Dusk explorer instead of DuskScan.
+- Cleared the wallet's transactions, shielded notes and history on reset.
+- Removed Review's Cancel. ([#126])
+- Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])
+- Opened Receive on the public account, as the web wallet does. ([web-wallet#970])
+- Picked the profile to connect from option cards instead of a dropdown. ([#127])
+- Opened the profile switcher from the header's account chip, with a copy button per account. ([#125])
+- Moved Refresh from the header to the balance. ([#125])
+- Showed Receive's name and short address in one-line fields with copy buttons. ([#125])
+- Pinned the shared typed-data RC through JSR's npm compatibility registry for reproducible installs. ([#22])
+- Used `@dusk/typed-data` for typed-data validation, hashing and signed-message construction. ([#22])
+- Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".
+- Defaulted public transfers to 2.5M gas, set gas minimums for shield (30M) and public staking (35M), and lowered the unshield minimum to 30M, matching the web wallet. ([web-wallet#969](https://github.com/dusk-network/web-wallet/issues/969))
+
+### Security
+
+- Encrypted contacts with a key only the unlocked wallet has, kept apart for each wallet, and moved plain ones in on the first unlock.
+- Deleted contacts on Reset wallet, and started a new or imported wallet with none.
+- Rejected non-integer and out-of-u8-range profile indices before BLS key derivation. ([#117])
+- Pinned direct Noble dependencies to exact reviewed versions. ([#22])
+- Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest.
 
 ### Fixed
 
@@ -358,197 +540,6 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Showed the recovery words at 18 px, with I wrote it down kept in view.
 - Stayed on Mainnet, Testnet or Devnet through a restore after a forgotten password; a custom node goes, as on Reset.
 - Wrote the stDUSK a Sozu unstake burned in the accounting export, as the trade back.
-
-## [0.4.0] - 2026-11-04
-
-### Added
-
-- Added more than one recovery phrase, all unlocked with one password: Add wallet creates or imports another, says which wallet it becomes, and refuses one that's already here.
-- Grouped the profile switcher by wallet, as Wallet 1 and Wallet 2, and switched to another wallet's profile without the password.
-- Named the open wallet under the profile in the header, and beside it on Reviews and site requests, when there's more than one wallet.
-- Added Wallets to Settings, to rename a wallet or remove it with the password.
-- Added Change password to Settings, for every wallet here.
-- Named the wallet of each site in Settings' Connected sites when there's more than one wallet.
-- Added a Bridge filter to Activity, which now holds bridge transfers instead of Sent and Received.
-- Said when a deposit to DuskEVM arrived, and added View in DuskEVM explorer to its details.
-- Said Arrived on a deposit to DuskEVM once it's there, and linked its transaction on DuskEVM's explorer.
-- Offered alice.dusk for a recipient typed as alice or alice.dusk.
-- Linked Dusk's Terms of use and Privacy policy in Settings, under About.
-- Said about what each way of staking pays a year, beside the choice: native staking across the network lately, and Sozu after its fee.
-- Warned about a recipient listed as compromised or a scam, on Send and in a site's request, and sent it nothing.
-- Added Activity to the full view's sidebar.
-- Added Forgot your password? to the unlock screen: a restore from the recovery phrase that keeps the same wallet's contacts.
-- Showed Sozu's fees on Liquid staking as its contract has them: its share of rewards, the deposit fee and no fee to unstake.
-- Showed Sozu's deposit fee on each stake as it's typed and on Review, and took it off what the stake gets.
-- Turned staking with Sozu off while Sozu has paused deposits or they can't be checked, and warned while its pool is synchronizing.
-- Read Sozu's terms again before sending a stake, and showed them for another Confirm when they changed.
-- Showed the 1 DUSK bridge fee and what arrives on BNB Smart Chain when paying the bridge's account, in its approval and on Send's Review.
-- Said that the testnet bridge to Sepolia isn't running right now, in its approval and on Send's Review.
-- Added Export to Activity: the rows listed as a CSV file with the web wallet's columns, your contact names only when asked.
-- Showed a site's payment to the bridge's account as a bridge to BNB Smart Chain, or Ethereum (Sepolia) on Testnet, with the memo as the recipient there, and a warning when the memo isn't an address there.
-- Said at the top of a test network, in the popup, the full view and site approvals, that test DUSK has no value.
-- Read the DuskEVM bridge's deposit, prove and claim calls on Testnet in their approvals: amount and recipient, marked as a known bridge call.
-- Accepted a gas limit without a price from sites, at the node's gas price.
-- Added a Sent screen after Confirm that follows the transaction: Sending, Sent to the network, then Completed or Failed with the reason and the fee charged, with its ID, Copy and the Dusk explorer link.
-- Showed the profile's full public history in Activity, including received transfers.
-- Showed the profile's shielded history in Activity.
-- Named Activity's counterparties by their verified `.dusk` names.
-- Added day groups and All, Sent, Received and Staking filters to Activity's full list.
-- Labelled DuskEVM bridge transfers in Activity.
-- Suggested a close `.dusk` name from contacts and past transfers when a typed one isn't registered.
-- Showed a pasted public account's verified `.dusk` name on Send.
-- Named the profile that pays on Send's Review, and a contact by both its label and its verified name.
-- Said on a public send's Review what everyone can see: the amount, the memo and your name.
-- Saved contacts from `.dusk` names, keeping the name and checking it again before it's an hour old.
-- Added a Disconnect for each connected site, and custom gas under Settings' Advanced.
-- Showed a new wallet how to get its first DUSK, with Receive, instead of empty Tokens and NFTs.
-- Added a spinner on the network pill while the wallet switches network.
-- Added an eye button beside the total balance that hides every balance behind ••••; the choice is remembered. ([#130])
-- Gave connected sites the profile's verified `.dusk` name, as `name`. ([#127])
-- Showed the profile's verified `.dusk` name in the approval pop-ups. ([#127])
-- Named the recipient of a site's transfer under its address: your profile, a saved contact, or its verified `.dusk` name. ([#127])
-- Added sending to `.dusk` names on Mainnet and Testnet, to their public account or shielded address. ([#125])
-- Showed each profile's verified `.dusk` name in the header, the profile switcher and Receive. ([#125])
-- Added a warning when sending to your own account or address. ([#125])
-- Showed on Review whether the transfer is visible on chain. ([#125])
-- Added a full escaped typed-data request view alongside the bounded approval preview. ([#113])
-- Displayed the installed extension version in Settings. ([#80])
-- Added `dusk_signTypedData`, letting dApps request a signature over structured data the wallet renders — domain, primary type, and bounded, potentially truncated message previews with declared field types — instead of an opaque digest. The wallet injects the requesting origin into the digest and echoes it in the result. ([#22])
-
-### Changed
-
-- Followed DUSK bridged to BNB Smart Chain or Ethereum to its end: On its way, then Arrived, with the bridge fee, what was received and its transaction there
-- Listed DUSK bridged out under Sent and in under Received, as well as under Bridge
-- Wrote and read amounts in the browser's language, so 1,001 doesn't read as about one on a Dutch browser
-- Showed a migration's payout with its transaction on the other chain, not as a memo
-- Link to the explorer at its own domain
-- Opened and closed sections the same way, said Copied on the copy button instead of a toast, faded messages in place, and had Confirm and Approve ignore a click for half a second as they appear.
-- Showed a turning ring beside the words while staking, Sozu, tokens, contacts or activity load.
-- Opened the popup faster.
-- Read a balance, Sozu's status or a token's balance once for a few seconds, checked the network's endpoints at most every 5 minutes unless one fails, and checked the .dusk lens once a session.
-- Found where a deposit to DuskEVM arrived in fewer requests.
-- Kept site connections, sends and DuskEVM arrivals per wallet: a site connected to one wallet sees nothing of another.
-- Filled every word box from a whole recovery phrase pasted into any of them, with 24 boxes for 24 words.
-- Said what's wrong with a recovery phrase after a paste or on leaving its boxes: a word that isn't one, a missing word, the count or the checksum.
-- Gave the recovery phrase's word boxes a visible edge.
-- Said on Forgot your password? and Reset wallet that they remove every recovery phrase here.
-- Said Lock in Settings, and that auto-lock locks every wallet, when there's more than one wallet.
-- Called a profile's label its name in Settings.
-- Named a send's recipient in Activity by its verified `.dusk` name before the name typed when sending.
-- Showed a failed shield's details as a shield's, from the public balance to the shielded one.
-- Dropped Submitted and Shielded reservation from a send's Technical details once the chain's history has all of it.
-- Named DUSK bridged to and from BNB Smart Chain and Ethereum in Activity by their routes, To BNB Smart Chain and From Ethereum, under Bridge, with the bridge's account it went through.
-- Named a `.dusk` name's reservation in Activity by the name its registration reveals, else Name reservation (step 1 of 2).
-- Said on Send that a pasted 0x address is an EVM address, not a Dusk account, and kept Review off.
-- Called a failed shield Shield attempt (failed) in Activity, and one that went through Shield, not Call convert.
-- Named Dusk Domains' contracts in Technical details, and every named contract in approvals, as the explorer does.
-- Said under Reset what it removes, and that your funds stay on Dusk.
-- Hid Sozu's deposit fee in DUSK while balances are hidden, on the stake form and its Review.
-- Worked out Sozu's yearly estimate from native staking's figure as shown, as the web wallet does, and added Not promised.
-- Moved Sozu's contract from the stake form to its Review, under Custom fee.
-- Dropped the note that a failed call is charged its whole gas limit.
-- Said what's visible to everyone only on sends, not on staking Reviews or the bridge, allowance and other contract approvals.
-- Shortened EVM addresses and transactions to 0x and four characters at each end, addresses with their checksum, and Dusk IDs to six at each end in approvals and notifications too.
-- Renamed Exact fee to Fee paid under Technical details, and Function to Method in approvals.
-- Showed stDUSK estimates to 4 decimals.
-- Said only that native staking needs your own Dusk node, with Run a node to Dusk's docs on running one.
-- Wrote dates and times as every Dusk app does: in English, on the language's clock, as "Mon 26 Oct 2026, 2:32 PM CET", in the export too.
-- Wrote Dusk contract IDs without 0x, and an ellipsis as one character.
-- Wrote fees under 0.01 DUSK to 2 significant digits, a maximum still rounded up.
-- Said "no fee" on a failed row that paid none, not "fee 0 DUSK paid".
-- Found the network by the chain ID its node gives, not its address: a custom node gets its network's names, Sozu, bridge, explorer and history, and one that hasn't said is Custom, not Mainnet.
-- Named the contracts and accounts the network's file names, in Activity and Technical details.
-- Named the bridge's chains as the network's routes do: BNB Smart Chain, and Sepolia on Testnet.
-- Led a withdrawal's prove and claim approvals with what they cost, then the withdrawal.
-- Named the connected site in the popup as its approval did: with its port, and http:// for a local one.
-- Marked the popup's top row as its header and its page as main, for screen readers.
-- Showed a profile's `.dusk` name beside its short account in the profile switcher.
-- Said that native staking's Max keeps both fees: this stake's and the one to unstake later.
-- Named a `.dusk` name's registration in Activity by the name it registered.
-- Moved a contract call's contract from under its title to Technical details, with Copy.
-- Hid a failed row's fee in Activity while balances are hidden.
-- Said that unstaking from Sozu returns the DUSK in the same transaction, with no fee and no waiting.
-- Gave stakes with Sozu a 5M gas limit and unstakes 10M, at the network's price, never under 2.5M and 4M.
-- Showed a deposit to DuskEVM as To its DuskEVM address in Activity and its details, with Copy.
-- Put the test network strip across the top of the full view, and kept it and the sidebar in place as the page scrolls.
-- Asked to unlock before showing Contacts.
-- Set section heads and balance labels in small capitals, the heads between grey brackets.
-- Showed links and a transaction's ID in blue.
-- Set addresses, IDs and block heights in Söhne Mono.
-- Wrote times of day in the browser's own format, as the web wallet does.
-- Shortened Staking's section head to Stake.
-- Warned on a contact's page when its saved `.dusk` name has expired, isn't registered or has no address any more.
-- Named whom a token approval lets spend in Activity, showed an allowance of 0 as a revoke, and listed approvals in the spender's contact Activity.
-- Named the eye button Show balances while balances are hidden.
-- Moved what a site's payment makes visible to everyone up, under the amount, in its approval window.
-- Set every extension page's language to English.
-- Showed the time zone with full dates and times in a transaction's details, the Sent screen and approvals.
-- Moved Delete all contacts to Settings' Advanced, asking first, and showed each contact by its first letter.
-- Kept Confirm and Approve off while a custom gas limit is under the minimum or the gas price is 0, with the reason under the field.
-- Showed under Custom fee what the gas limit and price come to in DUSK.
-- Showed a transaction's exact fee under Technical details.
-- Said plainly that staking needs some public DUSK for the network fee, without an error before anything is typed.
-- Kept Max on Staking to 4 decimals, and left the fee to unstake later.
-- Named the profile on both staking Reviews by its `.dusk` name, and repeated before Confirm that it needs your own Dusk node.
-- Showed on Sozu's Review what the stDUSK is worth now, and said why a contract call's fee cap is higher.
-- Led Activity and a transaction's details with a saved contact's own name, its `.dusk` name beside it.
-- Named Dusk Domains calls in Activity by what they did, such as "Registered a .dusk name", and Sozu's as "Staked with Sozu".
-- Kept a deposit to DuskEVM's recipient with the transaction and showed it in its details.
-- Stopped offering Add token and Import NFT on a contract call's details.
-- Gave the site approval windows the calm look, with Reject and the approve button always in view, and the chain, node, function, call data and the site's own details under Details.
-- Led a site's payment approval with the amount, the recipient's name and the fee.
-- Said in the connect approval what a site sees and that it can't move funds without your approval, with its own wording for a request for the shielded address.
-- Showed a saved contact's label beside the recipient's verified `.dusk` name in approvals, instead of in its place.
-- Said on a public transfer's approval what becomes visible to everyone, and under which name.
-- Showed what a site asks while the wallet is locked, with Reject beside Unlock.
-- Showed the exact amount a site asks to send, every decimal.
-- Refused `dusk_signMessage` strings that aren't hex or `base64:`-prefixed, instead of reading plain text as base64.
-- Gave the popup a calmer look: lists on one surface, pill buttons, round home actions and plain section titles, in each system's own fonts.
-- Reworked Staking into an overview with native and liquid staking as two equal choices, an amount screen that checks the 1,000 DUSK minimum as you type, and the owner and stake account under Advanced.
-- Named Sozu as a third party wherever liquid staking shows, and said how much stDUSK a stake gets and what it's worth now.
-- Showed toasts at the bottom of the popup, outside the page that scrolls, long enough to reach their action, and announced to screen readers.
-- Showed errors under their field instead of only in a toast.
-- Hid amounts in toasts and on the Sent screen while balances are hidden.
-- Showed every amount and fee in one format: at most 4 decimals, no trailing zeros, thousands grouped, with DUSK; a fee's maximum rounds up, a fee paid to the nearest.
-- Set fees at the network's gas price, with one Custom fee for your own limit and price, and a warning under the minimum gas limit as you type.
-- Restyled Send, Shield and Unshield: one large amount field, what's available after fees with Max, and errors under the field.
-- Stopped offering Save to Contacts for your own account or address.
-- Restyled Receive, Contacts and Settings, and showed what a `.dusk` name reaches under it on Receive.
-- Restyled the token and NFT screens, onboarding and Unlock, and kept the full view's pages to one readable column.
-- Shortened every Dusk address, contract ID and transaction ID the same way, to its first and last six characters.
-- Named a profile without a `.dusk` name by its label in the header, with its account in the tooltip and the profile switcher.
-- Named profiles by their verified `.dusk` names in Settings and its profile pickers.
-- Offered auto-lock after 5 or 15 minutes, 15 by default, or Off; an open popup nobody uses locks too.
-- Asked before disconnecting all sites, and moved Reset wallet to the end of Settings.
-- Showed Activity's rows with a direction icon and the other side's name first; a failed one says nothing was sent and the fee paid.
-- Showed a synced transaction's time from its block, or Syncing… until its outcome comes.
-- Reworked a transaction's details into a summary of who, how much and its status, then its date, memo, fee, profile and ID, with block and gas under Technical details.
-- Hid Activity's amounts and a transaction's amount while balances are hidden; fees stay visible.
-- Said known chain errors in plain words, with the chain's own under Technical details.
-- Moved the account's explorer link from Home's History ↗ to the end of Activity, on the Dusk explorer instead of DuskScan.
-- Cleared the wallet's transactions, shielded notes and history on reset.
-- Removed Review's Cancel. ([#126])
-- Cut repeated text across the popup, labelled its fields for screen readers and drew its icon buttons as SVG icons. ([#126])
-- Opened Receive on the public account, as the web wallet does. ([web-wallet#970])
-- Picked the profile to connect from option cards instead of a dropdown. ([#127])
-- Opened the profile switcher from the header's account chip, with a copy button per account. ([#125])
-- Moved Refresh from the header to the balance. ([#125])
-- Showed Receive's name and short address in one-line fields with copy buttons. ([#125])
-- Pinned the shared typed-data RC through JSR's npm compatibility registry for reproducible installs. ([#22])
-- Used `@dusk/typed-data` for typed-data validation, hashing and signed-message construction. ([#22])
-- Gated dApp RPC requests on the canonical method list before any permission lookup or approval prompt, so methods absent from the advertised surface are unreachable rather than merely undocumented. Deliberately refused methods still report why instead of "Unknown method".
-- Defaulted public transfers to 2.5M gas, set gas minimums for shield (30M) and public staking (35M), and lowered the unshield minimum to 30M, matching the web wallet. ([web-wallet#969](https://github.com/dusk-network/web-wallet/issues/969))
-
-### Security
-
-- Encrypted contacts with a key only the unlocked wallet has, kept apart for each wallet, and moved plain ones in on the first unlock.
-- Deleted contacts on Reset wallet, and started a new or imported wallet with none.
-- Rejected non-integer and out-of-u8-range profile indices before BLS key derivation. ([#117])
-- Pinned direct Noble dependencies to exact reviewed versions. ([#22])
-- Typed-data signatures cover a domain-separated message rather than the bare 32-byte digest, so they cannot be produced by, or replayed as, a signature over a caller-supplied digest.
-
-### Fixed
-
 - Said a Sozu stake or unstake is on its way on Staking, not "Nothing staked yet", and showed it there as it completes.
 - Refused anything too long to be a name that isn't an address at To, with Review off.
 - Joined up an address a chat app broke with spaces, at To and in Contacts.
