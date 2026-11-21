@@ -1,7 +1,7 @@
 // The networks Settings and the network menu offer: Dusk's own, with their
 // endpoints and explorer from their files in @dusk-network/networks, then a
-// node on this machine and any other. `hint` is a preset's second line,
-// where its name doesn't say it all.
+// node on this machine and any other ("Custom node"). `hint` is a preset's
+// second line, where its name doesn't say it all.
 
 import { networks } from "@dusk-network/networks";
 
@@ -30,11 +30,10 @@ export const NETWORK_PRESETS = [
   },
   {
     id: "custom",
-    label: "Custom",
+    label: "Custom node",
     nodeUrl: "",
     proverUrl: "",
     archiverUrl: "",
     explorerBase: null,
-    hint: "Any node URL",
   },
 ];

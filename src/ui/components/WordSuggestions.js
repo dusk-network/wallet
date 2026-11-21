@@ -5,8 +5,8 @@
 // their own under the box's, the first one marked. A tap takes one, Enter and
 // Tab the marked one; the arrow keys move the mark, and Escape puts them away
 // till the next letter. A word that's the only one, typed whole, needs none.
-// Letters that start no word are said to at once, in that row: Not a recovery
-// word. Only the box typed in has them, and they go as it's left, and the
+// Letters that start no word are said to at once, in that row: Not in the
+// word list. Only the box typed in has them, and they go as it's left, and the
 // moment the page is hidden or loses the focus, as for a phone's app switcher,
 // coming back only as the box is typed in again (Marek's: Firefox's switcher
 // kept a card of the chips, the word being typed in clear beside its masked
@@ -24,7 +24,7 @@ import { isFirefoxAndroid } from "../lib/device.js";
 import { h } from "../lib/dom.js";
 
 /** What's said under a box whose letters start no recovery word. */
-export const NOT_A_WORD_TEXT = "Not a recovery word";
+export const NOT_A_WORD_TEXT = "Not in the word list";
 
 // The boxes' columns (ui.css, .srp-grid): the chips' row goes under the box's.
 const COLUMNS = 2;

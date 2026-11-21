@@ -117,14 +117,14 @@ describe("transaction details", () => {
       };
     };
     let view = show({ ...stake, status: "unsent", signedTx: "ab12" });
-    expect([view.status, view.buttons.length]).toEqual(["Not sent yet", 2]);
-    // Nothing has left, never that it may have gone.
-    expect(view.note).toMatch(/nothing has left/i);
+    expect([view.status, view.buttons.length]).toEqual(["Held", 2]);
+    // Nothing left the wallet, never that it may have gone.
+    expect(view.note).toMatch(/nothing left your wallet/i);
     expect(view.note).not.toMatch(/may have gone/i);
     // No fee charged: its fee field has no amount.
     expect(view.fee).toBeTruthy();
     expect(view.fee).not.toMatch(/[1-9]/);
-    expect(visibleText(view.body)).not.toContain("Pending");
+    expect(visibleText(view.body)).not.toContain("Confirming");
     view.buttons[0].click();
     await settle();
     expect(actions.send).toHaveBeenLastCalledWith({ type: "DUSK_UI_RESEND_TX", hash: HASH });
@@ -393,7 +393,7 @@ describe("transaction details", () => {
     dom.document.body.replaceChildren(...txDetailsView(ov, { state, actions: { render: vi.fn(async () => {}), showToast: vi.fn() } }));
     const body = dom.document.body;
     const fields = fieldsOf(body);
-    expect(statusOf(body).status).toBe("Dropped");
+    expect(statusOf(body).status).toBe("Failed");
     // Its 3 DUSK stayed in the wallet.
     const note = visibleText(body.querySelector(".tx-hero-note"));
     expect(note).toMatch(exactly("3 DUSK"));

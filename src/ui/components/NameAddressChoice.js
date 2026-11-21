@@ -90,7 +90,7 @@ export function nameAddressChoice({
   };
 
   const options = [
-    account && option({ isShielded: false, title: "Public account", value: account, line: "Visible on chain" }),
+    account && option({ isShielded: false, title: "Public account", value: account, line: "Anyone can see it" }),
     address &&
       option({ isShielded: true, title: "Shielded address", value: address, line: "Private", disabled: shieldedDisabled }),
   ].filter(Boolean);

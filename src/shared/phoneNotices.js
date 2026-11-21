@@ -120,7 +120,7 @@ export const WAITING_NOTICE = Object.freeze({
   title: "A payment is waiting",
   // Sofía's: it said the payment goes out once the app's opened again, and
   // after Android had closed the app, it said Not sent, with Send it now.
-  away: "It goes out when you open Dusk Wallet again. If Android closes the app first, you'll be asked to send it.",
+  away: "Goes out when you reopen Dusk Wallet, or asks first if Android closed it.",
   back: "Open Dusk Wallet to send it.",
 });
 

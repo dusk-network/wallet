@@ -4,31 +4,31 @@ import { formatDuskExact } from "../../../shared/amount.js";
 import { balance } from "../../components/Balance.js";
 
 /**
- * A status in one word, the same in Activity and a transaction's details:
- * Pending until the network runs it, then Completed or Failed. Dropped (the
- * node took it out of its queue) and Not confirmed (the wallet stopped
- * waiting) are uncertain, so they tone as pending. Unknown is final on chain,
- * its outcome not looked up yet: nothing waits on it, so it tones neutral.
- * Not sent yet: handed over, the node never had it, and it can go as it was
- * signed (unsent); Not sent: another of its account's transactions took its
- * place, and it never will (not_sent). Never Pending for either.
+ * A status in one word, the same in Activity and a transaction's details, and
+ * in the words the Sent screen uses: Confirming once the network has it, until
+ * it runs, then Completed or Failed. One the node dropped from its queue before it ran
+ * (removed) is Failed, as Sent says it, and tones as failed; Not confirmed
+ * (the wallet stopped waiting) tones as pending. Unknown is final on chain, its
+ * outcome not looked up yet: nothing waits on it, so it tones neutral. Held:
+ * handed over, the node never had it, and it goes as it was signed only with
+ * Send it now (unsent); Not sent: another of its account's transactions took
+ * its place, and it never will (not_sent). Never Confirming for either.
  * @param {string} status
  * @param {{ final?: boolean }} [opts] - `final`: the chain has it, final
- * @returns {"Pending"|"Completed"|"Failed"|"Dropped"|"Not confirmed"|"Unknown"|"Not sent yet"|"Not sent"}
+ * @returns {"Confirming"|"Completed"|"Failed"|"Not confirmed"|"Unknown"|"Held"|"Not sent"}
  */
 export function txStatusWord(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "Completed";
-  if (s === "failed") return "Failed";
-  if (s === "removed") return "Dropped";
-  if (s === "unsent") return "Not sent yet";
+  if (s === "failed" || s === "removed") return "Failed";
+  if (s === "unsent") return "Held";
   if (s === "not_sent") return "Not sent";
   if (s === "unknown") return final ? "Unknown" : "Not confirmed";
-  return "Pending";
+  return "Confirming";
 }
 
 // Chain errors with a plain meaning, in the words Activity uses. The raw
-// error stays under a transaction's Technical details.
+// error stays under a transaction's Details.
 const KNOWN_ERRORS = [
   [/phoenix is not enabled/i, "Shielded transactions are paused on the network."],
   [/\bout\s*of\s*gas\b|\bOutOfGas\b/i, "It ran out of gas. A higher gas limit lets it finish."],
@@ -49,7 +49,8 @@ export function txErrorText(error) {
 export function txStatusTone(status, { final = false } = {}) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "ok";
-  if (s === "failed") return "bad";
+  // Dropped before it ran says Failed, so it looks it.
+  if (s === "failed" || s === "removed") return "bad";
   if ((s === "unknown" && final) || s === "not_sent") return "neutral";
   return "pending";
 }
@@ -60,7 +61,7 @@ export function txRecoveryReasonLabel(reason) {
 
   const key = raw.toLowerCase();
   if (key === "watcher_timeout") {
-    return "The wallet did not receive a final network event before the watcher timed out.";
+    return "The wallet stopped waiting before the network confirmed it.";
   }
   // Its connection to the network went while it waited, as with no signal.
   if (key === "watcher_unavailable") {
@@ -71,13 +72,13 @@ export function txRecoveryReasonLabel(reason) {
     return "The connection went as it was sent. The wallet looks it up by its ID.";
   }
   if (key === "not_found") {
-    return "The transaction was not found in the node's chain or mempool response.";
+    return "The network has no record of it.";
   }
   if (key === "removed_unconfirmed") {
-    return "The node reported removal, but the wallet has not confirmed it yet.";
+    return "The network said it dropped it. The wallet hasn't confirmed that yet.";
   }
   if (key === "removed") {
-    return "The node reported that this transaction was removed from the mempool.";
+    return "The network dropped it before it ran.";
   }
   if (key === "not_reached") {
     return "The connection went as it was sent, and the network never got it.";

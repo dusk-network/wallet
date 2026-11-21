@@ -7,7 +7,7 @@ import {
   revokeOriginEverywhere,
 } from "../shared/permissions.js";
 import { getSettings, setSettings } from "../shared/settings.js";
-import { noteSiteSendFailed, siteLastsMs } from "../shared/siteRecords.js";
+import { noteSiteSendFailed, siteConnectedBefore, siteLastsMs } from "../shared/siteRecords.js";
 import { sentOf } from "../shared/sendOutcome.js";
 import { assertSiteSend, proveSiteSend } from "../shared/sendPassword.js";
 import { WALLET_LIFECYCLE_LOCK, withStorageLock } from "../shared/storageLock.js";
@@ -501,8 +501,12 @@ export async function handleRpc(origin, request, { pressed, approvalKey = "", re
     const shown = promptFor(statusBeforePrompt);
     // A new connection lasts as this site was set to, else as new sites are.
     const lastsMs = await siteLastsMs(await siteWalletId(statusBeforePrompt), origin, (await getSettings()).newSiteLastsMs);
+    // A site never connected here before says so on its window: a look-alike
+    // of one you use is new to the wallet.
+    const firstConnection = !existing && !(await siteConnectedBefore(origin));
     const approved = await requestUserApproval("connect", origin, {
       requestedProfiles: true,
+      firstConnection,
       lastsMs,
       endsAt: Number(existing?.expiresAt) || 0,
       stays: Boolean(existing),

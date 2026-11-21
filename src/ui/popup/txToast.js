@@ -8,7 +8,8 @@ function statusWord(status) {
   const s = String(status ?? "").toLowerCase();
   if (s === "executed") return "completed";
   if (s === "failed" || s === "removed") return "failed";
-  return "is still pending";
+  if (s === "unknown") return "isn't confirmed yet";
+  return "is still confirming";
 }
 
 function tone(status) {

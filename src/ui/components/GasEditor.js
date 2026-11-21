@@ -161,7 +161,7 @@ export class DuskGasEditor extends HTMLElement {
     return this.#minLimit;
   }
 
-  /** The network's gas price and the limit that suits the transaction: what "Use the network's price" sets. */
+  /** The network's gas price and the limit that suits the transaction: what "Use network price" sets. */
   set networkGas(gas) {
     this.#networkGas = gas?.limit != null && gas?.price != null ? { limit: String(gas.limit), price: String(gas.price) } : null;
     this.updatePreview();
@@ -267,7 +267,7 @@ export class DuskGasEditor extends HTMLElement {
     this.#resetBtn = h("button", {
       class: "text-btn text-btn--inline gas-reset",
       type: "button",
-      text: "Use the network's price",
+      text: "Use network price",
       hidden: true,
       onclick: () => {
         if (this.#networkGas) this.setGas(this.#networkGas);
@@ -293,7 +293,7 @@ export class DuskGasEditor extends HTMLElement {
     this.#totalLabel = h("span", { class: "kv-label", text: "Total" });
     this.#totalRow = h("div", { class: "kv" }, [this.#totalLabel, this.#totalValue]);
     const group = h("div", { class: "group gas-fee" }, [
-      h("div", { class: "kv" }, [h("span", { class: "kv-label", text: "Network fee" }), this.#feeValue]),
+      h("div", { class: "kv" }, [h("span", { class: "kv-label", text: "Fee" }), this.#feeValue]),
       this.#totalRow,
     ]);
 

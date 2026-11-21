@@ -160,7 +160,7 @@ describe("Activity's rows", () => {
     };
     setup({ local: [pending] });
     const own = rowWith("−5 DUSK");
-    expect([own.name, own.status, own.pending]).toEqual(["faucet.dusk", "Pending", true]);
+    expect([own.name, own.status, own.pending]).toEqual(["faucet.dusk", "Confirming", true]);
     // Completed rows say nothing about it.
     for (const row of rows().filter((r) => r.row !== own.row)) expect([row.status, row.pending]).toEqual(["", false]);
 
@@ -169,7 +169,7 @@ describe("Activity's rows", () => {
     view.state.addressBook = { loaded: true, items: [{ name: "Faucet (test)", address: FAUCET }] };
     view.draw();
     const named = rowWith("−5 DUSK");
-    expect([named.name, named.alias, named.status]).toEqual(["Faucet (test)", "faucet.dusk", "Pending"]);
+    expect([named.name, named.alias, named.status]).toEqual(["Faucet (test)", "faucet.dusk", "Confirming"]);
   });
 
   // Lena's: after Don't send, a payment that went out anyway was a plain Sent row after a few seconds, and she

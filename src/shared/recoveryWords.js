@@ -1,4 +1,4 @@
-// "Check your recovery words": three of a phrase's words, by their places,
+// "Check your recovery phrase": three of a phrase's words, by their places,
 // chosen at random. Whether the words typed are its words there is
 // app-core's to say (recoveryWordsMatch), as both wallets ask it; nothing
 // typed is kept, logged or sent anywhere.

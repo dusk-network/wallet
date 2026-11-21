@@ -160,7 +160,7 @@ export async function handleUiCommand(
     return { ok: true, hideBalances: next.hideBalances === true };
   }
 
-  // Check your recovery words, in Settings: with the password, how many words
+  // Check your recovery phrase, in Settings: with the password, how many words
   // the open wallet's phrase has; then, with the words typed by their places,
   // whether they're its words there: yes or no, and nothing of the phrase,
   // whatever was typed. Compared here; nothing typed is kept.

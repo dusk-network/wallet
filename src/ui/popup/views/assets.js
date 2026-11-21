@@ -267,6 +267,8 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
   const tokens = Array.isArray(st?.tokens) ? st.tokens : [];
   const nfts = Array.isArray(st?.nfts) ? st.nfts : [];
 
+  // A token by its name, "DRC20 token" where it has none, its symbol beside
+  // its balance, also while that isn't read ("— TKN").
   const tokenRows = tokens.map((t) => {
     const cid = String(t?.contractId ?? "");
     const sym = String(t?.symbol ?? "").trim() || "TOKEN";
@@ -289,11 +291,8 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
       },
       [
         h("span", { class: "row-icon asset-letter", "aria-hidden": "true", text: sym.slice(0, 1).toUpperCase() }),
-        h("span", { class: "row-main" }, [
-          h("span", { class: "row-title", text: sym }),
-          h("span", { class: "row-sub", text: name, title: cid }),
-        ]),
-        h("span", { class: "tx-amount asset-amt" }, [balance(hidden, bal), bal === "—" ? null : h("span", { class: "tx-unit", text: ` ${sym}` })].filter(Boolean)),
+        h("span", { class: "row-main" }, [h("span", { class: "row-title", text: name, title: cid })]),
+        h("span", { class: "tx-amount asset-amt" }, [balance(hidden, bal), h("span", { class: "tx-unit", text: ` ${sym}` })]),
       ]
     );
   });
@@ -889,8 +888,11 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
         })
       : null;
 
-  // Back returns to the token, so Review has no Cancel.
-  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
+  // Back returns to the token, so Review has no Cancel. Its button says what
+  // it does and how much: "Send 5 EURd", "Approve 5 EURd", "Approve all EURd".
+  const valueShown = groupThousands(formatTokenUnits(String(d?.asset?.valueUnits ?? d?.asset?.value ?? "0"), dec, { maxFrac: dec }));
+  const confirmText = op === "transfer" ? `Send ${valueShown} ${sym}` : op === "approve" ? (d?.asset?.isMax ? `Approve all ${sym}` : `Approve ${valueShown} ${sym}`) : "Approve";
+  const confirmBtn = h("button", { class: "btn-primary", text: confirmText });
 
   // The public balance pays its fee.
   const pay = payGuard({

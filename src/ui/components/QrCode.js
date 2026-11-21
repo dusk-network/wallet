@@ -97,8 +97,8 @@ function wrapped(ctx, text, width) {
  */
 export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10, caption = [] } = {}) {
   const svg = qrSvgString(value, { ecc, margin });
-  if (!svg) throw new Error("No QR value to export");
-  if (typeof document === "undefined") throw new Error("PNG export is unavailable");
+  if (!svg) throw new Error("There's no QR to save.");
+  if (typeof document === "undefined") throw new Error("The QR can't be saved here.");
 
   const { w, h } = svgModuleSize(svg);
   const canvas = document.createElement("canvas");
@@ -106,7 +106,7 @@ export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10, capt
   const qrHeight = Math.max(1, Math.ceil(h * scale));
 
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("PNG export is unavailable");
+  if (!ctx) throw new Error("The QR can't be saved here.");
 
   // What it asks, each line wrapped to the width there is under the code,
   // never cut: the picture is all whoever gets it has.
@@ -128,7 +128,7 @@ export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10, capt
     img.decoding = "sync";
     await new Promise((resolve, reject) => {
       img.onload = resolve;
-      img.onerror = () => reject(new Error("Failed to render QR"));
+      img.onerror = () => reject(new Error("Couldn't draw the QR."));
       img.src = url;
     });
 
@@ -153,7 +153,7 @@ export async function qrPngBlob(value, { ecc = "M", margin = 2, scale = 10, capt
     return await new Promise((resolve, reject) => {
       canvas.toBlob((png) => {
         if (png) resolve(png);
-        else reject(new Error("Failed to export QR PNG"));
+        else reject(new Error("Couldn't save the QR."));
       }, "image/png");
     });
   } finally {

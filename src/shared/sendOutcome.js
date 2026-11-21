@@ -11,7 +11,7 @@
 const REFUSED =
   /waits for your password|nothing was signed|not accepted|wallet locked|wallet (or network )?changed while|invalid|insufficient|not enough|exceed|must be|minimum|too (low|high|small|large)|nonce|balance|rejected|refused|denied|does not accept|cannot include|not configured|is required|unauthori[sz]ed|failed to (archive|unarchive|deserialize)|unknown error code/i;
 
-/** Why a payment called off with Cancel wasn't sent (waitingSends.js). */
+/** Why a payment called off with Don't send wasn't sent (waitingSends.js). */
 export const SEND_CANCELLED_TEXT = "You cancelled it, so nothing was sent.";
 
 // The connection, as the browser reports it: no signal, or a node down.

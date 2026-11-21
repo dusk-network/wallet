@@ -878,14 +878,16 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
         const names = await siteNames(String(settings?.nodeUrl ?? ""), accounts);
 
         // The saved contacts, so a request to send names a recipient the
-        // user saved from its first paint, as it names the profiles. They
-        // open only while the wallet is unlocked.
-        let contacts = [];
+        // user saved from its first paint, as it names the profiles, and says
+        // of one that isn't saved that it isn't. They open only while the
+        // wallet is unlocked: null where they weren't read, so no recipient
+        // is called no contact for it.
+        let contacts = null;
         if (entry.kind === "send_tx" && status.isUnlocked) {
           try {
             contacts = (await contactsStore(engineContactsVault(engineCall)).list()).map(({ name, address }) => ({ name, address }));
           } catch {
-            contacts = [];
+            contacts = null;
           }
         }
 

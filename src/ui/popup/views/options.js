@@ -15,7 +15,7 @@ import { duskNameOwners, duskNamesNetwork, lookupPrimaryName } from "../../../sh
 import { networkForNode, networkTextOf } from "../../../shared/nodeNetwork.js";
 import { openUrl, platform } from "../../../platform/index.js";
 import { getExtensionApi } from "../../../platform/extensionApi.js";
-import { isPhone, thisDevice } from "../../lib/device.js";
+import { isPhone } from "../../lib/device.js";
 import { isTauriRuntime } from "../../../platform/runtime.js";
 import { h } from "../../lib/dom.js";
 import { shortAddress, siteName } from "../../lib/strings.js";
@@ -31,11 +31,12 @@ import { appNoticesAllowed, askAppNotices } from "../../../platform/notices.js";
 import { watchIncomingAgain } from "../incoming.js";
 import { switchContext } from "../context.js";
 import { siteDetailsEl, siteLastUsedEl } from "./siteRecord.js";
-import { resetKeptText } from "./wallets.js";
 
 // Settings: the wallets, the profile, security, connected sites, contacts and
-// the network, then Advanced (custom gas, Delete all contacts), Reset wallet
+// the network, then Advanced (custom fee, Delete all contacts), Reset wallet
 // on its own, and About: the version, and the terms of use and privacy policy.
+// What a button's own page says (Reset's warning, Change password's every
+// wallet) is said there, not here too.
 
 const autoLockLabel = (minutes) =>
   AUTO_LOCK_OPTIONS.find((o) => o.value === minutes)?.label ?? `${minutes} minutes`;
@@ -101,7 +102,7 @@ function fingerprintRow({ actions }) {
         }
       },
     });
-    ask = h("div", { class: "settings-fingerprint-ask" }, [fieldLabel(pwd, "Your password, to turn it on"), pwd, error, turnOn]);
+    ask = h("div", { class: "settings-fingerprint-ask" }, [fieldLabel(pwd, "Password"), pwd, error, turnOn]);
     row.append(ask);
     pwd.focus?.();
   };
@@ -264,11 +265,11 @@ export function optionsView(ov, { state, actions } = {}) {
   const labelsEditor =
     ov?.isUnlocked && walletId
       ? h("div", { class: "settings-labels" }, [
-          h("h3", { class: "settings-subtitle", text: "Names on this device" }),
+          h("h3", { class: "settings-subtitle", text: "Names (only on this device)" }),
           ...displayAccounts.map((acct, i) => {
             let saved = labelOf(nameMap?.[String(i)]);
             const input = textInput({
-              placeholder: "Name, only on this device",
+              placeholder: "Name",
               "aria-label": `Profile ${i + 1} name`,
               value: drafts[i] ?? saved,
             });
@@ -508,7 +509,7 @@ export function optionsView(ov, { state, actions } = {}) {
         })
       : null;
 
-  // Check your recovery words: three of them, behind the password, in the extension and the app.
+  // Check your recovery phrase: three of its words, behind the password, in the extension and the app.
   const checkWordsRow = ov?.isUnlocked
     ? h(
         "button",
@@ -522,7 +523,7 @@ export function optionsView(ov, { state, actions } = {}) {
         },
         [
           h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg("check") }),
-          h("span", { class: "row-main" }, [h("span", { class: "row-title", text: "Check your recovery words" })]),
+          h("span", { class: "row-main" }, [h("span", { class: "row-title", text: "Check your recovery phrase" })]),
           h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
         ]
       )
@@ -588,13 +589,12 @@ export function optionsView(ov, { state, actions } = {}) {
     lockChoices.map((opt) => h("option", { value: String(opt.value), text: opt.label }))
   );
   autoLockSelect.value = leaving ? "leave" : String(currentAutoLock);
+  // Under the choice only what it doesn't say: what Immediately is, in the
+  // app, and with more than one wallet here, that it's every one's.
   const lockNote = h("p", { class: "settings-note" });
   const sayLock = (onLeave) => {
-    lockNote.textContent = onLeave
-      ? "Locks the wallet as you leave the app."
-      : lockAll
-        ? "Locks every wallet after this long without use."
-        : "Locks the wallet after this long without use.";
+    lockNote.textContent = onLeave ? "Locks as you leave the app." : lockAll ? "For every wallet here." : "";
+    lockNote.hidden = !lockNote.textContent;
   };
   autoLockSelect.addEventListener("change", async () => {
     const onLeave = autoLockSelect.value === "leave";
@@ -975,7 +975,7 @@ export function optionsView(ov, { state, actions } = {}) {
   );
   if (nodeDraft) showUnsaved();
 
-  // Advanced: custom gas for every Review, as the web wallet has it.
+  // Advanced: a custom fee (gas limit and price) for every Review, as the web wallet has it.
   const custom = normalizeCustomGas(ov?.customGas);
   const gasOn = st.customGasOn ?? Boolean(custom);
   const gasToggle = h("input", { type: "checkbox", id: "custom-gas", checked: gasOn });
@@ -997,13 +997,13 @@ export function optionsView(ov, { state, actions } = {}) {
     gasNote.textContent = !gasToggle.checked
       ? "The wallet uses the network's gas price, and a gas limit that suits each transaction."
       : gas
-      ? `Each transaction costs at most ${formatFee(BigInt(gas.limit) * BigInt(gas.price), { max: true })} DUSK. One that needs more gas than this limit keeps its own.`
+      ? `Fee up to ${formatFee(BigInt(gas.limit) * BigInt(gas.price), { max: true })} DUSK per transaction. One that needs a higher gas limit keeps its own.`
       : "";
   };
   const saveGas = async (gas) => {
     try {
       const res = await actions?.send?.({ type: "DUSK_UI_SET_CUSTOM_GAS", customGas: gas });
-      if (res?.error) throw new Error(res.error.message ?? "Couldn't save custom gas");
+      if (res?.error) throw new Error(res.error.message ?? "Couldn't save the custom fee");
       if (state.overview) state.overview.customGas = gas;
       if (ov && ov !== state.overview) ov.customGas = gas;
       // Saved: the fields show what's saved from now on.
@@ -1041,12 +1041,12 @@ export function optionsView(ov, { state, actions } = {}) {
     type: "button",
     text: "Delete all contacts",
     onclick: async () => {
-      if (!confirm("Delete all saved contacts from this wallet? This can't be undone.")) return;
+      if (!confirm("Delete all contacts from this wallet? This can't be undone.")) return;
       try {
         // This wallet's alone, as drawn: another wallet's contacts stay.
         await clearAddressBook({ walletId });
         if (state.addressBook) Object.assign(state.addressBook, { loaded: false, items: null, query: "" });
-        actions?.showToast?.("Deleted all contacts");
+        actions?.showToast?.("All contacts deleted.");
       } catch (e) {
         actions?.showToast?.(e?.message ?? String(e), 2500);
       }
@@ -1055,7 +1055,7 @@ export function optionsView(ov, { state, actions } = {}) {
   const advanced = h("details", { class: "advanced settings-advanced", open: Boolean(st.advancedOpen) }, [
     h("summary", { text: "Advanced" }),
     h("div", { class: "advanced-body" }, [
-      h("label", { class: "settings-switch", for: "custom-gas" }, [gasToggle, h("span", { text: "Custom gas" })]),
+      h("label", { class: "settings-switch", for: "custom-gas" }, [gasToggle, h("span", { text: "Custom fee" })]),
       gasNote,
       gasFields,
       h("p", { class: "settings-note", text: "Remote NFT media is off." }),
@@ -1066,7 +1066,7 @@ export function optionsView(ov, { state, actions } = {}) {
     st.advancedOpen = advanced.open;
   });
 
-  // Contacts, a row of its own.
+  // Contacts, a row of its own, in a section with no title over it: the row says it.
   const contactsRow = h(
     "button",
     {
@@ -1100,8 +1100,8 @@ export function optionsView(ov, { state, actions } = {}) {
     ]
   );
 
-  // Reset, on a screen of its own: the password first, as for removing a wallet.
-  const resetKept = resetKeptText();
+  // Reset, on a screen of its own, which says what it removes: the password
+  // first, as for removing a wallet.
   const resetBtn = h("button", {
     class: "btn-destructive",
     type: "button",
@@ -1126,9 +1126,10 @@ export function optionsView(ov, { state, actions } = {}) {
       },
     });
 
-  const section = (title, children = [], className = "") =>
+  // `quiet`: a heading for screen readers alone, where the one button under it says the same.
+  const section = (title, children = [], className = "", { quiet = false } = {}) =>
     h("section", { class: ["settings-section", className].filter(Boolean).join(" ") }, [
-      bracketTitle({ class: "settings-section-title", text: title }),
+      bracketTitle({ class: quiet ? "settings-section-title sr-only" : "settings-section-title", text: title }),
       ...children.filter(Boolean),
     ]);
 
@@ -1149,22 +1150,16 @@ export function optionsView(ov, { state, actions } = {}) {
       (sayLock(leaving), lockNote),
       fingerRow,
       changePasswordBtn,
-      changePasswordBtn ? h("p", { class: "settings-note", text: "Changes the password for every wallet here." }) : null,
       sendPasswordRow || phraseRow || checkWordsRow ? h("div", { class: "group" }, [phraseRow, checkWordsRow, sendPasswordRow].filter(Boolean)) : null,
     ]),
     inApp && ov?.isUnlocked ? section("Notices", [incomingRow(ov, { actions })]) : null,
     sitesSection ? section("Connected sites", sitesSection) : null,
-    section("Contacts", [h("div", { class: "group" }, [contactsRow])]),
+    // Contacts is its own section, its title the row's, as Advanced's is the disclosure's.
+    h("section", { class: "settings-section" }, [h("div", { class: "group" }, [contactsRow])]),
     section("Network", [h("div", { class: "select-wrap" }, [networkSelect]), switchError, nodeDetails]),
     // Advanced is its own section, its title the disclosure's.
     h("section", { class: "settings-section" }, [advanced]),
-    section("Reset", [
-      h("p", {
-        class: "settings-note",
-        text: `Removes every wallet, with its ${resetKept}, from ${thisDevice()}, and goes back to Mainnet. Your funds stay on Dusk. You need each recovery phrase to use them again.`,
-      }),
-      resetBtn,
-    ], "settings-section--danger"),
+    section("Reset", [resetBtn], "settings-section--danger", { quiet: true }),
     section("About", [
       installedVersion ? h("p", { class: "settings-note", text: `Dusk Wallet v${installedVersion}` }) : null,
       h("p", { class: "settings-note settings-legal" }, [

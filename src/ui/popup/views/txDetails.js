@@ -30,11 +30,12 @@ import { waiting } from "../../components/Waiting.js";
 import { REPLACED_TEXT } from "../../../shared/waitingSends.js";
 
 // A transaction's details: a centred summary (who, how much, its status),
-// then its date, memo, fee, the profile it left or reached, and its ID, which
-// opens Dusk's explorer; a transfer to another chain that arrived adds when, and its
-// transaction there. Block, gas, finality and a call's contract sit under
-// Technical details, labelled as in every Dusk app. A row shows an amount short;
-// here it's exact, the fee too. Hide balances hides the amount; the fee stays.
+// then its date, memo, fee and the profile it left or reached; a transfer to
+// another chain that arrived adds when, and its transaction there. Its ID,
+// which opens the explorer, with Copy, and its block, gas, finality and a
+// call's contract sit under Details, labelled as in every Dusk app. A row
+// shows an amount short; here it's exact, the fee too. Hide balances hides
+// the amount; the fee stays.
 
 const STATUS_ICON = { ok: "check", bad: "alert", pending: "clock" };
 
@@ -55,8 +56,9 @@ function statusNote(tx, desc, hidden) {
   const shielded = tx?.privacy === "shielded";
   const a = desc.amount;
   const stayed = !desc.unsent || !a || a.text ? "" : hidden ? " The amount stayed in your wallet." : ` The ${a.exact ?? a.value} ${a.unit} stayed in your wallet.`;
+  // That no fee was charged, its Fee row says.
   if (tx?.dropped) {
-    return `The network dropped it before it ran, so no fee was charged.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
+    return `The network dropped it before it ran.${stayed}${shielded ? " Shielded funds may still be reserved locally." : ""}`;
   }
   // Chosen not to be sent, and arrived after all (txReconcile.js): when, too,
   // as its block says (wentAt).
@@ -67,7 +69,7 @@ function statusNote(tx, desc, hidden) {
   switch (desc.status) {
     case "pending":
       if (globalThis.navigator?.onLine === false) return "No connection. It's looked up again once you're back online.";
-      return tx?.sent?.status === "mempool" ? "Still waiting to go through. Don't retry yet." : "Waiting for a block, usually about 10 seconds.";
+      return tx?.sent?.status === "mempool" ? "Still waiting to go through. Don't retry yet." : "About 10 s";
     case "unknown":
       // Final on chain, its outcome not looked up yet; or the wallet's own
       // send it stopped waiting for.
@@ -76,9 +78,9 @@ function statusNote(tx, desc, hidden) {
         : "The wallet stopped waiting for a result. That doesn't mean it failed.";
     case "failed":
       return `${txErrorText(tx?.error) || reasonText(tx?.error) || "It ran but didn't go through."}${stayed}`;
-    // Handed over as the connection went, and the network never got it.
+    // Handed over as the connection went, and the network never got it: held.
     case "unsent":
-      return "It didn't reach the network. Nothing has left your wallet.";
+      return "It didn't reach the network. Nothing left your wallet.";
     case "not_sent":
       return REPLACED_TEXT;
     default:
@@ -86,9 +88,9 @@ function statusNote(tx, desc, hidden) {
   }
 }
 
-// Not sent yet: the network never got it, and it goes out as it was made,
-// with Send it now, or never, with Don't send (Chen's: "Not confirmed yet" for
-// good, with nothing to tap). Each answers once.
+// Held: the network never got it, and it goes out as it was made, with Send
+// it now, or never, with Don't send (Chen's: "Not confirmed yet" for good,
+// with nothing to tap). Each answers once.
 function unsentActions(tx, { state, actions } = {}) {
   if (tx?.status !== "unsent" || tx?.source !== "sent") return null;
   const hash = String(tx.hash ?? "");
@@ -145,13 +147,14 @@ function profileValue(ov, tx, rail) {
 // A fee, hidden as amounts are with Hide balances.
 const feeValue = (text, hidden) => h("span", {}, [balance(hidden, text), " DUSK"]);
 
+// The fee; none charged for one dropped, held or not sent.
 function feeRow(tx, desc, hidden) {
-  if (tx?.dropped || tx?.status === "unsent" || tx?.status === "not_sent") return kv("Network fee", "None charged");
-  if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Network fee", feeValue(formatDuskExact(tx.fee), hidden));
+  if (tx?.dropped || tx?.status === "unsent" || tx?.status === "not_sent") return kv("Fee", "None charged");
+  if (tx?.fee != null) return kv(desc.failed ? "Fee charged" : "Fee", feeValue(formatDuskExact(tx.fee), hidden));
   const limit = tx?.gasLimit ?? 0n;
   const price = tx?.gasPrice ?? 0n;
   if (desc.tone === "pending" && tx?.source === "sent" && limit > 0n && price > 0n) {
-    return kv("Network fee", h("span", {}, ["Up to ", feeValue(formatFee(limit * price, { max: true }), hidden)]));
+    return kv("Fee", h("span", {}, ["Up to ", feeValue(formatFee(limit * price, { max: true }), hidden)]));
   }
   return null;
 }
@@ -166,16 +169,12 @@ function technicalRows(tx, ov, nodeUrl, showToast, hidden) {
   const sent = tx?.sent ?? {};
   const watch = tx?.source === "sent" ? sent : {};
   return [
-    kv("Network", nodeUrl ? networkTextOf(nodeUrl) : String(ov?.networkName ?? "Unknown")),
-    num(tx?.blockHeight) ? kv("Block", mono(num(tx.blockHeight))) : null,
     used || limit ? kv("Gas used", h("span", {}, [balance(hidden, used && limit ? `${used} of ${limit}` : used ? used : `Limit ${limit}`)])) : null,
     num(tx?.gasPrice) ? kv("Gas price", `${num(tx.gasPrice)} LUX`) : null,
-    tx?.source !== "sent" && ["executed", "failed"].includes(tx?.status) ? kv("Finality", "Final") : null,
     tx?.kind === TX_KIND.CONTRACT_CALL && tx?.contractId ? kv("Contract", contractValue(String(tx.contractId), nodeUrl || ov?.nodeUrl, showToast)) : null,
     tx?.fnName ? kv("Method", safeTextEl(String(tx.fnName), { mono: true })) : null,
-    tx?.blockHash ? kv("Block hash", mono(String(tx.blockHash), shortAddress(String(tx.blockHash)))) : null,
     at("Submitted", tx?.submittedAt),
-    at("Seen in mempool", watch.mempoolSeenAt),
+    at("Reached the network", watch.mempoolSeenAt),
     at("Last checked", watch.lastCheckedAt),
     at("Dropped", watch.removedAt),
     sent.reservationStatus ? kv("Shielded reservation", String(sent.reservationStatus)) : null,
@@ -192,7 +191,7 @@ function contractValue(raw, nodeUrl, showToast) {
   return contractValueEl(contractLabel(raw, nodeUrl), mono(id, contractIdText(raw, { short: true })), copyContractButton(id, showToast));
 }
 
-function explorerButton(url, actions, text = "View in Dusk explorer") {
+function explorerButton(url, actions, text = "View in explorer") {
   if (!url) return null;
   return h(
     "button",
@@ -388,7 +387,7 @@ export function txDetailsView(ov, { state, actions } = {}) {
   // contact's .dusk name before it; an address without a name shows in full
   // mono, Copy beside it; a deposit to DuskEVM is "To" the address it paid
   // there, Copy beside it; a transfer through a bridge's account shows that
-  // account under it. A call's contract is under Technical details.
+  // account under it. A call's contract is under Details.
   const via = desc.via?.address ? desc.via : null;
   const other = via ? via.address : !desc.evm && desc.address && !desc.isAddress ? desc.address : "";
   // A contact whose name looks like another's: its .dusk name alone before the address, which shows once.
@@ -443,8 +442,8 @@ export function txDetailsView(ov, { state, actions } = {}) {
   const idButton = h("button", {
     class: "text-btn tx-id chain-link",
     type: "button",
-    title: explorerUrl ? "Open in Dusk explorer" : hash,
-    "aria-label": explorerUrl ? `Transaction ${shortAddress(hash)}, open in Dusk explorer` : undefined,
+    title: explorerUrl ? "Open in explorer" : hash,
+    "aria-label": explorerUrl ? `Transaction ${shortAddress(hash)}, open in explorer` : undefined,
     disabled: !explorerUrl,
     text: shortAddress(hash),
     onclick: async () => {
@@ -518,14 +517,13 @@ export function txDetailsView(ov, { state, actions } = {}) {
     ledger ? null : feeRow(tx, desc, hidden),
     ...ownRows,
     site ? kv("Site", site) : null,
-    kv("Transaction ID", [idButton, copyId]),
     arrivalRow,
   ].filter(Boolean));
 
-  // Technical details stay open across redraws (a sync can redraw this view).
+  // Details stay open across redraws (a sync can redraw this view): the ID first.
   const tech = h("details", { class: "advanced tx-tech", open: Boolean(state?.txTechOpen) }, [
-    h("summary", { text: "Technical details" }),
-    h("div", { class: "group group--inset" }, technicalRows(tx, ov, nodeUrl, showToast, hidden)),
+    h("summary", { text: "Details" }),
+    h("div", { class: "group group--inset" }, [kv("Transaction ID", [idButton, copyId]), ...technicalRows(tx, ov, nodeUrl, showToast, hidden)]),
   ]);
   tech.addEventListener("toggle", () => {
     if (state) state.txTechOpen = tech.open;

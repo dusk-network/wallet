@@ -157,7 +157,7 @@ describe("a stake or an unstake with Sozu, completed", () => {
 });
 
 describe("after Confirm", () => {
-  it("shows Sending at once, then Sent to the network with the transaction ID, Copy and the Dusk explorer", async () => {
+  it("shows Sending at once, then Confirming with the transaction ID, Copy and the Dusk explorer", async () => {
     const state = reviewState();
     const app = popup(state);
     await settle();
@@ -171,7 +171,7 @@ describe("after Confirm", () => {
 
     reply.resolve({ ok: true, result: { hash: HASH } });
     await settle();
-    expect([phase(), stepStates(), stepTitle(1)]).toEqual(["sent", ["done", "current", "upcoming"], "Sent to the network"]);
+    expect([phase(), stepStates(), stepTitle(1)]).toEqual(["sent", ["done", "current", "upcoming"], "Confirming"]);
     // Its ID, its memo and the most its fee costs.
     expect(visibleText(txId())).toBe("3e6a0e…ae84ba");
     expect(memo()).toBe("Lunch");
@@ -206,9 +206,7 @@ describe("after Confirm", () => {
     expect(noteTxStatus(state.sent, { hash: HASH, status: "executed", feePaid: "312345", blockHeight: "1234567" })).toBe(true);
     app.draw();
     expect([stepStates(), stepTitle(2)]).toEqual([["done", "done", "done"], "Completed"]);
-    // Its block, under Completed; the balance it went from; and its fee to the last lux, as its transaction's details
-    // say it.
-    expect(stepSub(2)).toMatch(exactly("1,234,567"));
+    // The balance it went from, and its fee to the last lux, as its transaction's details say it.
     expect(sentLine()).toMatch(/public/i);
     expect(sentLine()).not.toMatch(/shielded/i);
     expect(fee()).toMatch(exactly("0.000312345 DUSK"));
@@ -311,7 +309,6 @@ describe("after Confirm", () => {
     ov.txs = [{ hash: HASH, status: "executed", feePaid: "2136028", blockHeight: "4817567" }];
     app.draw();
     expect([phase(), stepStates(), stepTitle(2)]).toEqual(["sent", ["done", "done", "done"], "Completed"]);
-    expect(stepSub(2)).toMatch(exactly("4,817,567"));
     expect(sentLine()).toMatch(/public/i);
     expect(sentLine()).not.toMatch(/shielded/i);
     expect(fee()).toMatch(exactly("0.002136028 DUSK"));
@@ -319,7 +316,7 @@ describe("after Confirm", () => {
 
   // Amélie's: offline while Sending, nothing said a word of the connection; and later, the Wi-Fi off at Confirm said
   // "until you're back online", then "Not sent" a second on, and never waited as the web wallet does.
-  it("says a payment from Send waits for the network while it's offline, nothing gone out yet, with Cancel", async () => {
+  it("says a payment from Send waits for the network while it's offline, nothing gone out yet, with Don't send", async () => {
     const state = reviewState();
     const app = popup(state);
     await settle();
@@ -327,10 +324,10 @@ describe("after Confirm", () => {
     expect([phase(), stepStates()[0], cancelButton()]).toEqual(["sending", "current", null]);
     vi.stubGlobal("navigator", { ...globalThis.navigator, onLine: false });
     app.draw();
-    // Waiting, as it's offline: nothing has left the wallet, never that it may have gone out, and Cancel calls it off.
+    // Waiting, as it's offline: nothing sent yet, never that it may have gone out, and Don't send calls it off.
     expect([phase(), stepStates()[0]]).toEqual(["sending", "current"]);
     expect(stepSub(0)).toMatch(/offline/i);
-    expect(stepSub(0)).toMatch(/nothing has left your wallet/i);
+    expect(stepSub(0)).toMatch(/nothing sent yet/i);
     expect(stepSub(0)).not.toMatch(/may have gone out/i);
     expect(stepSub(0)).not.toContain(UNCLEAR_TEXT);
     expect(cancelButton()).toBeTruthy();
@@ -342,7 +339,7 @@ describe("after Confirm", () => {
 
   // Chen's: the Wi-Fi went just as a payment was handed over; the screen said "Nothing has left your wallet yet" of a
   // payment that had reached the node, and offered Cancel.
-  it("says a payment handed over may have gone out already, offline or waiting, never that nothing left, without Cancel", async () => {
+  it("says a payment handed over may have gone out already, offline or waiting, never that nothing left, without Don't send", async () => {
     const state = reviewState();
     const app = popup(state);
     await settle();
@@ -354,7 +351,7 @@ describe("after Confirm", () => {
     const mayHaveGone = () => {
       expect([stepStates()[0], cancelButton()]).toEqual(["current", null]);
       expect(stepSub(0)).toMatch(/may have gone out/i);
-      expect(stepSub(0)).not.toMatch(/nothing has left/i);
+      expect(stepSub(0)).not.toMatch(/nothing sent yet|nothing (has )?left/i);
       expect(stepSub(0)).toContain(UNCLEAR_TEXT);
     };
     app.draw();
@@ -366,7 +363,7 @@ describe("after Confirm", () => {
     mayHaveGone();
   });
 
-  it("says a payment that waits for the network does, and Cancel calls it off: not sent, no fee", async () => {
+  it("says a payment that waits for the network does, and Don't send calls it off: not sent, no fee", async () => {
     const state = reviewState();
     const app = popup(state);
     await settle();
@@ -376,11 +373,11 @@ describe("after Confirm", () => {
     expect(asked).toMatchObject({ sendId: state.sent.sendId, feeCapLux: "2500000" });
     expect(state.sent.sendId).toMatch(/^[\w-]{8,64}$/);
 
-    // The wallet says it waits: online, the node silent. Nothing gone out, so Cancel.
+    // The wallet says it waits: online, the node silent. Nothing gone out, so Don't send.
     state.sent.waits = true;
     app.draw();
     expect([phase(), stepStates()[0]]).toEqual(["sending", "current"]);
-    expect(stepSub(0)).toMatch(/nothing has left your wallet/i);
+    expect(stepSub(0)).toMatch(/nothing sent yet/i);
     expect(stepSub(0)).not.toMatch(/may have gone out/i);
     expect(stepSub(0)).not.toContain(UNCLEAR_TEXT);
     expect(cancelButton()).toBeTruthy();
@@ -413,7 +410,7 @@ describe("after Confirm", () => {
     expect(phase()).toBe("sending");
     sending.resolve({ ok: true, result: { hash: HASH } });
     await settle();
-    expect([phase(), stepStates(), stepTitle(1), cancelButton()]).toEqual(["sent", ["done", "current", "upcoming"], "Sent to the network", null]);
+    expect([phase(), stepStates(), stepTitle(1), cancelButton()]).toEqual(["sent", ["done", "current", "upcoming"], "Confirming", null]);
   });
 
   // Chen's: the Wi-Fi dropped as she paid on her first phone, she paid the same from her second, and the first sent
@@ -431,7 +428,7 @@ describe("after Confirm", () => {
     // The wallet says it's held (DUSK_UI_SEND_WAITING, held): not sent, said so, and nothing of closing the wallet.
     Object.assign(state.sent, { waits: false, held: true });
     app.draw();
-    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["sending", "unknown", "Not sent yet"]);
+    expect([phase(), stepStates()[0], stepTitle(0)]).toEqual(["sending", "unknown", "Held"]);
     expect(stepSub(0)).toMatch(/your account sent something else/i);
     expect(note()).toBeNull();
 

@@ -166,7 +166,7 @@ async function stakeState(page) {
   }));
 }
 
-// The page's clock, for Confirm: it ignores a click for a moment once its
+// The page's clock, for a Review's button: it ignores a click for a moment once its
 // screen is up, and the tests move the clock on as a person pauses.
 test.beforeEach(async ({ page }) => {
   await page.clock.install();
@@ -208,7 +208,7 @@ test.describe("owner-aware staking", () => {
       amountMode: "all",
     });
     await page.clock.fastForward(500);
-    await clickEnabled(page, "Confirm");
+    await clickEnabled(page, "Claim 42 DUSK");
     state = await stakeState(page);
     expect(state.messages.find((m) => m?.type === "DUSK_UI_SEND_TX").params).toMatchObject({
       kind: "withdraw_reward",
@@ -216,7 +216,7 @@ test.describe("owner-aware staking", () => {
       ownerProfileIndex: 0,
     });
     expect(state.messages.find((m) => m?.type === "DUSK_UI_SEND_TX").params).not.toHaveProperty("amount");
-    // Confirm shows the transaction's steps rather than a toast.
+    // Its button shows the transaction's steps rather than a toast.
     expect(state.route).toBe("sent");
     expect(state.toasts).toEqual([]);
 

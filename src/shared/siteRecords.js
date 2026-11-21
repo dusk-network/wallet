@@ -18,7 +18,7 @@
 // once. The same goes for a wallet's sites: a site with neither goes first,
 // then one that was only refused.
 
-import { getPermissionForOrigin } from "./permissions.js";
+import { connectedAnywhere, getPermissionForOrigin } from "./permissions.js";
 import { storage, STORAGE_KEYS } from "./storage.js";
 import { withStorageLock } from "./storageLock.js";
 import { TX_KIND } from "./constants.js";
@@ -200,6 +200,22 @@ export async function siteLastsMs(walletId, origin, fallback = 0) {
 export async function getSiteRecords(walletIds) {
   const all = await readAll();
   return Object.fromEntries(walletIds.map((id) => [id, sitesOf(all, id)]));
+}
+
+/**
+ * Whether a site was ever connected to a wallet here: connected now, to any
+ * wallet, or on a wallet's record as connected or used. A site forgotten in
+ * Settings, or past what's kept, counts as never, as one only refused does.
+ * @param {string} origin
+ * @returns {Promise<boolean>}
+ */
+export async function siteConnectedBefore(origin) {
+  if (await connectedAnywhere(origin)) return true;
+  const connected = (entry) => (entry?.what === "connect" || entry?.what === "shielded_address") && entry?.answer === "approved";
+  return Object.values(await readAll()).some((sites) => {
+    const site = isObject(sites) ? siteOf(sites, origin) : {};
+    return Number(site.lastUsedAt) > 0 || (Array.isArray(site.asked) && site.asked.some(connected));
+  });
 }
 
 /**

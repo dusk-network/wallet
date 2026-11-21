@@ -177,7 +177,7 @@ async function state(page) {
   }));
 }
 
-// The page's clock, for Confirm: it ignores a click for a moment once its
+// The page's clock, for a Review's button: it ignores a click for a moment once its
 // screen is up, and the tests move the clock on as a person pauses.
 test.beforeEach(async ({ page }) => {
   await page.clock.install();
@@ -227,7 +227,7 @@ test.describe("Sozu liquid staking", () => {
     await page.getByRole("button", { name: /Liquid staking/ }).click();
     // Too much says so under the field, not in a toast.
     await page.getByLabel("Stake amount").fill("5000");
-    await expect(page.locator(".amount-field__error")).toHaveText("That's more than your public balance, with the network fee.");
+    await expect(page.locator(".amount-field__error")).toHaveText(/^Your public balance is [\d,.]+ DUSK short, with this fee and the fee to unstake later\.$/);
     await expect(page.getByRole("button", { name: "Review stake" })).toBeDisabled();
     // Max keeps the fee, and the fee to unstake later: 0.005 and 0.01 DUSK.
     await page.getByRole("button", { name: "Max" }).click();
@@ -253,17 +253,17 @@ test.describe("Sozu liquid staking", () => {
     await expect(page.locator(".review-head")).toContainText("With Sozu, a third party");
     // What's visible to everyone is said on Send only.
     await expect(page.locator(".review-visible")).toHaveCount(0);
-    await expect(page.locator(".gas-fee")).toContainText("Network fee");
+    await expect(page.locator(".gas-fee")).toContainText("Fee");
     // The network's gas price, with one Custom fee, closed, and no presets.
     await expect(page.getByRole("button", { name: "Recommended" })).toHaveCount(0);
     await expect(page.getByLabel("Gas limit")).toBeHidden();
     await page.locator("details.gas-custom summary").click();
     await expect(page.getByLabel("Gas limit")).toBeVisible();
-    // The contract it calls, in there to check before Confirm.
+    // The contract it calls, in there to check before it's sent.
     await expect(page.locator("details.gas-custom .sozu-contract")).toContainText(/^Contract\s*Sozu pool · [0-9a-f]{6}…[0-9a-f]{6}/);
 
     await page.clock.fastForward(500);
-    await page.getByRole("button", { name: "Confirm" }).click();
+    await page.getByRole("button", { name: "Stake 5 DUSK" }).click();
     const submitted = await page.evaluate(() =>
       window.__stakeMessages.findLast((msg) => msg?.type === "DUSK_UI_SEND_TX")
     );
@@ -283,7 +283,7 @@ test.describe("Sozu liquid staking", () => {
     await installStakeHarness(page, { networkName: "Testnet" });
     await page.getByRole("button", { name: /Liquid staking/ }).click();
     await page.getByRole("tab", { name: "Unstake" }).click();
-    await expect(page.locator(".sozu-terms")).toHaveText("The DUSK comes back in the same transaction. No fee, no waiting.");
+    await expect(page.locator(".sozu-terms")).toHaveText("The DUSK comes back in the same transaction. No Sozu fee, no waiting.");
     await page.getByLabel("Unstake amount").fill("13");
     await expect(page.locator(".amount-field__error")).toHaveText("That's more than you have staked with Sozu.");
     await page.getByRole("button", { name: "Max" }).click();

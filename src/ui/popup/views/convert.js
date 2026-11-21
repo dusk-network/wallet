@@ -126,7 +126,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     ]),
     maxBtn,
   ]);
-  const feeNote = feeLux > 0n ? h("div", { class: "amount-fee-note", text: `Network fee up to ${formatFee(feeLux, { max: true })} DUSK` }) : null;
+  const feeNote = feeLux > 0n ? h("div", { class: "amount-fee-note", text: `Fee up to ${formatFee(feeLux, { max: true })} DUSK` }) : null;
 
   const nextBtn = h("button", {
     class: "btn-primary",
@@ -192,8 +192,9 @@ export function convertConfirmView(ov, { state, actions } = {}) {
   const fromRail = kind === TX_KIND.SHIELD ? "Public" : "Shielded";
   const toRail = kind === TX_KIND.SHIELD ? "Shielded" : "Public";
 
-  // Back returns to Shield with the draft, so Review has no Cancel.
-  const confirmBtn = h("button", { class: "btn-primary", text: "Confirm" });
+  // Back returns to Shield with the draft, so Review has no Cancel. Its
+  // button says what it does, the amount as Review shows it: "Shield 2 DUSK".
+  const confirmBtn = h("button", { class: "btn-primary", text: `${kind === TX_KIND.SHIELD ? "Shield" : "Unshield"} ${formatDuskExact(d.amountLux)} DUSK` });
 
   // The network's gas price by default; Custom fee for gas of your own.
   const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({ kind, amountLux: d.amountLux, ov, actions, gas: d?.gas });
@@ -268,8 +269,8 @@ export function convertConfirmView(ov, { state, actions } = {}) {
       h("div", { class: "review-head" }, [
         h("div", { class: "review-kind", text: kind === TX_KIND.SHIELD ? "Shield" : "Unshield" }),
         h("div", { class: "balance-amount" }, [formatDuskExact(d.amountLux), h("span", { class: "balance-unit", text: " DUSK" })]),
-        h("div", { class: "review-line", text: flowLine(kind) }),
       ]),
+      // Which balance it leaves and which it goes to, as the form said it.
       h("div", { class: "group" }, [kv("From", fromRail), kv("To", toRail)]),
       gasEditor,
       reviewActions(confirmBtn, confirmError, pay.el),

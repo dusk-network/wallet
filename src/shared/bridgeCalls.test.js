@@ -52,8 +52,7 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
   it("say the fee and what arrives, in one line", () => {
     const paid = bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "2000000000" });
     expect(paid).toMatchObject({ chain: "BNB Smart Chain", network: "mainnet", recipientOk: true, running: true, sentLux: 2_000_000_000n, feeLux: 1_000_000_000n, arrivesLux: 1_000_000_000n });
-    // The 2 DUSK sent, the 1 DUSK fee and the 1 DUSK that arrives, each in its own part.
-    expect(part(bridgeServiceLine(paid), /sent/i)).toMatch(exactly("2 DUSK"));
+    // The 1 DUSK fee and the 1 DUSK that arrives, each in its own part: the 2 DUSK sent is the amount the line sits under.
     expect(part(bridgeServiceLine(paid), /fee/i)).toMatch(exactly("1 DUSK"));
     expect(arrivals(bridgeServiceLine(paid))).toHaveLength(1);
     expect(part(bridgeServiceLine(paid), /arriv/i)).toMatch(exactly("1 DUSK"));
@@ -69,7 +68,6 @@ describe("the bridge's accounts for DUSK leaving Dusk", () => {
     const lastLux = bridgeServiceLine(bridgeServiceTransfer({ nodeUrl: MAINNET, to: mainnet.account, memo: EVM, amount: "1000000001" }));
     expect(part(lastLux, /arriv/i)).toMatch(exactly("0.000000001 DUSK"));
     expect(part(lastLux, /fee/i)).toMatch(exactly("1 DUSK"));
-    expect(part(lastLux, /sent/i)).toMatch(exactly("1.000000001 DUSK"));
 
     // Without an address there in the memo, nothing arrives, whatever the amount.
     for (const memo of [undefined, "", "Order 1042", EVM.replace(/[a-f]/, (c) => c.toUpperCase())]) {

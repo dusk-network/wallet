@@ -1,11 +1,11 @@
 // Activity's rows, on Home and in the full Activity view: a direction icon,
-// the other side's name first, a saved contact's own before its .dusk name
-// (else its short address in mono, with Copy on hover or focus), "Sent ·
-// 14:32" under it, and the amount with DUSK on the right. Known contract
-// calls say what they did: "Registered a .dusk name". A status word shows only while its outcome isn't known. One that failed or
-// was dropped says so under the name, "Failed · nothing sent · fee 0.0037
-// DUSK paid", and its amount shows muted, without a sign: nothing left.
-// Hide balances hides that fee too.
+// the other side's name first, a contact's own before its .dusk name (else
+// its short address in mono, with Copy on hover or focus), "Sent · 14:32"
+// under it, and the amount with DUSK on the right. Known contract calls say
+// what they did: "Registered a .dusk name". A status word shows only while
+// its outcome isn't known. One that failed or was dropped says so under the
+// name, "Failed · nothing sent · fee 0.0037 DUSK paid", and its amount shows
+// muted, without a sign: nothing left. Hide balances hides that fee too.
 
 import { formatDusk, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
@@ -529,9 +529,10 @@ export function contactNames(state, actions, ov) {
  * A payment's memo where it's the sender's own words, not the wallet's: one
  * that came in from an address that isn't one of the wallet's profiles or
  * contacts (app-core's sendersMemo, as the web wallet tells it), said as
- * theirs, with who it's from: "From " their .dusk name or their address, and
- * " · not in your contacts", which a .dusk name doesn't change: anyone can
- * register one. Null for any other memo.
+ * theirs, marked "Not a contact", which a .dusk name doesn't change: anyone
+ * can register one. Who it's from is the name the row and the details' head
+ * show already; with no one to name, app-core's words say it. Null for any
+ * other memo.
  * @param {object} tx - an Activity row
  * @param {{ among?: object }} [contactName] - contactNames', with the profiles and contacts
  * @returns {{ memo: string, from: string } | null}
@@ -542,8 +543,8 @@ export function theirMemo(tx, contactName) {
   const row = { category: received ? "received" : "sent", memo: String(tx?.memo ?? ""), counterparty: tx?.counterparty, counterpartyName: tx?.counterpartyName || null };
   const said = sendersMemo(row, contactName?.among ?? {});
   if (!said) return null;
-  const who = row.counterpartyName || (row.counterparty ? shortAddress(String(row.counterparty)) : "");
-  return { memo: said.memo, from: who ? `From ${who} · not in your contacts` : said.from };
+  const named = Boolean(row.counterpartyName || row.counterparty);
+  return { memo: said.memo, from: named ? "Not a contact" : said.from };
 }
 
 /**

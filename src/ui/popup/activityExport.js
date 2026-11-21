@@ -226,7 +226,7 @@ function evmWords({ booked = [], unread = [], approvalsUnread = [] } = {}, { sol
       ? `${unread.length === 1 ? "1 migration's fee" : `${unread.length} migrations' fees`} on ${chains.length === 1 ? chains[0] : "their chains"} couldn't be read: export again to add ${unread.length === 1 ? "it" : "them"}.`
       : "",
     failed.length ? `Some network fees${failed.length === 1 && failed[0] ? ` on ${failed[0]}` : ""} ${soleProfile ? "" : "may be in another profile's file, or "}couldn't be read: export again to add them.` : "",
-    ...[...before.values()].map(({ chain, from }) => `Network fees on ${chain || "its chain"} from before block ${Number(from).toLocaleString("en")} aren't in the file.`),
+    ...[...new Set([...before.values()].map(({ chain }) => chain || "its chain"))].map((chain) => `Older network fees on ${chain} aren't in the file.`),
   ];
 }
 
@@ -397,28 +397,22 @@ export function activityExportPanel(ov, { state, actions }) {
   return h("section", { class: "group activity-export", id: "activity-export", "aria-label": "Export CSV" }, [
     h("div", { class: "activity-export-field" }, [fieldLabel(periodSelect, "Period"), h("div", { class: "select-wrap" }, [periodSelect])]),
     period === "dates" ? h("div", { class: "activity-export-dates" }, [dateField("activity-export-from", "From", "from"), dateField("activity-export-to", "To", "to")]) : null,
-    checkbox("activity-export-contacts", "Add my contact names", ex.withContacts, (on) => {
+    checkbox("activity-export-contacts", "Add contact names", ex.withContacts, (on) => {
       ex.withContacts = on;
     }),
-    // A value only where DUSK has a price: off mainnet, said where the choice would be.
+    // A value only where DUSK has a price: off mainnet, said where the choice
+    // would be; on a test network, the strip at the top says test DUSK has none.
     priced(ov)
-      ? checkbox("activity-export-value", `Add each payment's value in ${currencyName(defaultCurrency())}, from CoinGecko's prices`, ex.fiat, (on) => {
+      ? checkbox("activity-export-value", `Add ${defaultCurrency()} value (CoinGecko)`, ex.fiat, (on) => {
           ex.fiat = on;
         })
-      : h("p", {
-          class: "activity-export-note activity-export-novalue",
-          text: isTestNetwork(String(ov?.nodeUrl ?? ""), ov?.chainId ?? null)
-            ? "Test DUSK has no value, so the file gives none."
-            : "DUSK has no price on this network, so the file gives no value.",
-        }),
-    checkbox("activity-export-excel", "For Excel: keep accents as it opens", ex.excel, (on) => {
+      : isTestNetwork(String(ov?.nodeUrl ?? ""), ov?.chainId ?? null)
+        ? null
+        : h("p", { class: "activity-export-note activity-export-novalue", text: "DUSK has no price on this network, so the file gives no value." }),
+    checkbox("activity-export-excel", "Keep accents for Excel", ex.excel, (on) => {
       ex.excel = on;
     }),
-    h("p", {
-      class: "activity-export-note",
-      text: "One profile's file for tax tools such as Koinly: exact amounts, times in UTC, transfers between your profiles marked.",
-    }),
-    inPopup() ? h("p", { class: "activity-export-note", text: "The file is saved from a new tab." }) : null,
+    h("p", { class: "activity-export-note", text: "One profile, exact amounts, times in UTC, transfers between your profiles marked." }),
     error,
     save,
   ].filter(Boolean));

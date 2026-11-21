@@ -7,7 +7,7 @@ import { normalizeMnemonic } from "../../lib/strings.js";
 import { nextWalletNumber, walletLabel } from "../../../shared/wallets.js";
 import { checkboxInput, fieldError, groupLabel, newPasswordField, passwordForm, stepActions, unlockPasswordField } from "../../components/FormControls.js";
 import { createMnemonicInput } from "../../components/MnemonicInput.js";
-import { createWordCheck, wordsMismatch } from "../../components/WordCheck.js";
+import { PHRASE_MATCHES_TEXT, createWordCheck, wordsMismatch } from "../../components/WordCheck.js";
 import { wordPlaces } from "../../../shared/recoveryWords.js";
 import { recoveryWordsMatch } from "@dusk-network/app-core/recovery-words";
 import { subnav } from "../../components/Subnav.js";
@@ -39,6 +39,9 @@ async function showPersistedVault(state, actions) {
   return true;
 }
 
+/** What a recovery phrase's words say above them, wherever they show: who can take the funds. */
+export const PHRASE_WARNING = "Anyone with it can take your funds. Never share it.";
+
 /** A recovery phrase's words in their numbered places, blurred till Reveal where it's asked. */
 export function srpGridEl(mnemonic, { blurred = false } = {}) {
   const words = normalizeMnemonic(mnemonic)
@@ -65,7 +68,7 @@ export function srpGridEl(mnemonic, { blurred = false } = {}) {
 // wrote down (FormControls.js).
 function newPasswordFields({ onDone, label = "Password" }) {
   const first = newPasswordField({ caption: label, placeholder: "At least 8 characters", onEnter: () => pwd2.focus() });
-  const again = newPasswordField({ caption: "Confirm password", placeholder: "The same password again", onEnter: () => onDone?.() });
+  const again = newPasswordField({ caption: "Confirm password", placeholder: "Same password again", onEnter: () => onDone?.() });
   const { input: pwd, error: pwdError } = first;
   const { input: pwd2, error: pwd2Error } = again;
   return {
@@ -92,9 +95,9 @@ function newPasswordFields({ onDone, label = "Password" }) {
 }
 
 // The password that unlocks the wallets here, for adding another: one field,
-// a line under it, and its error under that.
+// a line under it that says it's that one, not a new one, and its error under that.
 function currentPasswordField({ onDone }) {
-  const { input: pwd, error, els } = unlockPasswordField({ onEnter: () => onDone?.() });
+  const { input: pwd, error, els } = unlockPasswordField({ onEnter: () => onDone?.(), hint: "One password unlocks every wallet here." });
   return {
     pwd,
     els,
@@ -147,7 +150,7 @@ function webLinkOf(url) {
 
 /**
  * A payment link that opened the app before there's a wallet here (Amélie's:
- * a request link landed her on "Set up your Dusk Wallet", on Mainnet, and for
+ * a request link landed her on "Set up Dusk Wallet", on Mainnet, and for
  * a second her wallet and money seemed gone): says it waits, with Open in
  * browser instead, which hands it to the phone's browser and drops it here.
  * It's paid on Send once a wallet's set up or imported.
@@ -209,7 +212,8 @@ function formError() {
 /**
  * Set up a wallet, or with `adding`, add another to the ones here: create or
  * import, as the same rows. Creating one beside others skips the password,
- * the one they share.
+ * the one they share. Import says it needs a recovery phrase; Create, nothing
+ * more than its name.
  */
 export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
   const choice = (icon, title, sub, route, mode) =>
@@ -234,7 +238,7 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
         h("span", { class: "row-icon", "aria-hidden": "true", html: iconSvg(icon) }),
         h("span", { class: "row-main" }, [
           h("span", { class: "row-title", text: title }),
-          h("span", { class: "row-sub", text: sub }),
+          sub ? h("span", { class: "row-sub", text: sub }) : null,
         ]),
         h("span", { class: "row-chev", "aria-hidden": "true", html: iconSvg("chev-r") }),
       ]
@@ -253,10 +257,9 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
         },
       }),
       h("div", { class: "row onboard-form" }, [
-        h("p", { class: "auth-lead", text: "Your password unlocks every wallet here." }),
         h("div", { class: "group onboard-choices" }, [
-          choice("create", "Create wallet", "Get a new recovery phrase", "wallet_add_phrase", "create"),
-          choice("import", "Import wallet", "Use a recovery phrase you have", "wallet_add_import", "import"),
+          choice("create", "Create wallet", "", "wallet_add_phrase", "create"),
+          choice("import", "Import wallet", "With a recovery phrase you have", "wallet_add_import", "import"),
         ]),
       ]),
     ];
@@ -264,15 +267,11 @@ export function onboardingWelcomeView({ state, actions, adding = false } = {}) {
 
   return [
     h("div", { class: "auth-page" }, [
-      h("h1", { class: "auth-title", text: "Set up your Dusk Wallet" }),
+      h("h1", { class: "auth-title", text: "Set up Dusk Wallet" }),
       linkWaiting(state, actions),
-      h("p", {
-        class: "auth-lead",
-        text: "Your recovery phrase is the only way to restore your wallet. Keep it safe.",
-      }),
       h("div", { class: "group onboard-choices" }, [
-        choice("create", "Create wallet", "Get a new recovery phrase", "onboard_create_password", "create"),
-        choice("import", "Import wallet", "Use a recovery phrase you have", "onboard_import", "import"),
+        choice("create", "Create wallet", "", "onboard_create_password", "create"),
+        choice("import", "Import wallet", "With a recovery phrase you have", "onboard_import", "import"),
       ]),
     ]),
   ];
@@ -315,7 +314,7 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
   const next = h("button", {
     class: "btn-primary btn-full",
     type: "button",
-    text: "Continue",
+    text: "Set password",
     onclick: async () => {
       try {
         err.show("");
@@ -348,11 +347,11 @@ export function onboardingCreatePasswordView({ state, actions } = {}) {
       },
     }),
     h("div", { class: "row onboard-form" }, [
-      h("p", { class: "auth-lead", text: "The password unlocks your wallet on this device." }),
       ...fields.els,
+      // The one consent before the words show: the phrase, not the password, restores it.
       h("label", { class: "checkline" }, [
         agree,
-        h("span", { text: "I understand that my recovery phrase is the only way to restore this wallet." }),
+        h("span", { text: "Only my recovery phrase can restore this wallet." }),
       ]),
       agreeError.el,
       finger.el,
@@ -435,8 +434,8 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
     }),
     h("div", { class: "row onboard-form" }, [
       adding ? walletLanding(ov).el : null,
-      h("p", { class: "auth-lead", text: "Write down these 12 words in order and keep them somewhere safe." }),
-      h("p", { class: "phrase-warning", text: "Never share your recovery phrase. Anyone with it can take your funds." }),
+      h("p", { class: "auth-lead", text: "Write these 12 words down, in order, and keep them safe." }),
+      h("p", { class: "phrase-warning", text: PHRASE_WARNING }),
       words,
       h("div", { class: "phrase-tools" }, hold ? [toggle] : [toggle, copyBtn]),
       // In view at the bottom however small the window, as Confirm is on a Review.
@@ -446,7 +445,7 @@ export function onboardingCreatePhraseView({ state, actions, adding = false, ov 
 }
 
 /**
- * Check your recovery words, once they're written down: three of them,
+ * Check your recovery phrase, once it's written down: three of its words,
  * chosen at random, compared here, with Check and Skip for now; either makes
  * the wallet. A mismatch says so and nothing more, with Try again (the same
  * three) and Show my recovery words, which goes back to the words, hidden
@@ -480,7 +479,7 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
   const busyBody = h("p", { class: "auth-note", style: "display:none", text: "Encrypting your wallet. Keep this window open." });
 
   const nav = subnav({
-    title: "Check your recovery words",
+    title: "Check your recovery phrase",
     onBack: () => {
       // Back is disabled while the vault is being created,
       // as vault creation continues in the background.
@@ -530,7 +529,7 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
 
       if (adding) {
         await addedWallet(state, actions);
-        if (checked) actions?.showToast?.("Your recovery words match.");
+        if (checked) actions?.showToast?.(PHRASE_MATCHES_TEXT);
         return;
       }
       const finger = state.onboard?.fingerprint === true;
@@ -538,7 +537,7 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
       state.route = setUpTo(state);
       state.needsRefresh = true;
       await actions?.render?.({ forceRefresh: true });
-      if (checked) actions?.showToast?.("Your recovery words match.");
+      if (checked) actions?.showToast?.(PHRASE_MATCHES_TEXT);
       if (finger) fingerOnWith(password, actions);
     } catch (e) {
       const message = e?.message ?? String(e);
@@ -591,13 +590,10 @@ export function onboardingCreateConfirmView({ state, actions, adding = false } =
 
   // The words asked, in a form the popup keeps through redraws, as it does
   // a mismatch said in their place.
-  const label = groupLabel(words.el, "Check your recovery words");
   const form = h("div", { class: "row onboard-form" });
   const ask = () =>
     form.replaceChildren(
       ...[
-        h("p", { class: "auth-lead", text: "Enter these words from your recovery phrase." }),
-        label,
         words.el,
         wordsError.el,
         ...(current ? current.els : []),
@@ -693,7 +689,7 @@ function phraseForm({ state, actions, title, lead = "", landing = null, network 
   const mnemonicInput = createMnemonicInput({
     wordCount: 12,
     allowWordCountToggle: true,
-    hint: "Paste the whole phrase into any box.",
+    hint: "Paste all words into any box.",
     onComplete: () => fields.pwd.focus(),
     // After a paste, and as the focus leaves the words: what's wrong with them.
     // Typing again takes back what the button said of them too.
@@ -721,7 +717,8 @@ function phraseForm({ state, actions, title, lead = "", landing = null, network 
   // Back with words or a password typed asks first: leaving clears them.
   const typed = () => Boolean(mnemonicInput.getMnemonic() || fields.pwd.value || fields.pwd2?.value);
   const leave = async () => {
-    if (typed() && !(await askConfirm({ title: "Go back?", text: "This clears the recovery phrase and password you typed.", action: "Go back", destructive: true }))) return;
+    // The question says it all, so the dialog has no line under it.
+    if (typed() && !(await askConfirm({ title: "Clear the words and password you typed?", text: "", action: "Go back", destructive: true }))) return;
     onBack();
   };
   const nav = subnav({ title, onBack: leave });
@@ -851,15 +848,15 @@ export function onboardingImportView({ state, actions, adding = false, ov } = {}
 
 /**
  * A forgotten password: the wallet restored from its recovery phrase in
- * place of every one here, with a new password. It says first what that
- * does; Back returns to the unlock form.
+ * place of every one here, with a new password. It says first that every
+ * other wallet goes; Back returns to the unlock form.
  */
 export function restoreWalletView({ state, actions } = {}) {
   return phraseForm({
     state,
     actions,
     title: "Restore wallet",
-    lead: "This removes every recovery phrase on this device, then sets up this one with a new password. If it was here before, its contacts and profile names stay.",
+    lead: "This removes every wallet on this device and restores only this one.",
     passwordLabel: "New password",
     verb: "Restore wallet",
     busyVerb: "Restoring…",

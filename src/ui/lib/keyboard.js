@@ -10,8 +10,8 @@
 // Either way the page gets room under its end (#app's padding, ui.css) to
 // scroll that far; where nothing's said, the room stays until the next screen,
 // so nothing moves under a finger as the keyboard closes. What a field shows
-// under it as it's typed in, as a recovery-word box's suggestions and Not a
-// recovery word, goes above the keyboard with it.
+// under it as it's typed in, as a recovery-word box's suggestions and Not in
+// the word list, goes above the keyboard with it.
 //
 // Turned sideways, the keyboard leaves a strip at the top a box high: the
 // field goes there, and the test network's band and the popup's top bar give
@@ -114,7 +114,7 @@ const isShown = (el) => Boolean(el) && !el.hidden && !el.closest?.("[hidden]");
 
 // What a field shows under it as it's typed in, its own: the words it
 // suggests (`aria-controls`, a recovery-word box's chips) and what's said
-// of it (`aria-errormessage`, "Not a recovery word"), where shown.
+// of it (`aria-errormessage`, "Not in the word list"), where shown.
 function ownedBy(field, doc) {
   const ids = ["aria-controls", "aria-errormessage"].flatMap((name) => String(field.getAttribute?.(name) ?? "").split(/\s+/).filter(Boolean));
   return ids.map((id) => doc.getElementById?.(id)).filter(isShown);

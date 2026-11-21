@@ -182,16 +182,13 @@ export function createAccountMenuController({
               }
             },
           }, [
-            h("div", { class: "net-menu-item-left" }, [
-              h("div", { class: "net-menu-item-label", text: "Profile names" }),
-              h("div", { class: "net-menu-item-hint", text: "Settings" }),
-            ]),
+            h("div", { class: "net-menu-item-left" }, [h("div", { class: "net-menu-item-label", text: "Profile names" })]),
             h("span", { class: "net-menu-check", "aria-hidden": "true", html: iconSvg("chev-r") }),
           ]);
 
+    // No title over it: it hangs from the profile's chip. Named for screen readers.
     const menu = h("div", { class: "net-menu acct-menu" }, [
-      h("div", { class: "net-menu-title", id: "acct-menu-title", text: "Select profile" }),
-      h("div", { class: "net-menu-items", role: "menu", "aria-labelledby": "acct-menu-title" }, [
+      h("div", { class: "net-menu-items", role: "menu", "aria-label": "Profile" }, [
         ...items,
         addWalletBtn || manageAccountsBtn ? h("div", { class: "divider", role: "separator" }) : null,
         addWalletBtn,

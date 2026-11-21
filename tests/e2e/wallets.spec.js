@@ -25,8 +25,8 @@ const home = (page) => expect(page.locator("#app").getByRole("button", { name: "
 const chip = (page) => page.locator("#header-actions .account-chip .chip-text");
 // With more than one wallet, the open one's name under the profile's.
 const chipWallet = (page) => page.locator("#header-actions .account-chip .chip-wallet");
-// The password the wallets share, on Add wallet and Remove wallet.
-const SHARED = "Password you unlock with";
+// The password the wallets share, on Add wallet and Remove wallet: "Password", as on the unlock form.
+const shared = (page) => page.getByLabel("Password", { exact: true });
 
 async function unlock(page, password) {
   await page.getByLabel("Password", { exact: true }).fill(password);
@@ -35,7 +35,8 @@ async function unlock(page, password) {
 
 test("moves the release's vault, adds a wallet, switches both ways without a password, removes one, then resets", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByText("Unlock your wallet")).toBeVisible();
+  // The unlock form: its password field, with no heading over it.
+  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
   await unlock(page, twelve.password);
   await home(page);
 
@@ -49,10 +50,10 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
   await page.locator("#header-actions .account-chip").click();
   await expect(page.locator(".acct-menu-wallet-title")).toHaveText(["Wallet 1"]);
   await page.getByRole("menuitem", { name: "Add wallet" }).click();
-  await expect(page.getByText("Your password unlocks every wallet here.")).toBeVisible();
+  await expect(page.getByText("With a recovery phrase you have")).toBeVisible();
   await page.getByRole("button", { name: /Import wallet/ }).click();
   await expect(page.getByText("This becomes Wallet 2.")).toBeVisible();
-  await expect(page.getByText("Paste the whole phrase into any box.")).toBeVisible();
+  await expect(page.getByText("Paste all words into any box.")).toBeVisible();
   // Pasted into box 5: every box from the first, and the word that isn't one said.
   await page.getByLabel("Word 5", { exact: true }).evaluate((box, text) => {
     const data = new DataTransfer();
@@ -60,13 +61,13 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
     box.dispatchEvent(new ClipboardEvent("paste", { clipboardData: data, bubbles: true, cancelable: true }));
   }, OTHER.replace("worth", "wurth"));
   await expect(page.getByLabel("Word 1", { exact: true })).toHaveValue("legal");
-  await expect(page.getByText("Word 7 isn't a recovery word. Check its spelling.")).toBeVisible();
+  await expect(page.getByText("Word 7 isn't in the word list. Check its spelling.")).toBeVisible();
   await expect(page.getByLabel("Word 7", { exact: true })).toHaveAttribute("aria-invalid", "true");
   await page.getByLabel("Word 1", { exact: true }).fill(OTHER);
-  await expect(page.getByText("Word 7 isn't a recovery word. Check its spelling.")).toHaveCount(0);
-  await expect(page.getByLabel(SHARED)).not.toHaveAttribute("placeholder", /./);
+  await expect(page.getByText("Word 7 isn't in the word list. Check its spelling.")).toHaveCount(0);
+  await expect(shared(page)).not.toHaveAttribute("placeholder", /./);
   await expect(page.getByText("One password unlocks every wallet here.")).toBeVisible();
-  await page.getByLabel(SHARED).fill(twelve.password);
+  await shared(page).fill(twelve.password);
   await page.getByRole("button", { name: "Import wallet" }).click();
   await home(page);
   await expect(chip(page)).toHaveText("Profile 1");
@@ -90,7 +91,7 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
   await page.getByRole("button", { name: /Import wallet/ }).click();
   await expect(page.getByText("This becomes Wallet 3.")).toBeVisible();
   await page.getByLabel("Word 1", { exact: true }).fill(twelve.mnemonic);
-  await page.getByLabel(SHARED).fill(twelve.password);
+  await shared(page).fill(twelve.password);
   await page.getByRole("button", { name: "Import wallet" }).click();
   await expect(page.getByText("This recovery phrase is already in your wallet.")).toBeVisible({ timeout: 60_000 });
   expect((await stored(page, "dusk_vault_v2")).wallets).toHaveLength(2);
@@ -102,8 +103,9 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
   await page.getByTitle("Settings").click();
   await page.getByRole("button", { name: "Remove Wallet 1" }).click();
   await expect(page.getByText("This removes Wallet 1 from this device")).toBeVisible();
-  await expect(page.getByText("One password unlocks every wallet here.")).toBeVisible();
-  await page.getByLabel(SHARED).fill(twelve.password);
+  // Said only where a wallet is added, not here.
+  await expect(page.getByText("One password unlocks every wallet here.")).toHaveCount(0);
+  await shared(page).fill(twelve.password);
   await page.getByRole("button", { name: "Remove wallet" }).click();
   await expect(page.getByText("Wallet 1 removed.")).toBeVisible({ timeout: 60_000 });
   expect((await stored(page, "dusk_vault_v2")).wallets).toEqual([second]);
@@ -111,22 +113,22 @@ test("moves the release's vault, adds a wallet, switches both ways without a pas
 
   // Reset, with the password: every phrase gone.
   await page.getByRole("button", { name: "Reset wallet" }).click();
-  await page.getByLabel(SHARED).fill(twelve.password);
+  await shared(page).fill(twelve.password);
   await page.getByRole("button", { name: "Reset wallet" }).click();
-  await expect(page.getByText("Set up your Dusk Wallet")).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText("Set up Dusk Wallet")).toBeVisible({ timeout: 60_000 });
   expect([await stored(page, "dusk_vault_v1"), await stored(page, "dusk_vault_v2"), await stored(page, "dusk_wallets_v1")]).toEqual([null, null, null]);
 });
 
 test("moves nothing with a wrong password, then moves on the right one", async ({ page }) => {
   await page.goto("/");
   await unlock(page, `${twelve.password}!`);
-  await expect(page.locator("#unlock-error")).toHaveText("Wrong password. Check Caps Lock, or restore with your recovery phrase below.");
+  await expect(page.locator("#unlock-error")).toHaveText("Wrong password. Check Caps Lock.");
   expect(await stored(page, "dusk_vault_v1")).toEqual(twelve.vault);
   expect(await stored(page, "dusk_vault_v2")).toBeNull();
 
   // A reload, as a popup opened again: still there; the backoff passes, then it moves.
   await page.reload();
-  await expect(page.getByText("Unlock your wallet")).toBeVisible();
+  await expect(page.getByLabel("Password", { exact: true })).toBeVisible();
   await page.waitForTimeout(1_100);
   await unlock(page, twelve.password);
   await home(page);

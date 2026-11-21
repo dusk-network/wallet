@@ -82,16 +82,17 @@ export function fieldError(field, { markInvalid = true } = {}) {
 
 /**
  * The password the wallets here share, for a change to them (adding one,
- * removing one): named for what it is, with no placeholder, a line under it
- * that says one password unlocks them all, and its error under that.
- * @param {{ onEnter?: () => void }} [opts]
+ * removing one): "Password", with no placeholder, `hint` under it where one
+ * is given (Add wallet's: "One password unlocks every wallet here."), and its
+ * error under that.
+ * @param {{ onEnter?: () => void, hint?: string }} [opts]
  */
-export function unlockPasswordField({ onEnter } = {}) {
+export function unlockPasswordField({ onEnter, hint = "" } = {}) {
   const input = passwordInput({ autocomplete: "current-password", onEnter });
-  const hint = fieldHint(input, "One password unlocks every wallet here.");
+  const hintEl = hint ? fieldHint(input, hint) : null;
   const error = fieldError(input);
   input.addEventListener("input", () => error.show(""));
-  return { input, error, els: [passwordForm([fieldLabel(input, "Password you unlock with"), input, hint, error.el])] };
+  return { input, error, els: [passwordForm([fieldLabel(input, "Password"), input, hintEl, error.el])] };
 }
 
 /**
@@ -232,14 +233,14 @@ const offForGas = new WeakSet();
 
 /**
  * The end of a Review, which stays in view however long the Review is (ui.css):
- * what stops it, then Confirm, so an off Confirm never hides why. Confirm is
- * held while the browser is offline, saying so.
+ * what stops it, then its button, so an off button never hides why. The
+ * button is held while the browser is offline, saying so.
  * @param {HTMLButtonElement} button
  * @param {...(HTMLElement|null)} reasons
  * @returns {HTMLElement}
  */
 export function reviewActions(button, ...reasons) {
-  const offline = holdWhileOffline(button, { text: "You're offline. Confirm once you're back online." });
+  const offline = holdWhileOffline(button, { text: "You're offline." });
   return stepActions(button, ...reasons, offline);
 }
 

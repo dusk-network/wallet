@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { approveOrigin, getPermissionForOrigin, setConnectionLasts } from "../shared/permissions.js";
+import { approveOrigin, getPermissionForOrigin, revokeOrigin, setConnectionLasts } from "../shared/permissions.js";
 import { setSettings } from "../shared/settings.js";
 import { clearSiteRecords, noteSiteLasts, noteSiteRequest, noteSiteUse, SITE_ASKED_KEPT, SITES_KEPT, forgetSiteRecord } from "../shared/siteRecords.js";
 import { STORAGE_KEYS } from "../shared/storage.js";
@@ -318,6 +318,54 @@ describe("what's kept of what a site asked", () => {
     await waiting.outcome;
     await cleared;
     expect(mocks.store[STORAGE_KEYS.SITE_RECORDS]).toBeUndefined();
+  });
+});
+
+// The copy audit's: a site's first connection looked like any other's, only its address said which it was.
+describe("a site never connected here before", () => {
+  // Whether the site's connection window is told it's new, and what answers it.
+  const connecting = async (origin = SITE) => {
+    const asking = await ask("dusk_requestProfiles", undefined, origin);
+    return { ...asking, first: asking.entry.params.firstConnection };
+  };
+  const refused = async (asking) => {
+    asking.reject();
+    await asking.outcome;
+  };
+
+  it("is said to be new till it's connected once, refused or not, and again once its record is forgotten", async () => {
+    let asking = await connecting();
+    expect(asking.first).toBe(true);
+    await refused(asking);
+
+    asking = await connecting();
+    expect(asking.first).toBe(true);
+    asking.approve({ accountIndex: 0 });
+    await asking.outcome;
+
+    // Disconnected, it was connected before.
+    await revokeOrigin(SITE, ACCOUNT);
+    asking = await connecting();
+    expect(asking.first).toBe(false);
+    await refused(asking);
+
+    // Forgotten in Settings, it's as new as it was.
+    await forgetSiteRecord(ACCOUNT, SITE);
+    asking = await connecting();
+    expect(asking.first).toBe(true);
+    await refused(asking);
+  });
+
+  it("isn't new where another wallet here has it connected, or a connection from before the wallets were apart", async () => {
+    await approveOrigin(SITE, { accountIndex: 0, profileId: `account:0:${OTHER}` }, OTHER);
+    let asking = await connecting();
+    expect(asking.first).toBe(false);
+    await refused(asking);
+
+    mocks.store[STORAGE_KEYS.PERMISSIONS] = { [OTHER_SITE]: { accountIndex: 0, profileId: `account:0:${ACCOUNT}`, grants: { publicAccount: true } } };
+    asking = await connecting(OTHER_SITE);
+    expect(asking.first).toBe(false);
+    await refused(asking);
   });
 });
 

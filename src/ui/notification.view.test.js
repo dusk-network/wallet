@@ -251,7 +251,8 @@ describe("a site's send while offline", () => {
 
 describe("connect approval", () => {
   it("says how long it stays connected, as Settings has it", async () => {
-    const seesLine = () => visibleText(app.querySelectorAll(".ap-facts .list-row")[0]);
+    // The line under what the site sees, which says for how long.
+    const seesLine = () => visibleText(app.querySelectorAll(".ap-facts .list-row")[0].querySelector(".row-sub"));
     // A day, as a day; a week, as 7 days: never 17, or a day for a week.
     await render("connect", { requestedProfiles: true, lastsMs: 86_400_000 });
     expect(seesLine()).toMatch(/\bfor a day\b/i);
@@ -274,6 +275,22 @@ describe("connect approval", () => {
     expect(seesLine()).not.toContain("2031");
     expect(seesLine()).not.toMatch(/\bdays?\b/);
     expect(seesLine()).toMatch(/until you disconnect/i);
+  });
+
+  // The copy audit's: a site's first connection looked like any other's, only its address said which it was.
+  it("says when a site was never connected here, and never of one that was", async () => {
+    const firstTime = /You haven't connected this site before/i;
+    for (const params of [
+      { requestedProfiles: true, firstConnection: true },
+      { requestedProfiles: true, firstConnection: true, shieldedReceiveAddress: true },
+    ]) {
+      await render("connect", params);
+      expect(visibleText(head())).toMatch(firstTime);
+    }
+    for (const params of [{ requestedProfiles: true, firstConnection: false }, { requestedProfiles: true }, { shieldedReceiveAddress: true, currentAccountIndex: 0 }]) {
+      await render("connect", params);
+      expect(visibleText(app)).not.toMatch(firstTime);
+    }
   });
 
   it("says what the site sees: the public account, and the shielded address only where it asks for it", async () => {
@@ -845,6 +862,8 @@ describe("a site's request to pay the bridge's account", () => {
   const kinds = (params) => rules(params).map((w) => w.kind);
   const titles = (params) => rules(params).map((w) => w.title);
   const onMainnet = { chainId: "dusk:1", nodeUrl: "https://nodes.dusk.network", networkName: "Mainnet" };
+  // The bar's buttons in order: Reject first, then what approving does.
+  const answers = () => bar().querySelectorAll("button").map((b) => b.textContent);
 
   it("shows it as a bridge to the chain the memo's address is on, tagged as known", async () => {
     const params = transfer(testnet.account, { amount: "2000000000", memo: EVM });
@@ -875,6 +894,7 @@ describe("a site's request to pay the bridge's account", () => {
     const two = transfer(mainnet.account, { amount: "2000000000", memo: EVM, ...onMainnet });
     await render("send_tx", two);
     expect([service(two).feeLux, service(two).arrivesLux]).toEqual([1_000_000_000n, 1_000_000_000n]);
+    expect(answers()).toEqual(["Reject", "Bridge 2 DUSK"]);
     expect(sub()).toBe(bridgeServiceLine(service(two)));
     expect(feePart()).toMatch(exactly("1 DUSK"));
     expect(arrivals()).toHaveLength(1);
@@ -895,6 +915,7 @@ describe("a site's request to pay the bridge's account", () => {
     expect(arrives()).not.toMatch(/\d/);
     expect(kinds(noAddress)).toEqual([]);
     expect(warns()).toHaveLength(1);
+    expect(answers()).toEqual(["Reject", "Send anyway"]);
 
     const all = transfer(mainnet.account, { amount: "1000000000", memo: EVM, ...onMainnet });
     await render("send_tx", all);
@@ -904,9 +925,9 @@ describe("a site's request to pay the bridge's account", () => {
     expect(arrives()).not.toMatch(/\d/);
     expect(kinds(all)).toEqual(["fee"]);
     expect(warns()).toEqual(titles(all));
-    expect(app.querySelector(".callout.warn .muted").textContent).toBe(rules(all)[0].text);
-    // The 1 DUSK fee that takes it all.
-    expect(app.querySelector(".callout.warn .muted").textContent).toMatch(exactly("1 DUSK"));
+    expect(answers()).toEqual(["Reject", "Send anyway"]);
+    // The 1 DUSK fee that takes it all, in the warning's one line.
+    expect(app.querySelector(".callout.warn .callout-title").textContent).toMatch(exactly("1 DUSK"));
     // Reject stays the user's choice.
     expect(approve().disabled).toBe(false);
   });
@@ -917,7 +938,8 @@ describe("a site's request to pay the bridge's account", () => {
     expect(service(params).running).toBe(false);
     expect(kinds(params)).toEqual(["off"]);
     expect(warns()).toEqual(titles(params));
-    expect(app.querySelector(".callout.warn .muted").textContent).toBe(rules(params)[0].text);
+    // Nothing arrives, so the button sends anyway, never bridges; Reject first.
+    expect(answers()).toEqual(["Reject", "Send anyway"]);
     // Nothing arrives there while it isn't running: one part says what arrives, with no amount, and nothing else
     // promises one.
     expect(sub()).toBe(bridgeServiceLine(service(params)));
@@ -1182,6 +1204,36 @@ describe("the recipient of a site's request to send", () => {
     expect(recipient().lead).toBe(shortAddress(CAROL));
   });
 
+  // The copy audit's: Send's Review says a recipient isn't one of your contacts; a site's request to pay said nothing.
+  it("says a recipient that's none of your profiles or contacts isn't a contact, an account or a shielded address", async () => {
+    const stranger = /Not a contact/i;
+    answerName(null);
+    for (const params of [transfer(CAROL), transfer(STRANGER_ADDRESS, { privacy: "shielded" })]) {
+      await render("send_tx", params);
+      expect(recipient().tag).toMatch(stranger);
+    }
+    // A contact, or one of your profiles: whose it is, never that it's no contact.
+    for (const [to, whose] of [
+      [BOB, "Bob"],
+      [SAVINGS, "Profile 2"],
+    ]) {
+      await render("send_tx", transfer(to));
+      expect(recipient().tag).toContain(whose);
+      expect(recipient().tag).not.toMatch(stranger);
+    }
+  });
+
+  it("calls no recipient a stranger where the contacts weren't read: locked, or their store didn't open", async () => {
+    const stranger = /Not a contact/i;
+    answerName(null);
+    await render("send_tx", transfer(CAROL), { contacts: null });
+    expect(recipient().tag ?? "").not.toMatch(stranger);
+    // Locked: what's asked shows over the unlock, the contacts not read yet.
+    await render("send_tx", transfer(CAROL), { isUnlocked: false, accounts: [], duskNames: {}, contacts: [] });
+    expect(app.querySelector("input[type=password]")).not.toBeNull();
+    expect(recipient().tag ?? "").not.toMatch(stranger);
+  });
+
   it("shows a saved contact's label beside the name the recipient set, never instead of it", async () => {
     answerName("bob-shop.dusk");
     await render("send_tx", transfer(BOB));
@@ -1324,11 +1376,12 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     await render("send_tx", tokenCall("drc20_standard", "transfer", `{"to":{"Moonlight":"${SHOP}"},"amount":5}`));
     const transferTitle = title();
     await render("send_tx", tokenCall("drc20_standard", "approve", `{"spender":{"Contract":"${ROUTER}"},"amount":18446744073709551615}`));
-    // Said as an allowance, not as a transfer: of the most there is, exactly, in the token's units.
+    // Said as an allowance, not as a transfer: of the most there is, Unlimited, its exact figure under Details, in the token's units.
     expect(title()).not.toBe(transferTitle);
     expect(title()).toMatch(/allow|spend/i);
     expect(transferTitle).not.toMatch(/allow|spend/i);
-    expect(amount()).toBe("18,446,744,073.709551615 TKN");
+    expect(amount()).toBe("Unlimited TKN");
+    expect(row("Amount").textContent).toBe("18,446,744,073.709551615 TKN");
     expect(spenderId()).toBe(ROUTER);
     expect(visibleText(row("Spender"))).toMatch(/contract/i);
     expect(row("Units").textContent).toBe("18446744073709551615");
@@ -1368,7 +1421,8 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     // A contract ID with a 0, which Sozu's driver writes in hex.
     const pool = "10".repeat(32);
     await render("send_tx", tokenCall("sozu_staked_dusk", "approve", `["${pool}","18446744073709551615"]`));
-    expect(amount()).toBe("18,446,744,073.709551615 TKN");
+    expect(amount()).toBe("Unlimited TKN");
+    expect(row("Amount").textContent).toBe("18,446,744,073.709551615 TKN");
     expect(row("Units").textContent).toBe("18446744073709551615");
     expect(spenderId()).toBe(pool);
     expect(unlimited()).toBe(true);
@@ -1427,6 +1481,100 @@ describe("a site's token call, read with the wallet's token drivers", () => {
     expect(head().querySelector(".ap-amount")).toBeNull();
     expect([row("To"), row("Units"), app.querySelector(".ap-opaque")]).toEqual([undefined, undefined, null]);
     expect(approve().disabled).toBe(false);
+  });
+
+  // The copy audit's: a 10 stDUSK allowance's first window read "10,000,000,000 TOKEN", the call's
+  // units as an unnamed token's, until the token's details came.
+  describe("a token whose details come late, or never", () => {
+    // Sozu's approval of 10 stDUSK (9 decimals), and of the most there is, for a contract.
+    const tenStDusk = () => tokenCall("sozu_staked_dusk", "approve", `["${"10".repeat(32)}","10000000000"]`);
+    const allOfIt = () => tokenCall("sozu_staked_dusk", "approve", `["${"10".repeat(32)}","18446744073709551615"]`);
+    // The token's details as the test gives them, once it does: held back after the call is made, which answers them at once.
+    const detailsLater = () => {
+      let give;
+      mocks.answers.DUSK_UI_DRC20_GET_METADATA = () => new Promise((resolve) => (give = resolve));
+      return (answer) => give(answer);
+    };
+    const STAKED = { ok: true, result: { name: "Staked Dusk", symbol: "stDUSK", decimals: 9 } };
+    // Said while the token's details are read, and once they couldn't be.
+    const reading = () => /Reading the token…/.test(visibleText(head()));
+    const unreadLines = () => visibleText(app).match(/Couldn't read this token/gi) ?? [];
+
+    it("says it's reading the token, with Approve off, then shows the amount in the token's units", async () => {
+      const params = tenStDusk();
+      const give = detailsLater();
+      const shown = render("send_tx", params);
+      await vi.waitFor(() => expect(reading()).toBe(true));
+      // No amount until the token's decimals come: never the units scaled for a token it guessed.
+      expect(head().querySelector(".ap-amount")).toBeNull();
+      expect(visibleText(app)).not.toMatch(/TOKEN|10,000,000,000/);
+      expect(row("Units").textContent).toBe("10000000000");
+      expect(approve().disabled).toBe(true);
+      pastClickGuard();
+      approve().click();
+      await settle();
+      expect(decision("approve")).toBeUndefined();
+
+      give(STAKED);
+      await shown;
+      expect(reading()).toBe(false);
+      expect(amount()).toBe("10 stDUSK");
+      expect(visibleText(row("Token"))).toMatch(/\(stDUSK\)/);
+      expect(unreadLines()).toEqual([]);
+      expect(approve().disabled).toBe(false);
+    });
+
+    it.each([
+      ["the wallet couldn't read them", { ok: false, error: "Engine call timed out" }],
+      ["they name no symbol", { ok: true, result: { name: "", symbol: "", decimals: 0 } }],
+      ["their decimals aren't a whole number", { ok: true, result: { name: "Staked Dusk", symbol: "stDUSK", decimals: 9.5 } }],
+    ])("shows the call's raw units beside its contract when %s, never a figure scaled for an unnamed token", async (_label, answer) => {
+      const params = tenStDusk();
+      const give = detailsLater();
+      const shown = render("send_tx", params);
+      await vi.waitFor(() => expect(reading()).toBe(true));
+      give(answer);
+      await shown;
+      expect(reading()).toBe(false);
+      // The units as the call has them, said once why, and the contract they're of on the main view.
+      expect(amount()).toBe("10000000000 units");
+      expect(unreadLines()).toHaveLength(1);
+      expect(visibleText(row("Token"))).toBe("111111…111111");
+      expect(row("Token").closest("details")).toBeNull();
+      expect(visibleText(app)).not.toMatch(/TOKEN|10,000,000,000|stDUSK/);
+      expect(approve().disabled).toBe(false);
+    });
+
+    it("keeps an unlimited allowance waiting for MAX, while it reads the token and when it can't", async () => {
+      const params = allOfIt();
+      const give = detailsLater();
+      const shown = render("send_tx", params);
+      await vi.waitFor(() => expect(reading()).toBe(true));
+      expect(approve().disabled).toBe(true);
+      give({ ok: false, error: "Engine call timed out" });
+      await shown;
+      expect(amount()).toBe("18446744073709551615 units");
+      expect(unlimited()).toBe(true);
+      expect(approve().disabled).toBe(true);
+      typeInto(maxBox(), "MAX");
+      expect(approve().disabled).toBe(false);
+    });
+
+    it("doesn't draw the token over the unlock the window asked for meanwhile", async () => {
+      const params = tenStDusk();
+      const give = detailsLater();
+      const shown = render("send_tx", params);
+      await vi.waitFor(() => expect(reading()).toBe(true));
+      mocks.pending = { ...mocks.pending, isUnlocked: false, accounts: [], duskNames: {} };
+      for (const hear of mocks.heard) hear({ type: "DUSK_UI_LOCK_STATE", isUnlocked: false, reason: "engine_closed" });
+      await vi.waitFor(() => expect(app.querySelector("input[type=password]")).not.toBeNull());
+      give(STAKED);
+      await shown;
+      await settle();
+      // Still the unlock, with no amount drawn over it.
+      expect(app.querySelector("input[type=password]")).not.toBeNull();
+      expect(visibleText(app)).not.toMatch(/stDUSK/);
+    });
   });
 });
 
@@ -1781,7 +1929,7 @@ describe("a node that isn't a network's own", () => {
     }
     await render("send_tx", transfer(BOB, { chainId: "dusk:3070325578", nodeUrl: HOSTILE, networkName: "Custom" }), { nodeUrl: HOSTILE, networkName: "Custom", chainId: 1 });
     expect(strip()).toContain("Mainnet");
-    expect(row("Network").textContent).toContain(new URL(HOSTILE).host);
+    expect(row("Node").textContent).toContain(new URL(HOSTILE).host);
     // Details name the chain the signature carries, and the ID sites see apart from it.
     expect(row("Signs for").textContent).toContain("Mainnet");
     expect(app.querySelectorAll(".kv-value").map((v) => v.textContent)).toContain("dusk:3070325578");

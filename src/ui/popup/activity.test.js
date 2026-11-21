@@ -316,7 +316,8 @@ describe("the wallet's own sends", () => {
     await until(() => state.activity?.loaded && !state.activity.syncing && state.activity.checked.size > 0);
     expect(await txs.getTxMeta(register)).toBeNull();
     const { sentSteps } = await import("./views/sent.js");
-    expect(sentSteps(state.sent, overview()).at(-1)).toMatchObject({ label: "Completed", state: "done", sub: "In block 4,658,012" });
+    expect(state.sent).toMatchObject({ status: "executed", blockHeight: "4658012" });
+    expect(sentSteps(state.sent, overview()).at(-1)).toMatchObject({ label: "Completed", state: "done" });
   });
 
   it("are left as they are while the wallet still watches them", async () => {

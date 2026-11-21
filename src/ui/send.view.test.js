@@ -975,8 +975,10 @@ describe("names on Send and Review", () => {
     };
     const view = mount(state);
     await settle();
-    // To: the contact's label and its verified name, over its whole account. From: the profile, by its verified name.
-    expect([view.toNames(), view.toAddress()]).toEqual([saying("Bobby", "bob.dusk"), BOB.account]);
+    // To: the contact's label and its verified name, over its account short, whole under Details. From: the profile, by its verified name.
+    expect([view.toNames(), view.toAddress()]).toEqual([saying("Bobby", "bob.dusk"), "21n5nc…fMMLNz"]);
+    const whole = dom.document.body.querySelector(".review-to-details .kv-value");
+    expect([isShown(whole), visibleText(whole)]).toEqual([true, BOB.account]);
     expect(reviewFrom()).toEqual({ wallet: "", profile: "me.dusk", balance: ONLY_PUBLIC });
     expect(view.visibleLine()).toEqual(saying("me.dusk"));
   });
@@ -1552,7 +1554,11 @@ describe("a send to the bridge's account", () => {
   const body = () => dom.document.body;
   const text = (selector) => visibleText(body().querySelector(selector));
   // Each warning shown: its title, and its line.
-  const warnings = () => body().querySelectorAll(".callout.warn").filter(isShown).map((note) => [visibleText(note.querySelector(".callout-title")), visibleText(note.querySelector(".muted"))]);
+  const warnings = () =>
+    body()
+      .querySelectorAll(".callout.warn")
+      .filter(isShown)
+      .map((note) => [visibleText(note.querySelector(".callout-title")), note.querySelector(".muted") ? visibleText(note.querySelector(".muted")) : ""]);
   // The row the memo shows in, named for what it is here: its label, and the address it holds.
   const memoRow = () => {
     const row = body().querySelectorAll(".send-review .kv").find((kv) => visibleText(kv.querySelector(".kv-value") ?? kv).includes(EVM));

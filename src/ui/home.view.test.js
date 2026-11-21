@@ -161,7 +161,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect(box.memo).toBe(memo);
     expect(box.made).toMatch(exactly(made));
   };
-  // Where a box says it stands, as its title opens: Not sent yet, Sending, Not confirmed, Not sent or Sent.
+  // Where a box says it stands, as its title opens: Waiting, Held, Sending, Not confirmed, Not sent or Confirming.
   const standing = (box) => box.title.split(": ")[0];
   // What Don't send says: it wasn't sent, and nothing left; never that it went out already or couldn't be stopped.
   const calledOff = (showToast) => {
@@ -194,7 +194,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     pays(going, { memo: "Hors ligne deux", made: "02:36" });
     // Chen's and Lena's: "Not sent yet … It's being sent. Cancel" as it went out. One state at a time: the one that waits
     // goes out once the network answers; the one going out says it's sending, and nothing of waiting.
-    expect([standing(waits), standing(going)]).toEqual(["Not sent yet", "Sending"]);
+    expect([standing(waits), standing(going)]).toEqual(["Waiting", "Sending"]);
     expect(waits.note).toMatch(/goes out/i);
     expect(waits.note).not.toMatch(/may have gone/i);
     expect(going.note).toBe("");
@@ -238,7 +238,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     expect([standing(waitsBox), standing(checksBox), standing(goingBox)]).toEqual(["Not confirmed", "Not confirmed", "Sending"]);
     for (const box of [waitsBox, checksBox]) {
       expect(box.note).toMatch(/may have gone out/i);
-      expect(box.note).not.toMatch(/nothing was sent|not sent/i);
+      expect(box.note).not.toMatch(/nothing (was )?sent|nothing left|not sent/i);
     }
     expect(waitsBox.note).toMatch(/goes out once/i);
     expect(checksBox.note).toMatch(/check/i);
@@ -265,10 +265,10 @@ describe("payments from Send waiting for the network, on Home", () => {
     // Not sent, each, and why: the wallet closed, or no network, and no fee; each with Send it now or Don't send.
     for (const box of [closedBox, failedBox]) {
       expect([standing(box), box.kind, box.buttons.length]).toEqual(["Not sent", "home-waiting--unsent", 2]);
-      expect(box.note).toMatch(/nothing was sent/i);
       expect(box.note).not.toMatch(/may have gone/i);
     }
     expect(closedBox.note).toMatch(/closed/i);
+    expect(closedBox.note).toMatch(/nothing left your wallet/i);
     expect(failedBox.note).toMatch(/no fee/i);
 
     // Send it now: straight to Review, the same amount, recipient and memo, sent there in its place; nothing dropped.
@@ -286,7 +286,7 @@ describe("payments from Send waiting for the network, on Home", () => {
   });
 
   // Lena's, in the app: "Sending: 0.01 DUSK…", then for 20 s no card, no payment and the old balance.
-  it("says one that went out after it waited went, with no button, till its block's in", () => {
+  it("says one that went out after it waited is confirming, with no button, till the network has run it", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(at(2, 40));
     const { document } = installFakeDom();
@@ -297,8 +297,8 @@ describe("payments from Send waiting for the network, on Home", () => {
     const [box, ...more] = boxes(document);
     expect(more).toEqual([]);
     pays(box, { memo: "Hors ligne un", made: "02:34" });
-    // Sent: nothing to wait for, or to call off.
-    expect([standing(box), box.kind]).toEqual(["Sent", "home-waiting--went"]);
+    // Confirming: nothing to wait for, or to call off.
+    expect([standing(box), box.kind]).toEqual(["Confirming", "home-waiting--went"]);
     expect([box.note, box.buttons]).toEqual(["", []]);
   });
 
@@ -379,7 +379,7 @@ describe("payments from Send waiting for the network, on Home", () => {
     // One held, still waiting; the other not sent, as the wallet stopped while it waited. For each, its account sent
     // something else meanwhile, and it offers Send it too or Don't send.
     expect([heldBox.kind, stoppedBox.kind]).toEqual(["home-waiting--held", "home-waiting--unsent"]);
-    expect([standing(heldBox), standing(stoppedBox)]).toEqual(["Not sent yet", "Not sent"]);
+    expect([standing(heldBox), standing(stoppedBox)]).toEqual(["Held", "Not sent"]);
     for (const box of [heldBox, stoppedBox]) {
       expect(box.note).toMatch(/something else/i);
       expect(box.note).not.toMatch(/same/i);
