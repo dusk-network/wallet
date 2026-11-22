@@ -14,7 +14,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Kept an amount being typed on a phone in view above the keyboard with its error or its question of how it reads, the question's buttons first where the keyboard leaves no room for all, in Send, Shield, Staking and Receive's request, and a memo with its error, rather than taking the page on to the button below and the field out of view; a warning said as a field is typed in still goes above the keyboard with its button.
 - Lined the top bar's logo and its last button up with the content's edges, in the popup, the full view, the Android app and a site's request, with the popup's 16 px margins on a phone; and made the network's pill as tall as the profile's chip beside it.
 - Put the Android app's Review bar at the bottom of the screen, Confirm above the navigation bar, rather than floating over the details, and kept the app inside a phone's cutout and navigation bar turned sideways, its toasts too.
-- Kept the profile menu inside the window once a .dusk name comes in after it opens.
+- Kept the profile menu inside the window once a .dusk name comes in after it opens, and inside a phone's cutout and navigation bar.
 - Set the Android app's four Receive buttons two by two, the dot beside the network's name in the full view's sidebar, Receive and Send at one height at the head of its dashboard, and Unstake from Sozu apart from the figures and buttons over it.
 
 ## [0.4.0] - 2026-11-21

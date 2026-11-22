@@ -1800,15 +1800,14 @@ body.page--popup .site-bar-action {
     gap: 10px;
   }
 
-  /* Receive and Send one height and type size: the primary button's own
-     46 px minimum would make Send the taller. */
+  /* Receive and Send one height and type size: Receive as tall as the
+     primary button's own 46 px, a finger's, which the app turned sideways is
+     tapped with. */
   body.page--full .dashboard-top-action {
     width: auto;
     min-width: 108px;
-    height: 38px;
-    min-height: 38px;
-    padding-block: 0;
-    font-size: 13.5px;
+    min-height: 46px;
+    font-size: 14.5px;
   }
 
   body.page--full .dashboard-actions {
@@ -2876,8 +2875,8 @@ button.net-menu-item--active {
    as it can be from the start: placed by its width as it opens, it grew as
    a .dusk name came in, and ran off the window's edge. */
 .acct-menu {
-  width: min(280px, calc(100vw - 16px));
-  max-height: calc(100vh - 16px);
+  width: min(280px, calc(100vw - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  max-height: calc(100vh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
 }
 
@@ -3904,11 +3903,12 @@ body[data-runtime="tauri"].page--full .panel {
   }
 }
 
-/* On a phone held upright, a Review's bar is the bottom of the app's screen:
-   it takes the room kept clear of the navigation bar, so Confirm is above
-   that and nothing scrolls under the bar, where that room under the page
-   left the bar floating over the details. It's taller here, and what gets
-   the focus isn't left under it. */
+/* Held upright, a Review's bar is the bottom of the app's screen: it takes
+   the room under the page, where that room left the bar floating over the
+   details, and nothing scrolls under it. Under Confirm, the screen's own
+   inset; on a touch screen at least the app's floor for a phone's navigation
+   bar, which the app is drawn under (edge to edge) and a WebView may not
+   report. It's taller here, and what gets the focus isn't left under it. */
 @media (max-width: 600px) and (orientation: portrait) {
   body[data-runtime="tauri"] .panel-content:has(.review-actions) {
     padding-bottom: 0 !important;
@@ -3918,6 +3918,12 @@ body[data-runtime="tauri"].page--full .panel {
   body[data-runtime="tauri"] .review-actions {
     bottom: 0;
     margin-bottom: 0;
+    padding-bottom: calc(var(--panel-padding) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 600px) and (orientation: portrait) and (pointer: coarse) {
+  body[data-runtime="tauri"] .review-actions {
     padding-bottom: calc(var(--panel-padding) + max(env(safe-area-inset-bottom, 0px), var(--dusk-safe-bottom-min)));
   }
 }
