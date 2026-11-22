@@ -159,11 +159,13 @@ function ensureAssetsLoaded(ov, { state, actions } = {}) {
 
   st.loading = true;
   st.error = null;
+  // This read: one under way as the list changed (readWatchedAgain) lands nowhere.
+  const read = (st.read = {});
 
   actions
     ?.send?.({ type: "DUSK_UI_ASSETS_GET", profileIndex: idx })
     .then((resp) => {
-      if (state.assets !== st) return;
+      if (state.assets !== st || st.read !== read) return;
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to load watched assets");
       const out = resp?.result ?? resp ?? {};
       st.tokens = Array.isArray(out?.tokens) ? out.tokens : [];
@@ -174,7 +176,7 @@ function ensureAssetsLoaded(ov, { state, actions } = {}) {
       actions?.render?.().catch(() => {});
     })
     .catch((e) => {
-      if (state.assets !== st) return;
+      if (state.assets !== st || st.read !== read) return;
       st.loading = false;
       st.loaded = false;
       st.error = e?.message ?? String(e);
@@ -183,6 +185,16 @@ function ensureAssetsLoaded(ov, { state, actions } = {}) {
     });
 
   return st;
+}
+
+/**
+ * The watched list changed here, a token or an NFT added or removed: it's
+ * read again the next time a screen draws it, also in the pause after a read
+ * that failed, and a read under way as it changed counts for nothing.
+ * @param {object} state
+ */
+export function readWatchedAgain(state) {
+  if (state?.assets) Object.assign(state.assets, { loaded: false, loading: false, error: null, updatedAt: 0, read: null });
 }
 
 function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
@@ -340,9 +352,12 @@ export function assetsSectionsView(ov, { state, actions } = {}) {
         h("div", { class: "section-actions" }, [link("Add token", openAddToken), link("Import NFT", openAddNft)]),
       ]),
       st?.error ? h("div", { class: "err", text: String(st.error) }) : null,
+      // A list that couldn't be read says so alone, never that it's empty.
       rows.length
         ? h("div", { class: "group" }, rows)
-        : h("div", { class: "group" }, [st?.loading ? waiting("Loading…", { tag: "p", className: "tx-empty" }) : h("p", { class: "tx-empty", text: "No tokens or NFTs yet." })]),
+        : st?.error
+          ? null
+          : h("div", { class: "group" }, [st?.loading ? waiting("Loading…", { tag: "p", className: "tx-empty" }) : h("p", { class: "tx-empty", text: "No tokens or NFTs yet." })]),
     ].filter(Boolean)),
   ];
 }
@@ -412,7 +427,7 @@ export function assetAddTokenView(ov, { state, actions } = {}) {
         });
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to watch token");
         // Invalidate cache so Home refreshes.
-        if (state.assets) state.assets.loaded = false;
+        readWatchedAgain(state);
         actions?.showToast?.("Token added.");
         state.route = "home";
         actions?.render?.({ forceRefresh: true }).catch(() => {});
@@ -541,7 +556,7 @@ export function assetAddNftView(ov, { state, actions } = {}) {
           },
         });
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to import NFT");
-        if (state.assets) state.assets.loaded = false;
+        readWatchedAgain(state);
         actions?.showToast?.("NFT imported.");
         state.route = "home";
         actions?.render?.({ forceRefresh: true }).catch(() => {});
@@ -604,6 +619,11 @@ export function assetTokenView(ov, { state, actions } = {}) {
   };
 
   if (!token) {
+    // The list couldn't be read: its error, not a token loading on or missing.
+    // It's asked for again as the page is drawn after the read's pause.
+    if (st.error && !st.loading) {
+      return [subnav({ title: "Token", onBack }), h("div", { class: "row" }, [h("div", { class: "err", text: String(st.error) })])];
+    }
     if (st.loading || !st.loaded) {
       return [
         subnav({ title: "Token", onBack }),
@@ -636,7 +656,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
     try {
       const resp = await actions?.send?.({ type: "DUSK_UI_ASSETS_UNWATCH_TOKEN", contractId: cid });
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to unwatch token");
-      if (state.assets) state.assets.loaded = false;
+      readWatchedAgain(state);
       actions?.showToast?.("Token removed.");
       onBack();
     } catch (e) {
@@ -999,6 +1019,11 @@ export function assetNftView(ov, { state, actions } = {}) {
     : null;
 
   if (!nft) {
+    // The list couldn't be read: its error, not an NFT missing from it. It's
+    // asked for again as the page is drawn after the read's pause.
+    if (st.error && !st.loading) {
+      return [subnav({ title: "NFT", onBack }), h("div", { class: "row" }, [h("div", { class: "err", text: String(st.error) })])];
+    }
     return [
       subnav({ title: "NFT", onBack }),
       h("div", { class: "row" }, [
@@ -1016,7 +1041,7 @@ export function assetNftView(ov, { state, actions } = {}) {
     try {
       const resp = await actions?.send?.({ type: "DUSK_UI_ASSETS_UNWATCH_NFT", contractId: cid, tokenId });
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to remove NFT");
-      if (state.assets) state.assets.loaded = false;
+      readWatchedAgain(state);
       actions?.showToast?.("NFT removed.");
       onBack();
     } catch (e) {

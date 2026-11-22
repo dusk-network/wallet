@@ -49,6 +49,7 @@ import {
   assetTokenView,
   assetTokenConfirmView,
   assetNftView,
+  readWatchedAgain,
 } from "./views/assets.js";
 import { optionsView } from "./views/options.js";
 import { addressBookView } from "./views/addressbook.js";
@@ -221,7 +222,7 @@ async function maybeAutoWatchDashboardStDusk(ov) {
     if (watchResp?.error) return;
 
     st.key = key;
-    if (state.assets) state.assets.loaded = false;
+    readWatchedAgain(state);
   } catch {
     // Dashboard asset discovery is best-effort; it must not block wallet use.
   } finally {

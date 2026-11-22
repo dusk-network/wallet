@@ -72,37 +72,46 @@ describe("a read of the watched tokens that fails", () => {
   const NODE = "https://testnet.nodes.dusk.network";
   const ov = ({ wallet = "wallet-a", nodeUrl = NODE, profile = 0 } = {}) => ({ isUnlocked: true, nodeUrl, accounts: [wallet, "other"], selectedAccountIndex: profile });
 
-  // Home's Tokens and NFTs as the popup draws it: drawn again whenever it asks,
-  // its answers coming a moment later, as the background's do.
+  const NFT = `${"ef".repeat(32)}`;
+  const TOKENS = { tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }], nfts: [] };
+  const LISTED = { ...TOKENS, nfts: [{ contractId: NFT, tokenId: "7", symbol: "ART", name: "Artwork" }] };
+
+  // The popup's asset screens as it draws them: Home's Tokens and NFTs, a token's page, an NFT's, Add token. Drawn
+  // again whenever it asks, by the route; its answers coming a moment later, as the background's do. `answer.list`
+  // is the watched list a read gives, `answer.balance` a token balance's answer (a promise holds it).
   async function homeTokens() {
     const { installFakeDom, settle, visibleText } = await import("../../testing/fakeDom.js");
     const { vi } = await import("vitest");
     const { document } = installFakeDom();
-    const { assetsSectionsView } = await import("./assets.js");
-    const answer = { fail: true };
+    const views = await import("./assets.js");
+    const answer = { fail: true, list: TOKENS, balance: { result: "12345" } };
     const state = { route: "home" };
     let shown = ov();
+    const screens = { home: views.assetsSectionsView, asset_token: views.assetTokenView, asset_nft: views.assetNftView, asset_add_token: views.assetAddTokenView };
     const draw = (next = shown) => {
       shown = next;
-      document.body.replaceChildren(...assetsSectionsView(shown, { state, actions }));
+      document.body.replaceChildren(...screens[state.route](shown, { state, actions }));
     };
+    const later = (value) => new Promise((resolve) => setTimeout(() => resolve(value)));
     const actions = {
-      send: vi.fn(
-        (message) =>
-          new Promise((resolve) =>
-            setTimeout(() => {
-              if (message.type !== "DUSK_UI_ASSETS_GET") resolve({ result: "100" });
-              else resolve(answer.fail ? { error: { message: "Watched tokens can't be read now." } } : { result: { tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }], nfts: [] } });
-            })
-          )
-      ),
+      send: vi.fn((message) => {
+        if (message.type === "DUSK_UI_ASSETS_GET") return later(answer.fail ? { error: { message: "Watched tokens can't be read now." } } : { result: answer.list });
+        if (message.type === "DUSK_UI_DRC20_GET_BALANCE") return answer.balance instanceof Promise ? answer.balance : later(answer.balance);
+        return later({ ok: true });
+      }),
       render: vi.fn(async () => draw()),
+      showToast: vi.fn(),
     };
-    const reads = () => actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_ASSETS_GET").length;
+    const asked = (type) => actions.send.mock.calls.filter(([m]) => m.type === type).length;
+    const reads = () => asked("DUSK_UI_ASSETS_GET");
     const settleAll = async () => {
       for (let i = 0; i < 6; i++) await settle();
     };
-    return { answer, draw, reads, settleAll, text: () => visibleText(document.body), rows: () => document.body.querySelectorAll(".asset-row"), vi };
+    const press = async (text) => {
+      document.body.querySelectorAll("button").find((b) => b.textContent === text).click();
+      await settleAll();
+    };
+    return { answer, state, draw, reads, asked, settleAll, press, text: () => visibleText(document.body), rows: () => document.body.querySelectorAll(".asset-row"), vi };
   }
 
   it("is said on the screen and asked for once, not again each time the screen is drawn, and read again later", async () => {
@@ -145,6 +154,71 @@ describe("a read of the watched tokens that fails", () => {
     await page.settleAll();
     expect(page.reads()).toBe(2);
     expect(page.rows().length).toBe(1);
+  });
+
+  it("is read again at once when the list changes, as a token added changes it, and the new token shows", async () => {
+    const page = await homeTokens();
+    page.answer.list = { tokens: [], nfts: [] };
+    page.draw();
+    await page.settleAll();
+    expect(page.reads()).toBe(1);
+    expect(page.text()).toContain("Watched tokens can't be read now.");
+
+    // Add token, its details looked up: added, and Home again at once.
+    page.answer.fail = false;
+    page.answer.list = TOKENS;
+    page.state.route = "asset_add_token";
+    page.state.assetAddToken = { contractId: TOKEN, loading: false, error: null, meta: { name: "Token", symbol: "TKN", decimals: 2 } };
+    page.draw();
+    await page.press("Add token");
+    expect(page.asked("DUSK_UI_ASSETS_WATCH_TOKEN")).toBe(1);
+    expect(page.state.route).toBe("home");
+    expect(page.reads()).toBe(2);
+    expect(page.rows().length).toBe(1);
+    expect(page.text()).not.toContain("Watched tokens can't be read now.");
+  });
+
+  it("says only its error on Home with nothing read before, never that there are none", async () => {
+    const page = await homeTokens();
+    page.draw();
+    await page.settleAll();
+    expect(page.text()).toContain("Watched tokens can't be read now.");
+    expect(page.text()).not.toMatch(/No tokens/);
+  });
+
+  it.each([
+    ["a token's page", "asset_token", (state) => (state.assetTokenContractId = TOKEN), /Loading/],
+    ["an NFT's page", "asset_nft", (state) => (state.assetNft = { contractId: NFT, tokenId: "7" }), /not found/],
+  ])("says its error on %s after a switch of profile, and reads again after the pause", async (_, route, open, untrue) => {
+    const page = await homeTokens();
+    try {
+      page.answer.fail = false;
+      page.answer.list = LISTED;
+      page.draw();
+      await page.settleAll();
+      expect(page.reads()).toBe(1);
+
+      // The page open, and another profile whose read fails.
+      page.state.route = route;
+      open(page.state);
+      page.answer.fail = true;
+      page.draw(ov({ profile: 1 }));
+      await page.settleAll();
+      expect(page.reads()).toBe(2);
+      expect(page.text()).toContain("Watched tokens can't be read now.");
+      expect(page.text()).not.toMatch(untrue);
+
+      // After the pause, drawn again: asked again, and the page shows what it's for.
+      page.vi.setSystemTime(Date.now() + 30_001);
+      page.answer.fail = false;
+      page.draw();
+      await page.settleAll();
+      expect(page.reads()).toBe(3);
+      expect(page.text()).not.toContain("Watched tokens can't be read now.");
+      expect(page.text()).toContain(route === "asset_token" ? "TKN" : "ART #7");
+    } finally {
+      page.vi.useRealTimers();
+    }
   });
 });
 
