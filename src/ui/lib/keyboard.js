@@ -118,9 +118,25 @@ const isShown = (el) => Boolean(el) && !el.hidden && !el.closest?.("[hidden]");
 // an amount's error or its two-readings question), where shown. It goes
 // above the keyboard with the field, which stays in view, rather than
 // taking the page on to the button as a warning does.
-function ownedBy(field, doc) {
-  const ids = ["aria-controls", "aria-errormessage", "aria-describedby"].flatMap((name) => String(field.getAttribute?.(name) ?? "").split(/\s+/).filter(Boolean));
+function ownedBy(field, doc, names = ["aria-controls", "aria-errormessage", "aria-describedby"]) {
+  const ids = names.flatMap((name) => String(field.getAttribute?.(name) ?? "").split(/\s+/).filter(Boolean));
   return ids.map((id) => doc.getElementById?.(id)).filter(isShown);
+}
+
+// What's said of a field that asks for an answer, as an amount that reads two
+// ways asks which, with a button for each: the buttons' box, else null.
+function askedOf(field, doc) {
+  const buttons = ownedBy(field, doc, ["aria-errormessage", "aria-describedby"])
+    .flatMap((el) => Array.from(el.querySelectorAll?.("button") ?? []))
+    .filter(isShown);
+  if (!buttons.length) return null;
+  return buttons.reduce(
+    (box, button) => {
+      const r = button.getBoundingClientRect();
+      return { top: Math.min(box.top, r.top), bottom: Math.max(box.bottom, r.bottom) };
+    },
+    { top: Infinity, bottom: -Infinity }
+  );
 }
 
 // What the screen says between a field and its button as it's typed in: a
@@ -227,8 +243,17 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
     // The field, and its button with it when both fit; said between them,
     // the button and as much of what's said as fits above it.
     const both = Boolean(b && b.bottom > f.bottom && b.bottom - f.top <= room);
-    const bottom = b && b.bottom > f.bottom && (both || w) ? b.bottom : f.bottom;
-    const first = !both && w && bottom === b.bottom ? Math.max(w.top, b.bottom - room) : f.top;
+    let bottom = b && b.bottom > f.bottom && (both || w) ? b.bottom : f.bottom;
+    let first = !both && w && bottom === b.bottom ? Math.max(w.top, b.bottom - room) : f.top;
+    // Asked something as it's typed in, with a button for each answer, where
+    // the field and what it shows don't all fit (a phone on its side): the
+    // buttons above the keyboard, as what must be answered, and as much as
+    // fits above them, the question first.
+    const asked = !both && !w && f.bottom - f.top > room ? askedOf(field, doc) : null;
+    if (asked) {
+      bottom = asked.bottom;
+      first = Math.max(f.top, asked.bottom - room);
+    }
     let by = bottom > to ? bottom - to : 0;
     if (first - by < from) by = first - from;
     if (Math.abs(by) >= 1) scroller.scrollTop += by;

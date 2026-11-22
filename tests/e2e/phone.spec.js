@@ -320,12 +320,20 @@ test("keeps the amount being typed in above the keyboard, with what's said of it
       await page.keyboard.type(text);
       // What's said of the amount, tied to it, then the frames the page moves in.
       await expect.poll(() => amount.getAttribute("aria-describedby"), { message: `${route} ${text}` }).toBeTruthy();
-      await expect(page.locator(`#${await amount.getAttribute("aria-describedby")}`)).toBeVisible();
+      const said = page.locator(`#${await amount.getAttribute("aria-describedby")}`);
+      await expect(said).toBeVisible();
       await twoFrames(page);
       const strip = await keyboardStrip(page);
-      const box = await boxOf(amount);
-      expect(box.top, `${route} ${text}`).toBeGreaterThanOrEqual(0);
-      expect(box.bottom, `${route} ${text}`).toBeLessThanOrEqual(strip);
+      // A question asked of the amount, a button for each reading: the buttons above the keyboard, as what must be
+      // answered; else the amount being typed.
+      const choices = said.getByRole("button");
+      const shown = (await choices.count()) ? await choices.all() : [amount];
+      if (text === "1,234") expect(shown.length, `${route} ${text}`).toBe(2);
+      for (const el of shown) {
+        const box = await boxOf(el);
+        expect(box.top, `${route} ${text}`).toBeGreaterThanOrEqual(0);
+        expect(box.bottom, `${route} ${text}`).toBeLessThanOrEqual(strip);
+      }
     }
   }
 });
