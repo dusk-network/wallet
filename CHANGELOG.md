@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Fixed
+
+- Kept Tokens and NFTs' error on the screen when the token list can't be read, asking for it again 30 seconds on, or at once on another wallet, network or profile, rather than hundreds of times a second as the screen was drawn again.
+
 ## [0.4.0] - 2026-11-21
 
 ### Added

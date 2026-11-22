@@ -67,6 +67,87 @@ describe("tokens and NFTs after a switch to another wallet, on the same network 
   });
 });
 
+describe("a read of the watched tokens that fails", () => {
+  const TOKEN = `0x${"cd".repeat(32)}`;
+  const NODE = "https://testnet.nodes.dusk.network";
+  const ov = ({ wallet = "wallet-a", nodeUrl = NODE, profile = 0 } = {}) => ({ isUnlocked: true, nodeUrl, accounts: [wallet, "other"], selectedAccountIndex: profile });
+
+  // Home's Tokens and NFTs as the popup draws it: drawn again whenever it asks,
+  // its answers coming a moment later, as the background's do.
+  async function homeTokens() {
+    const { installFakeDom, settle, visibleText } = await import("../../testing/fakeDom.js");
+    const { vi } = await import("vitest");
+    const { document } = installFakeDom();
+    const { assetsSectionsView } = await import("./assets.js");
+    const answer = { fail: true };
+    const state = { route: "home" };
+    let shown = ov();
+    const draw = (next = shown) => {
+      shown = next;
+      document.body.replaceChildren(...assetsSectionsView(shown, { state, actions }));
+    };
+    const actions = {
+      send: vi.fn(
+        (message) =>
+          new Promise((resolve) =>
+            setTimeout(() => {
+              if (message.type !== "DUSK_UI_ASSETS_GET") resolve({ result: "100" });
+              else resolve(answer.fail ? { error: { message: "Watched tokens can't be read now." } } : { result: { tokens: [{ contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 }], nfts: [] } });
+            })
+          )
+      ),
+      render: vi.fn(async () => draw()),
+    };
+    const reads = () => actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_ASSETS_GET").length;
+    const settleAll = async () => {
+      for (let i = 0; i < 6; i++) await settle();
+    };
+    return { answer, draw, reads, settleAll, text: () => visibleText(document.body), rows: () => document.body.querySelectorAll(".asset-row"), vi };
+  }
+
+  it("is said on the screen and asked for once, not again each time the screen is drawn, and read again later", async () => {
+    const page = await homeTokens();
+    try {
+      page.draw();
+      await page.settleAll();
+      expect(page.reads()).toBe(1);
+      expect(page.text()).toContain("Watched tokens can't be read now.");
+      // Drawn again and again, as the popup does: still the one read, the error still shown.
+      for (let i = 0; i < 5; i++) page.draw();
+      await page.settleAll();
+      expect(page.reads()).toBe(1);
+      expect(page.text()).toContain("Watched tokens can't be read now.");
+
+      // Later, as a list read in full would be read again: asked once more, and it's there.
+      page.vi.setSystemTime(Date.now() + 30_001);
+      page.answer.fail = false;
+      page.draw();
+      await page.settleAll();
+      expect(page.reads()).toBe(2);
+      expect(page.rows().length).toBe(1);
+      expect(page.text()).not.toContain("Watched tokens can't be read now.");
+    } finally {
+      page.vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["wallet", { wallet: "wallet-b" }],
+    ["network", { nodeUrl: "https://nodes.dusk.network" }],
+    ["profile", { profile: 1 }],
+  ])("is asked for again at once on a switch of %s", async (_, to) => {
+    const page = await homeTokens();
+    page.draw();
+    await page.settleAll();
+    expect(page.reads()).toBe(1);
+    page.answer.fail = false;
+    page.draw(ov(to));
+    await page.settleAll();
+    expect(page.reads()).toBe(2);
+    expect(page.rows().length).toBe(1);
+  });
+});
+
 describe("sending a token from its page", () => {
   const TOKEN = `0x${"cd".repeat(32)}`;
   const TO = "26FCH745YG5eTfL1CF7ExhifgcANFUvDTXtVPRz1MwNya7Lu23RnDZBYFLZUY6BRXnZhrhtb48Ax2Lsz3dQUX62mXaU4XRAoKm7qB9nF";

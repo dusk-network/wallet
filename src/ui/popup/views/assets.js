@@ -149,7 +149,11 @@ function ensureAssetsLoaded(ov, { state, actions } = {}) {
   const st = state.assets;
   const idx = Number(ov?.selectedAccountIndex ?? 0) || 0;
 
-  const stale = !st.loaded || Date.now() - Number(st.updatedAt || 0) > 30_000;
+  // A read that failed counts as a read: its error stays on the screen, and
+  // the list is asked for again once it's as old as one read in full would
+  // be, not each time the screen is drawn again (which asked hundreds of
+  // times a second, the error never shown).
+  const stale = (!st.loaded && !st.error) || Date.now() - Number(st.updatedAt || 0) > 30_000;
 
   if (!stale || st.loading) return st;
 
@@ -174,6 +178,7 @@ function ensureAssetsLoaded(ov, { state, actions } = {}) {
       st.loading = false;
       st.loaded = false;
       st.error = e?.message ?? String(e);
+      st.updatedAt = Date.now();
       actions?.render?.().catch(() => {});
     });
 
