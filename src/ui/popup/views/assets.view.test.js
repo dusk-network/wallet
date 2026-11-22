@@ -220,6 +220,26 @@ describe("a read of the watched tokens that fails", () => {
       page.vi.useRealTimers();
     }
   });
+
+  it("asks for a token's balance once while it's being read, however often the screen is drawn", async () => {
+    const page = await homeTokens();
+    page.answer.fail = false;
+    const balance = Promise.withResolvers();
+    page.answer.balance = balance.promise;
+    page.draw();
+    await page.settleAll();
+    for (let i = 0; i < 6; i++) page.draw();
+    await page.settleAll();
+    expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(1);
+
+    // Its answer comes: shown, and not asked for again.
+    balance.resolve({ result: "12345" });
+    await page.settleAll();
+    page.draw();
+    await page.settleAll();
+    expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(1);
+    expect(page.text()).toMatch(exactly("123.45"));
+  });
 });
 
 describe("sending a token from its page", () => {

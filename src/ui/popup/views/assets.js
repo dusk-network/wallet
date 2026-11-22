@@ -207,15 +207,18 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
 
   const now = Date.now();
   const STALE_MS = 25_000;
+  // The balances being read: none is asked for again while its answer is on its way.
+  const reading = (st.balancesReading ??= new Set());
 
   for (const t of tokens) {
     const cid = String(t?.contractId ?? "").trim();
-    if (!cid) continue;
+    if (!cid || reading.has(cid)) continue;
     const last = Number(st.balancesAt?.[cid] ?? 0) || 0;
     if (st.balances?.[cid] !== undefined && now - last < STALE_MS) continue;
 
     // Mark as "requested" to avoid spamming during rapid renders.
     st.balancesAt[cid] = now;
+    reading.add(cid);
 
     actions
       ?.send?.({
@@ -234,7 +237,8 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
       })
       .catch(() => {
         // Keep previous cached value if any; do not hard-fail the whole view.
-      });
+      })
+      .finally(() => reading.delete(cid));
   }
 
   return st;
