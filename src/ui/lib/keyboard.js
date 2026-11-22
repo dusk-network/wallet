@@ -114,9 +114,12 @@ const isShown = (el) => Boolean(el) && !el.hidden && !el.closest?.("[hidden]");
 
 // What a field shows under it as it's typed in, its own: the words it
 // suggests (`aria-controls`, a recovery-word box's chips) and what's said
-// of it (`aria-errormessage`, "Not in the word list"), where shown.
+// of it (`aria-errormessage`, "Not in the word list"; `aria-describedby`,
+// an amount's error or its two-readings question), where shown. It goes
+// above the keyboard with the field, which stays in view, rather than
+// taking the page on to the button as a warning does.
 function ownedBy(field, doc) {
-  const ids = ["aria-controls", "aria-errormessage"].flatMap((name) => String(field.getAttribute?.(name) ?? "").split(/\s+/).filter(Boolean));
+  const ids = ["aria-controls", "aria-errormessage", "aria-describedby"].flatMap((name) => String(field.getAttribute?.(name) ?? "").split(/\s+/).filter(Boolean));
   return ids.map((id) => doc.getElementById?.(id)).filter(isShown);
 }
 

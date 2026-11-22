@@ -10,6 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 ### Fixed
 
 - Kept Tokens and NFTs' error on the screen when the token list can't be read, asking for it again 30 seconds on, or at once on another wallet, network or profile, rather than hundreds of times a second as the screen was drawn again.
+- Kept an amount being typed on a phone in view above the keyboard with its error or its question of how it reads, in Send, Shield, Staking and Receive's request, and a memo with its error, rather than taking the page on to the button below and the field out of view; a warning said as a field is typed in still goes above the keyboard with its button.
 
 ## [0.4.0] - 2026-11-21
 
