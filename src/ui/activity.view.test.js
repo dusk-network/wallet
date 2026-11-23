@@ -9,7 +9,7 @@ import { txDetailsView } from "./popup/views/txDetails.js";
 import { activityKey } from "./popup/activity.js";
 
 // The token and NFT cards load on their own.
-vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
+vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [], ensureAssetsLoaded: () => undefined }));
 // A details view asks for a synced entry's details through this.
 const detail = vi.hoisted(() => ({ load: vi.fn() }));
 vi.mock("./popup/activity.js", async (importOriginal) => ({

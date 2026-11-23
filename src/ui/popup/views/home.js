@@ -1,7 +1,7 @@
 import { formatDusk, formatDuskExact, groupThousands, safeBigInt } from "../../../shared/amount.js";
 import { TX_KIND } from "../../../shared/constants.js";
 import { h } from "../../lib/dom.js";
-import { assetsSectionsView } from "./assets.js";
+import { assetsSectionsView, ensureAssetsLoaded } from "./assets.js";
 import { activityView, recentActivitySection } from "./activityView.js";
 import { activityRows } from "../activity.js";
 import { networkForNode } from "../../../shared/nodeNetwork.js";
@@ -273,8 +273,10 @@ export function homeView(ov, { state, actions } = {}) {
 
   // A wallet with nothing in it yet: how to get DUSK, in place of empty
   // Tokens and NFTs. Both balances must be known: shielded DUSK still
-  // syncing isn't nothing.
-  const assets = state?.assets;
+  // syncing isn't nothing. So must its watched tokens and NFTs, read for it
+  // too: one it holds shows in their place, and while they're read, or where
+  // they can't be, Tokens and NFTs says so.
+  const assets = ensureAssetsLoaded(ov, { state, actions });
   const empty =
     hasBalance &&
     pubLux === 0n &&
@@ -282,7 +284,9 @@ export function homeView(ov, { state, actions } = {}) {
     !stakedLux &&
     shieldedSync?.state !== "syncing" &&
     !activityRows(ov, state).length &&
-    !(assets?.tokens?.length || assets?.nfts?.length);
+    Boolean(assets?.loaded) &&
+    !assets.error &&
+    !(assets.tokens?.length || assets.nfts?.length);
   const getStarted = empty ? getStartedSection(ov, { state, actions }) : null;
 
   // Full mode should feel like an app dashboard, while popup remains a compact

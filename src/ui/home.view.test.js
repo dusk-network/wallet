@@ -4,7 +4,7 @@ import { installFakeDom, visibleText } from "./testing/fakeDom.js";
 import { homeView } from "./popup/views/home.js";
 
 // The token and NFT cards load on their own; the balance card is what matters here.
-vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [] }));
+vi.mock("./popup/views/assets.js", () => ({ assetsSectionsView: () => [], ensureAssetsLoaded: () => undefined }));
 
 const escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
