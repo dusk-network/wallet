@@ -869,16 +869,16 @@ describe("the requests made here", () => {
     const back = () => dom.document.body.querySelectorAll(".request-row__payments li").map(sendBack).find(Boolean);
     back().click();
     expect(state.route).toBe("send");
-    expect(state.draft).toMatchObject({ to: SENDER, amountDusk: "0.016", amountMasked: false, memo: "Refund: Factura 2026-074 Ilustración" });
+    expect(state.draft).toEqual({ to: SENDER, amountDusk: "0.016", memo: "Refund: Factura 2026-074 Ilustración" });
 
-    // With balances hidden, the amount it fills in stays hidden on Send and Review.
+    // With balances hidden, the same: Send and its Review show the amount, as every flow does.
     const hiddenState = { route: "receive", receive: { tab: "public" }, activity: state.activity };
     const actions = { render: vi.fn(async () => dom.document.body.replaceChildren(...receiveView({ ...unlocked, hideBalances: true }, { state: hiddenState, actions }))), showToast: vi.fn() };
     await actions.render();
     await vi.waitFor(() => expect(hiddenState.requests?.loaded).toBe(true));
     await actions.render();
     back().click();
-    expect(hiddenState.draft).toMatchObject({ to: SENDER, amountDusk: "0.016", amountMasked: true });
+    expect(hiddenState.draft).toEqual(state.draft);
   });
 
   it("finds a payment past the page Activity shows: one paid while closed, with more than a page after it", async () => {

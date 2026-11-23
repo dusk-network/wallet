@@ -910,7 +910,6 @@ ext?.runtime?.onMessage?.addListener((message, sender, sendResponse) => {
           origin: entry.origin,
           params: entry.params,
           payBalance,
-          hideBalances: settings?.hideBalances === true,
           // The wallet's network for the approval's header, by its node's
           // address, the chain ID that node signs for, and whose prover and
           // archiver it uses.

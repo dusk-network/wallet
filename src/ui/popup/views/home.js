@@ -404,7 +404,7 @@ function waitingSection(ov, { state, actions } = {}) {
   // payment, Don't send leads.
   const meanwhile = (send) => sentMeanwhileText(send, { toText: (address) => toText({ to: address }), whenText: whenAtText, hidden });
   const sendItToo = (send) => () => {
-    state.draft = againDraft(send, ov, { hidden });
+    state.draft = againDraft(send, ov);
     state.route = "confirm";
     actions?.render?.()?.catch?.(() => {});
   };

@@ -390,7 +390,7 @@ function stakingContext(ov, { state, actions } = {}) {
 }
 
 // Where Review's draft comes from: the action, its amount and the profiles.
-function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amountMode = "all", amountMasked = false }) {
+function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amountMode = "all" }) {
   const kind = actionToKind(actionKind);
   const stakeProfileIndex = Number(pos.stakeProfileIndex) || 0;
   const ownerProfileIndex =
@@ -404,7 +404,6 @@ function makeDraft(pos, st, { state, actions, actionKind, amountLux = null, amou
     ownerProfileIndex,
     amountLux,
     amountMode,
-    amountMasked,
     hasStake: Boolean(pos.hasStake),
     // What Unstake and Claim move, for Review and the Sent screen.
     displayLux:
@@ -917,7 +916,7 @@ function stakingOverview(ov, ctx, { state, actions }) {
 }
 
 function nativeStakeView(ov, ctx, { state, actions }) {
-  const { st, minLux, pos, hidden, feeGas } = ctx;
+  const { st, minLux, pos, feeGas } = ctx;
   const back = () => setScreen(st, SCREEN_OVERVIEW, actions);
   const kind = TX_KIND.STAKE;
   const feeLux = reviewFeeLux(kind, FUNDING_PUBLIC, feeGas);
@@ -932,16 +931,14 @@ function nativeStakeView(ov, ctx, { state, actions }) {
     : Number(st.ownerProfileIndex ?? stakeProfileIndex) || 0;
 
   // What stops any amount: no gas, a stake this wallet can't manage.
-  const blocked = actionState(pos, ACTION_TOPUP, null, minLux, { hidden, feeGas });
+  const blocked = actionState(pos, ACTION_TOPUP, null, minLux, { feeGas });
 
   const field = amountField({
     label: isNew ? "Stake amount" : "Amount to add",
     value: st.stakeAmountDusk ?? "",
     disabled: !blocked.ok,
-    masked: hidden && Boolean(st.stakeMasked),
     onInput: () => {
       st.amountMode = "custom";
-      st.stakeMasked = false;
       check();
     },
     onEnter: () => review(),
@@ -992,7 +989,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       reviewBtn.disabled = true;
       return null;
     }
-    const result = actionState(pos, ACTION_TOPUP, lux, minLux, { hidden, feeGas });
+    const result = actionState(pos, ACTION_TOPUP, lux, minLux, { feeGas });
     field.setError(result.ok ? "" : result.reason);
     reviewBtn.disabled = !result.ok;
     return result.ok ? lux : null;
@@ -1010,15 +1007,12 @@ function nativeStakeView(ov, ctx, { state, actions }) {
       actionKind: ACTION_TOPUP,
       amountLux: lux.toString(),
       amountMode: st.amountMode === "max" ? "max" : "custom",
-      amountMasked: field.isMasked(),
     });
     st.amountMode = "custom";
   }
 
   const fill = (lux, mode) => {
-    // What Max fills in shows as dots with balances hidden; the minimum isn't a balance.
-    st.stakeMasked = mode === "max";
-    field.setValue(formatLuxForInput(lux), { masked: hidden && st.stakeMasked });
+    field.setValue(formatLuxForInput(lux));
     st.amountMode = mode;
     check();
     field.focus();
@@ -1043,7 +1037,7 @@ function nativeStakeView(ov, ctx, { state, actions }) {
   });
 
   const available = h("div", { class: "amount-avail" }, [
-    h("span", {}, ["Available ", balance(hidden, fmtLux(publicLux)), " DUSK from your public balance"]),
+    h("span", {}, [`Available ${fmtLux(publicLux)} DUSK from your public balance`]),
     useMin,
     maxBtn,
   ].filter(Boolean));
@@ -1145,19 +1139,16 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
     actions?.render?.().catch(() => {});
   };
 
-  // What moves: the amount staked, or all of the stake or the rewards. The
-  // stake and the rewards are balances, hidden with Hide balances; an amount
-  // typed in for a stake shows, as on every Review; what Max filled in doesn't.
+  // What moves: the amount staked, or all of the stake or the rewards.
   const shownLux = kind === TX_KIND.STAKE ? d.amountLux : d.amountLux || d.displayLux;
   const allText = kind === TX_KIND.UNSTAKE ? "All stake" : kind === TX_KIND.WITHDRAW_REWARD ? "All rewards" : "—";
-  const hideAmount = (kind !== TX_KIND.STAKE || Boolean(d.amountMasked)) && balancesHidden(ov);
 
   // The button names what it does, with the amount as the head shows it: "Stake 1,000 DUSK".
   const verb = kind === TX_KIND.UNSTAKE ? "Unstake" : kind === TX_KIND.WITHDRAW_REWARD ? "Claim" : "Stake";
   const confirmBtn = h(
     "button",
     { class: "btn-primary" },
-    shownLux && safeBigInt(shownLux, 0n) > 0n ? [`${verb} `, balance(hideAmount, formatDuskExact(shownLux)), " DUSK"] : [verb]
+    shownLux && safeBigInt(shownLux, 0n) > 0n ? [`${verb} ${formatDuskExact(shownLux)} DUSK`] : [verb]
   );
 
   const gasPrivacy = d.payment === FUNDING_SHIELDED ? "shielded" : "public";
@@ -1169,14 +1160,13 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
     gasOpts: { privacy: gasPrivacy },
     amountLux: kind === TX_KIND.STAKE ? String(d.amountLux ?? "0") : String(shownLux ?? "0"),
     comesBack: kind !== TX_KIND.STAKE,
-    hideTotal: hideAmount,
     ov,
     actions,
     gas: d?.gas,
   });
 
   const amountLine = () =>
-    shownLux && safeBigInt(shownLux, 0n) > 0n ? [balance(hideAmount, formatDuskExact(shownLux)), " DUSK"] : [allText];
+    shownLux && safeBigInt(shownLux, 0n) > 0n ? [`${formatDuskExact(shownLux)} DUSK`] : [allText];
 
   const line =
     kind === TX_KIND.STAKE ? "Native staking" : kind === TX_KIND.UNSTAKE ? "Back to your public balance" : "To your public balance";
@@ -1191,7 +1181,6 @@ export function stakeConfirmView(ov, { state, actions } = {}) {
     editor: gasEditor,
     availableLux: paying != null ? safeBigInt(paying, 0n) : null,
     sendsLux: kind === TX_KIND.STAKE ? safeBigInt(d.amountLux ?? 0, 0n) : 0n,
-    hidden: balancesHidden(ov),
     button: confirmBtn,
   });
 

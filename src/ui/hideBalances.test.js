@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { TX_KIND } from "../shared/constants.js";
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
+import { fakeEvent, installFakeDom, screenReaderText, settle, typeInto, visibleText } from "./testing/fakeDom.js";
 import { assetTokenView, assetsOwner, assetsSectionsView } from "./popup/views/assets.js";
 import { convertConfirmView, convertFormView } from "./popup/views/convert.js";
 import { homeView } from "./popup/views/home.js";
@@ -79,12 +79,10 @@ const button = (text) => body.querySelectorAll("button").find((b) => b.textConte
 // A figure exactly as written: not inside a longer number, not signed or bounded unless written so, and not followed by
 // more digits, letters or a decimal part (1.0025 ≠ 11.0025, 0.005 ≠ −0.005, 2,000,000 ≠ 2,000,000.5, BNB ≠ BNBX).
 const exactly = (text) => new RegExp(`(?<![\\d.,+\\-−<>≤≥~])(?<![+\\-−<>≤≥~]\\s)${text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\dA-Za-z]|[.,]\\d)`);
-// What a form says under its amount where the public balance can't pay it: how much short, its figure hidden, and of
-// which balance.
-const tooMuch = (el) => {
+// What a form says under its amount where the public balance can't pay it: how much short, and of which balance.
+const tooMuch = (el, short) => {
   const said = visibleText(el);
-  expect(said).toMatch(exactly("•••• DUSK"));
-  expect(said).not.toMatch(/\d/);
+  expect(said).toMatch(exactly(short));
   expect(said).toMatch(/public balance/i);
   expect(said).not.toMatch(/shielded/i);
 };
@@ -100,8 +98,39 @@ const hides = (el) => {
   expect([visibleText(el), screenReaderText(el)].join(" ")).not.toMatch(/\d/);
   expect(el.getAttribute("title")).toBeNull();
 };
+// A figure inside a flow with balances hidden: there, to the eyes and to screen readers, and no dots.
+const shows = (el, figure) => {
+  expect([visibleText(el), screenReaderText(el)]).toEqual([expect.stringMatching(exactly(figure)), expect.stringMatching(exactly(figure))]);
+  expect(visibleText(el)).not.toContain("••••");
+};
 // A field's row on a page, by its label.
 const fieldRow = (label) => body.querySelectorAll(".kv").find((kv) => visibleText(kv.querySelector(".kv-label")) === label);
+
+// The profile's staking, as Staking reads it: no stake yet, its public balance the overview's.
+const owner = (over = {}) => ({
+  profileIndex: 0,
+  account: ACCOUNT,
+  publicBalance: { value: "1482938300000" },
+  hasStake: false,
+  info: { amount: null, reward: "0", faults: 0, hardFaults: 0 },
+  ownerKind: "none",
+  ownerProfileIndex: 0,
+  manageable: true,
+  profiles: [{ profileIndex: 0 }, { profileIndex: 1 }],
+  relatedStakes: [],
+  ...over,
+});
+const staking = (ownerStatus, screen) => ({
+  loaded: true,
+  loading: false,
+  profileIndex: 0,
+  minimumStakeLux: dusk(1000),
+  actionKind: "topup",
+  stakeAmountDusk: "",
+  ownerProfileIndex: 0,
+  ownerStatus,
+  screen,
+});
 
 describe("Hide balances", () => {
   it("hides the dashboard's balances behind the eye beside Refresh, and shows them again", async () => {
@@ -152,58 +181,6 @@ describe("Hide balances", () => {
 });
 
 describe("hidden balances", () => {
-  it("hide what Send has available after fees, while Max fills in the real amount", async () => {
-    const state = { route: "send", draft: null, addressBook: { loaded: true, items: [] } };
-    await show(sendFormView(overview(HIDDEN), { state, actions: actions() }));
-    const to = body.querySelector(".to-input-wrap textarea");
-    const amount = body.querySelector("input.amount-field__input");
-    const max = () => body.querySelector(".amount-avail button");
-
-    typeInto(to, OTHER_ACCOUNT);
-    await settle();
-    hides(body.querySelector(".amount-avail__text"));
-    nowhere("1,482.9358", "1482.9358", "1,482.9383", "1482.9383");
-    // The fee isn't a balance.
-    expect(body.querySelector(".amount-fee-note").textContent).toMatch(exactly("up to 0.0025 DUSK"));
-    max().click();
-    expect(amount.value).toBe("1482.9358");
-
-    // Shielded: what's spendable now, the rest held for a pending transaction.
-    typeInto(to, ADDRESS);
-    await settle();
-    hides(body.querySelector(".amount-avail__text"));
-    expect(body.querySelector(".amount-fee-note").textContent).toMatch(exactly("up to 0.05 DUSK"));
-    max().click();
-    expect(amount.value).toBe("19.95");
-
-    // What the user types shows as typed.
-    typeInto(amount, "12.5");
-    expect(amount.value).toBe("12.5");
-  });
-
-  it("hide Shield's and Unshield's balance lines, while Max and the balance check use the real ones", async () => {
-    const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
-    await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
-    hides(body.querySelector(".amount-avail__text"));
-    nowhere("1,482.8883", "1482.8883", "1,482.9383", "1482.9383");
-    expect(visibleText(body.querySelector(".amount-fee-note"))).toMatch(exactly("up to 0.05 DUSK"));
-    body.querySelector(".amount-avail button").click();
-    expect(body.querySelector("input.amount-field__input").value).toBe("1482.8883");
-
-    // The balance check uses the real balance, says so under the field, and Review doesn't go on.
-    typeInto(body.querySelector("input.amount-field__input"), "5000");
-    body.querySelector("button.btn-primary").click();
-    await settle();
-    tooMuch(body.querySelector(".amount-field__error"));
-    expect(state.route).toBe("convert");
-
-    state.draft = { kind: TX_KIND.UNSHIELD };
-    await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
-    hides(body.querySelector(".amount-avail__text"));
-    nowhere("19.95", "25 DUSK");
-    expect(visibleText(body.querySelector(".amount-fee-note"))).toMatch(exactly("up to 0.05 DUSK"));
-  });
-
   it("hide token balances on the dashboard and on the token's page", async () => {
     const state = { route: "asset_token", assets: assets(), assetTokenContractId: TOKEN };
     await show(assetsSectionsView(overview(HIDDEN), { state, actions: actions() }));
@@ -227,47 +204,24 @@ describe("hidden balances", () => {
     expect(dom.clipboard.writeText).toHaveBeenLastCalledWith("cd".repeat(32));
   });
 
-  it("hide Stake's balance, staked amounts and rewards, while Max and the balance check use the real ones", async () => {
-    const owner = (over = {}) => ({
-      profileIndex: 0,
-      account: ACCOUNT,
-      publicBalance: { value: "1482938300000" },
-      hasStake: false,
-      info: { amount: null, reward: "0", faults: 0, hardFaults: 0 },
-      ownerKind: "none",
-      ownerProfileIndex: 0,
-      manageable: true,
-      profiles: [{ profileIndex: 0 }, { profileIndex: 1 }],
-      relatedStakes: [],
-      ...over,
-    });
-    const staking = (ownerStatus, screen) => ({
-      loaded: true,
-      loading: false,
-      profileIndex: 0,
-      minimumStakeLux: dusk(1000),
-      actionKind: "topup",
-      stakeAmountDusk: "",
-      ownerProfileIndex: 0,
-      ownerStatus,
-      screen,
-    });
-    const act = actions();
-    const draw = (state) => show(stakeFormView(overview(HIDDEN), { state, actions: act }));
+  it("hide Home's balances again back from Send, which shows them", async () => {
+    const state = { route: "home", overview: overview(HIDDEN), addressBook: { loaded: true, items: [] }, assets: assets() };
+    const home = async () => {
+      await show(homeView(state.overview, { state, actions: actions() }));
+      hides(body.querySelector(".home-hero .balance-amount"));
+      nowhere("1,507.9383", "1,482.9383", "1,482.9358");
+    };
+    await home();
+    state.route = "send";
+    await show(sendFormView(state.overview, { state, actions: actions() }));
+    typeInto(body.querySelector(".to-input-wrap textarea"), OTHER_ACCOUNT);
+    await settle();
+    shows(body.querySelector(".amount-avail__text"), "1,482.9358 DUSK");
+    state.route = "home";
+    await home();
+  });
 
-    // A new stake: the balance that pays it, hidden; Max fills in the real amount.
-    const state = { route: "stake", staking: staking(owner(), "native") };
-    await draw(state);
-    hides(body.querySelector(".amount-avail span"));
-    nowhere("1,482.9383", "1482.9383", "1,482.8383", "1482.8383");
-    button("Max").click();
-    expect(state.staking.stakeAmountDusk).toBe("1482.8383");
-
-    // Too much: the check holds, under the field, and doesn't give the balance away.
-    typeInto(body.querySelector("input.amount-field__input"), "5000");
-    tooMuch(body.querySelector(".amount-field__error"));
-    expect(act.showToast).not.toHaveBeenCalled();
-
+  it("hide Staking's overview: what's staked, its rewards, its locked part and the balance", async () => {
     // Profile 2's stake, which Profile 1 owns: staked, rewards and locked hidden.
     const stake = {
       profileIndex: 1,
@@ -284,7 +238,7 @@ describe("hidden balances", () => {
       ownerProfileIndex: 0,
       manageable: true,
     };
-    await draw({ route: "stake", staking: staking(owner({ relatedStakes: [stake] }), "overview") });
+    await show(stakeFormView(overview(HIDDEN), { state: { route: "stake", staking: staking(owner({ relatedStakes: [stake] }), "overview") }, actions: actions() }));
     const big = body.querySelectorAll(".stake-sum .stake-big");
     expect(big).toHaveLength(2);
     big.forEach(hides);
@@ -332,5 +286,121 @@ describe("still shown with balances hidden", () => {
     };
     await show(sozuConfirmView(overview(HIDDEN), { state, actions: actions() }));
     expect(review()).toEqual(["10 DUSK", "up to 0.005 DUSK", "up to 10.005 DUSK"]);
+  });
+
+  it("what Send has available after fees, and what Max fills in, public and shielded", async () => {
+    const state = { route: "send", draft: null, addressBook: { loaded: true, items: [] } };
+    await show(sendFormView(overview(HIDDEN), { state, actions: actions() }));
+    const to = body.querySelector(".to-input-wrap textarea");
+    const amount = body.querySelector("input.amount-field__input");
+    const max = () => body.querySelector(".amount-avail button");
+
+    typeInto(to, OTHER_ACCOUNT);
+    await settle();
+    shows(body.querySelector(".amount-avail__text"), "1,482.9358 DUSK");
+    expect(body.querySelector(".amount-fee-note").textContent).toMatch(exactly("up to 0.0025 DUSK"));
+    max().click();
+    expect(amount.value).toBe("1482.9358");
+
+    // Shielded: what's spendable now, the rest held for a pending transaction.
+    typeInto(to, ADDRESS);
+    await settle();
+    shows(body.querySelector(".amount-avail__text"), "19.95 DUSK");
+    expect(body.querySelector(".amount-fee-note").textContent).toMatch(exactly("up to 0.05 DUSK"));
+    max().click();
+    expect(amount.value).toBe("19.95");
+    // In the one field, as typed in it.
+    expect(body.querySelectorAll(".amount-field input")).toHaveLength(1);
+  });
+
+  it("Shield's and Unshield's balance lines, and how much is short", async () => {
+    const state = { route: "convert", draft: { kind: TX_KIND.SHIELD } };
+    await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
+    shows(body.querySelector(".amount-avail__text"), "1,482.8883 DUSK");
+    expect(visibleText(body.querySelector(".amount-fee-note"))).toMatch(exactly("up to 0.05 DUSK"));
+    body.querySelector(".amount-avail button").click();
+    expect(body.querySelector("input.amount-field__input").value).toBe("1482.8883");
+
+    // Too much: how much is short, under the field, and Review doesn't go on.
+    typeInto(body.querySelector("input.amount-field__input"), "5000");
+    body.querySelector("button.btn-primary").click();
+    await settle();
+    tooMuch(body.querySelector(".amount-field__error"), "3,517.1117 DUSK");
+    expect(state.route).toBe("convert");
+
+    state.draft = { kind: TX_KIND.UNSHIELD };
+    await show(convertFormView(overview(HIDDEN), { state, actions: actions() }));
+    shows(body.querySelector(".amount-avail__text"), "19.95 DUSK");
+    expect(visibleText(body.querySelector(".amount-fee-note"))).toMatch(exactly("up to 0.05 DUSK"));
+  });
+
+  it("what a stake has available, what Max fills in and how much is short", async () => {
+    const act = actions();
+    const state = { route: "stake", staking: staking(owner(), "native") };
+    await show(stakeFormView(overview(HIDDEN), { state, actions: act }));
+    shows(body.querySelector(".amount-avail span"), "1,482.9383 DUSK");
+    button("Max").click();
+    expect([state.staking.stakeAmountDusk, body.querySelector("input.amount-field__input").value]).toEqual(["1482.8383", "1482.8383"]);
+
+    // Too much: how much is short, under the field.
+    typeInto(body.querySelector("input.amount-field__input"), "5000");
+    tooMuch(body.querySelector(".amount-field__error"), "3,517.1117 DUSK");
+    expect(act.showToast).not.toHaveBeenCalled();
+  });
+
+  it("what a token's transfer has available, as it's filled in, the page's own figure hidden while it's only looked at", async () => {
+    const state = { route: "asset_token", assets: assets(), assetTokenContractId: TOKEN };
+    await show(assetTokenView(overview(HIDDEN), { state, actions: actions() }));
+    const hero = () => body.querySelector(".asset-token-balance-value");
+    const available = () => body.querySelector(".asset-avail");
+    const amount = body.querySelector('input[name="assetTokenAmount"]');
+    // Looked at: nothing says it.
+    hides(hero());
+    nowhere("123.45", "12345", "12,345");
+    // A transfer begun, the amount tapped: what's available, under it, as Send says it.
+    amount.focus();
+    amount.dispatchEvent(fakeEvent("focusin", { bubbles: true }));
+    shows(available(), "123.45 TKN");
+    // Left with nothing typed: gone again.
+    amount.blur();
+    amount.dispatchEvent(fakeEvent("focusout", { bubbles: true, relatedTarget: null }));
+    expect(available().hidden).toBe(true);
+    nowhere("123.45");
+    // Typed in, it stays, the page's own figure still hidden.
+    typeInto(amount, "5");
+    shows(available(), "123.45 TKN");
+    hides(hero());
+  });
+
+  it("what a token's transfer has available only while its own is filled in, to the last decimal it takes", async () => {
+    const NINE = `0x${"ab".repeat(32)}`;
+    const two = { ...assets(), tokens: [...assets().tokens, { contractId: NINE, symbol: "NIN", name: "Nine", decimals: 9 }], balances: { [TOKEN]: "12345", [NINE]: "1" }, balancesAt: { [TOKEN]: Date.now(), [NINE]: Date.now() } };
+    const state = { route: "asset_token", assets: two, assetTokenContractId: TOKEN };
+    const amount = () => body.querySelector('input[name="assetTokenAmount"]');
+    const available = () => body.querySelector(".asset-avail");
+    await show(assetTokenView(overview(HIDDEN), { state, actions: actions() }));
+    typeInto(amount(), "5");
+    shows(available(), "123.45 TKN");
+    // Left typed in, and another token's page opened, its transfer not touched: nothing of its balance.
+    state.assetTokenContractId = NINE;
+    await show(assetTokenView(overview(HIDDEN), { state, actions: actions() }));
+    expect(available().hidden).toBe(true);
+    hides(body.querySelector(".asset-token-balance-value"));
+    nowhere("0.000000001", "1 NIN");
+    // Its own amount tapped: what it holds, one atomic unit, to its ninth decimal rather than 0.
+    amount().focus();
+    amount().dispatchEvent(fakeEvent("focusin", { bubbles: true }));
+    shows(available(), "0.000000001 NIN");
+  });
+
+  it("how much more a token transfer asks than there is", async () => {
+    const act = actions();
+    const state = { route: "asset_token", assets: assets(), assetTokenContractId: TOKEN, assetTokenForm: { to: OTHER_ACCOUNT, amount: "200", spender: "", approveAmount: "" } };
+    await show(assetTokenView(overview(HIDDEN), { state, actions: act }));
+    button("Review transfer").click();
+    await settle();
+    const said = body.querySelectorAll(".field-error").filter((el) => !el.hidden).map(visibleText);
+    expect(said).toEqual([expect.stringMatching(exactly("76.55 TKN"))]);
+    expect(act.send).not.toHaveBeenCalled();
   });
 });

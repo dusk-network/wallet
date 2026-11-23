@@ -98,14 +98,15 @@ export function txRecoveryReasonLabel(reason) {
 
 /**
  * What a stake or an unstake with Sozu got or gave back in stDUSK, to the lux,
- * hidden with the balances, and what one stDUSK was worth then (app-core's
- * stDuskWorth), as the web wallet says them: for a transaction's details and
- * its Completed screen. None without what the pool's event says (`fact`).
+ * and what one stDUSK was worth then (app-core's stDuskWorth), as the web
+ * wallet says them: for a transaction's details, which hide it with the
+ * balances, and its Completed screen, which shows it. None without what the
+ * pool's event says (`fact`).
  * @param {import("@dusk-network/app-core/sozu").SozuFact | undefined} fact
- * @param {boolean} hidden - balancesHidden(ov)
+ * @param {boolean} [hidden] - balancesHidden(ov), where the details are browsed
  * @returns {{ label: string, value: Array<string|HTMLElement> | string }[]}
  */
-export function stDuskLines(fact, hidden) {
+export function stDuskLines(fact, hidden = false) {
   if (!fact) return [];
   const worth = stDuskWorth(fact.pool);
   return [

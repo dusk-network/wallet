@@ -1415,7 +1415,7 @@ export async function renderNotification() {
     // buttons, so what keeps Approve off is in view with it.
     const available = /^\d+$/.test(String(pending.payBalance ?? "")) ? BigInt(pending.payBalance) : null;
     const guardFor = (gasEditor, bar, sendsLux, ready = () => true) => {
-      const pay = payGuard({ editor: gasEditor, availableLux: available, sendsLux, shielded, hidden: pending.hideBalances === true, button: bar.approveBtn, ready, gas });
+      const pay = payGuard({ editor: gasEditor, availableLux: available, sendsLux, shielded, button: bar.approveBtn, ready, gas });
       pay.el.classList.add("ap-actions__error");
       bar.nodes.splice(1, 0, pay.el);
       // Above the amount chosen in Settings, the password, as the fee changes too.

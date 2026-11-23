@@ -1032,10 +1032,12 @@ describe("a site's request the balance can't pay", () => {
     expect(guard().textContent).toMatch(exactly("1.0025 DUSK"));
   });
 
-  it("hides the figure with Hide balances, which would give the balance away", async () => {
+  it("says how much is missing with Hide balances on too, as it does everything a site asks you to approve", async () => {
+    // As the window was once told the setting: it hides nothing of what's asked.
     await render("send_tx", transfer(BOB, { gas }), { payBalance: "1000", hideBalances: true });
-    expect(guard().textContent).toContain("•••• DUSK");
-    expect(guard().textContent).not.toMatch(/\d/);
+    expect(guard().textContent).toMatch(exactly("1.0025 DUSK"));
+    expect(visibleText(app.querySelector(".ap-amount"))).toMatch(exactly("1 DUSK"));
+    expect([app.textContent, bar().textContent].join(" ")).not.toContain("••••");
   });
 
   it("stops nothing when it can pay, or when the balance couldn't be read", async () => {

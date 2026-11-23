@@ -72,16 +72,14 @@ export function sameWaiting(ov, { to, lux, memo = "" }, { except = "" } = {}) {
  * too (`replaces`), which it takes once it's sent from there.
  * @param {object} send - one of the overview's waitingSends
  * @param {object} ov
- * @param {{ hidden?: boolean }} [opts] - its amount hidden, as balances are
  */
-export function againDraft(send, ov, { hidden = false } = {}) {
+export function againDraft(send, ov) {
   const lux = safeBigInt(send?.lux, 0n);
   return {
     to: String(send?.to ?? ""),
     privacy: send?.privacy === "shielded" ? "shielded" : "public",
     amountLux: lux.toString(),
     amountDusk: formatLuxForInput(lux),
-    amountMasked: hidden,
     memo: String(send?.memo ?? ""),
     replaces: String(send?.sendId ?? ""),
     // From the wallet, profile and network it was made on, as Home lists it: Review refuses it from any other.
@@ -152,7 +150,8 @@ export function checksMeanwhile(send, now = Date.now()) {
  * account sent…" while it's read; the plain sentence where the node named
  * nothing.
  * @param {object} send - a held payment, with `meanwhile`
- * @param {{ toText: (address: string) => string, whenText: (at: number) => string, hidden?: boolean }} words
+ * @param {{ toText: (address: string) => string, whenText: (at: number) => string, hidden?: boolean }} words -
+ *   `hidden` where it's browsed, as on Home, with the balances
  * @returns {string}
  */
 export function sentMeanwhileText(send, { toText, whenText, hidden = false }) {

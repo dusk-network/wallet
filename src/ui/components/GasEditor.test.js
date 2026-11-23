@@ -163,11 +163,6 @@ describe("fee editor", () => {
     typeInto(editor.querySelectorAll("input").find((i) => accessibleName(i) === "Gas price (LUX)"), "0");
     expect(feeValue(editor)).not.toMatch(/\d/);
     expect(totalValue(editor)).toMatch(exactly("0.1 DUSK"));
-    // Hidden as the balance it is.
-    editor.hideTotal = true;
-    editor.amountLux = "100000000";
-    expect(totalValue(editor)).toMatch(/•••• DUSK/);
-    expect(totalValue(editor)).not.toMatch(/\d/);
     editor.amountLux = "0";
     expect(rows()).toHaveLength(1);
   });
