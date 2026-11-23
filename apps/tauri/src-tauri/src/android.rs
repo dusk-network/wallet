@@ -254,11 +254,12 @@ pub fn notices<R: Runtime>() -> TauriPlugin<R> {
 /// to look for once the app leaves the screen, android/ArrivalJob.kt),
 /// settled (one the page heard of), forget (a wallet's sends, or every
 /// wallet's), incoming (the accounts to look at for money coming in), waiting
-/// (a payment waiting for the network while the app's away) or opened (the
-/// transaction a notice's tap opened the app on). Each answers `{ allowed }`,
-/// opened its `hash` too.
+/// (a payment waiting for the network while the app's away), hidden (whether
+/// balances are hidden, which a send's notice is worded by as it's posted) or
+/// opened (the transaction a notice's tap opened the app on). Each answers
+/// `{ allowed }`, opened its `hash` too.
 pub async fn notice<R: Runtime>(app: &AppHandle<R>, action: &str, args: Value) -> Result<Value, String> {
-  if !matches!(action, "status" | "ask" | "notify" | "watch" | "settled" | "forget" | "incoming" | "waiting" | "opened") {
+  if !matches!(action, "status" | "ask" | "notify" | "watch" | "settled" | "forget" | "incoming" | "waiting" | "hidden" | "opened") {
     return Err("There's no such thing to ask.".into());
   }
   let Some(notices) = app.try_state::<Notices<R>>() else {

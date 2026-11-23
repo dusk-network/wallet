@@ -132,7 +132,7 @@ vi.mock("../shared/walletEngine.js", () => ({
 }));
 
 // The phone's notices, as the app's Kotlin would answer: allowed or not, and what was asked.
-const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [], watched: [], settled: [], forgotten: [], waiting: [] }));
+const phoneNotices = vi.hoisted(() => ({ allowed: () => false, asked: [], watched: [], settled: [], forgotten: [], waiting: [], hidden: [] }));
 vi.mock("../platform/notices.js", () => ({
   appNoticesAllowed: async () => phoneNotices.allowed(),
   askAppNotices: async () => {
@@ -159,6 +159,10 @@ vi.mock("../platform/notices.js", () => ({
   // A payment waiting for the network while the app's away (android/ArrivalJob.kt's Waiting): null for none.
   waitAppSend: async (setup) => {
     phoneNotices.waiting.push(setup);
+  },
+  // Whether balances are hidden, which Android reads as it posts a send's notice (android/ArrivalJob.kt).
+  hideAppAmounts: async (hidden) => {
+    phoneNotices.hidden.push(hidden);
   },
 }));
 
@@ -1493,15 +1497,17 @@ describe("more than one recovery phrase", { timeout: 30_000 }, () => {
 // a test says, and records what it was asked.
 describe("arrival notices in the app on a phone", () => {
   const phone = ({ allowed }) => {
-    Object.assign(phoneNotices, { allowed, asked: [], watched: [], settled: [], forgotten: [], waiting: [], shown: null });
+    Object.assign(phoneNotices, { allowed, asked: [], watched: [], settled: [], forgotten: [], waiting: [], hidden: [], shown: null });
     vi.stubGlobal("navigator", { ...globalThis.navigator, userAgent: "Mozilla/5.0 (Linux; Android 15; Pixel 6; wv) Chrome/156.0 Mobile Safari/537.36" });
     vi.stubGlobal("document", { visibilityState: "hidden" });
     return phoneNotices.asked;
   };
-  const sendAndSettle = async (localSend, hash, { to = ACCOUNT, amount = "1", toName, memo } = {}) => {
+  // A send, and its outcome; with `watched`, Android told of it first, as a block takes seconds to come.
+  const sendAndSettle = async (localSend, hash, { to = ACCOUNT, amount = "1", toName, memo, watched = false } = {}) => {
     engine.executed = Promise.withResolvers();
     engine.sendTransaction.mockResolvedValueOnce({ hash, nonce: 1n });
     await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to, amount, ...(memo ? { memo } : {}) }, ...(toName ? { toName } : {}) });
+    if (watched) await vi.waitFor(() => expect(phoneNotices.watched.map((send) => send.hash)).toContain(hash));
     engine.executed.resolve({ data: { err: null } });
   };
   // What a send left behind, done: its watcher's steps, as many as it takes.
@@ -1675,19 +1681,101 @@ describe("arrival notices in the app on a phone", () => {
     await putTxMeta("e1".repeat(32), { status: "submitted", kind: "transfer", nodeUrl: "https://testnet.nodes.dusk.network", walletId: ACCOUNT });
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK", hash: "e1".repeat(32) })).resolves.toMatchObject({ state: "on" });
     expect(phoneNotices.watched).toEqual([
-      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet", publicBody: "Testnet", wallet: ACCOUNT, token: expect.stringMatching(/^[0-9a-f]{32}$/) },
+      { hash: "e1".repeat(32), nodeUrl: "https://testnet.nodes.dusk.network", title: "Your payment arrived", failTitle: "Your payment didn't go through", body: "Testnet", hiddenBody: "Testnet", publicBody: "Testnet", wallet: ACCOUNT, token: expect.stringMatching(/^[0-9a-f]{32}$/) },
     ]);
     // Its notice's token, by which its tap is known as the notice's, kept on the phone.
     const { noticeTokenFor } = await import("../shared/noticeTokens.js");
     expect(await noticeTokenFor("e1".repeat(32))).toBe(phoneNotices.watched[0].token);
     // Notices on, each send after: looked for from the start, and no more once its outcome is heard.
-    await sendAndSettle(localSend, "e2".repeat(32), { amount: "30000000", toName: "sofiadesign.dusk" });
+    await sendAndSettle(localSend, "e2".repeat(32), { amount: "30000000", toName: "sofiadesign.dusk", watched: true });
     await settled("e2".repeat(32));
     await vi.waitFor(() => expect(phoneNotices.watched.map((w) => w.hash)).toEqual(["e1".repeat(32), "e2".repeat(32)]));
     expect(phoneNotices.watched[1].token).toBe(await noticeTokenFor("e2".repeat(32)));
-    // The notice Android shows says which payment, and on a locked phone that hides it, only what came of it.
-    expect([phoneNotices.watched[1].title, phoneNotices.watched[1].body, phoneNotices.watched[1].publicBody]).toEqual(["Your payment arrived", "0.03 DUSK to sofiadesign.dusk · Mainnet", "Mainnet"]);
+    // The notice Android shows says which payment, without its amount while balances are hidden, and on a locked
+    // phone that hides it, only what came of it.
+    expect([phoneNotices.watched[1].title, phoneNotices.watched[1].body, phoneNotices.watched[1].hiddenBody, phoneNotices.watched[1].publicBody]).toEqual(["Your payment arrived", "0.03 DUSK to sofiadesign.dusk · Mainnet", "To sofiadesign.dusk · Mainnet", "Mainnet"]);
     await vi.waitFor(() => expect(phoneNotices.settled).toContain("e2".repeat(32)));
+  });
+
+  // A payment on its way as balances are hidden, or shown: Android words its notice as the setting says when it posts
+  // it. It's told of the payment once, with its words both ways; the setting alone goes to it as it changes, notices
+  // allowed or not, so no payment is looked for again. Where the wallet words a notice itself, its outcome heard with
+  // the app away, it says the amount or not as the setting says then.
+  it("tells Android of a payment on its way once, with its notice with and without its amount, and only the setting as balances are hidden or shown", async () => {
+    // A fresh start, whatever ran before: its own word of the setting first.
+    vi.resetModules();
+    let allowed = true;
+    phone({ allowed: () => allowed });
+    const { localSend } = await import("./localBus.js");
+    await vi.waitFor(() => expect(phoneNotices.hidden).toEqual([false]));
+    const { patchTxMeta, putTxMeta } = await import("../shared/txStore.js");
+    const sent = (hash) => putTxMeta(hash, { status: "submitted", kind: "transfer", to: ACCOUNT, amount: "30000000", toName: "sofiadesign.dusk", nodeUrl: "https://testnet.nodes.dusk.network", walletId: ACCOUNT });
+    const hash = "e9".repeat(32);
+    await sent(hash);
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK", hash })).resolves.toMatchObject({ state: "on" });
+    expect(phoneNotices.watched).toEqual([expect.objectContaining({ hash, body: "0.03 DUSK to sofiadesign.dusk · Testnet", hiddenBody: "To sofiadesign.dusk · Testnet", publicBody: "Testnet" })]);
+    const watched = [...phoneNotices.watched];
+    await localSend({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: true });
+    await localSend({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: false });
+    // Notices turned off on the phone meanwhile: the setting still goes, for when they're on again.
+    allowed = false;
+    await localSend({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: true });
+    expect(phoneNotices.hidden).toEqual([false, true, false, true]);
+    expect(phoneNotices.watched).toEqual(watched);
+
+    // Its outcome heard with the app away, balances hidden: the wallet's own notice of it, without its amount.
+    allowed = true;
+    await patchTxMeta(hash, { status: "executed" });
+    await vi.waitFor(() => expect(phoneNotices.shown?.hash).toBe(hash));
+    expect([phoneNotices.shown.body, phoneNotices.shown.publicBody]).toEqual(["To sofiadesign.dusk · Testnet", "Testnet"]);
+    // Balances shown: another's, with its amount.
+    await localSend({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: false });
+    const next = "eb".repeat(32);
+    await sent(next);
+    await patchTxMeta(next, { status: "executed" });
+    await vi.waitFor(() => expect(phoneNotices.shown?.hash).toBe(next));
+    expect(phoneNotices.shown.body).toBe("0.03 DUSK to sofiadesign.dusk · Testnet");
+  });
+
+  // Hide balances on, then a reset and a new wallet with no restart between: what each leaves the setting at goes to
+  // Android, as a toggle does, so a payment's notice says its amount again as the wallet shows balances again.
+  it("tells Android what a reset and a new wallet leave Hide balances at, as a toggle does", async () => {
+    phone({ allowed: () => true });
+    const { localSend } = await import("./localBus.js");
+    await localSend({ type: "DUSK_UI_SET_HIDE_BALANCES", hideBalances: true });
+    expect(phoneNotices.hidden.at(-1)).toBe(true);
+    await expect(localSend({ type: "DUSK_UI_RESET_WALLET" })).resolves.toEqual({ ok: true });
+    expect(phoneNotices.hidden.at(-1)).toBe(false);
+    phoneNotices.hidden.length = 0;
+    await expect(localSend({ type: "DUSK_UI_CREATE_WALLET", mnemonic: "wallet B", password: "password123" })).resolves.toMatchObject({ ok: true });
+    expect(phoneNotices.hidden).toEqual([false]);
+  });
+
+  // The wallet hears a payment's outcome, and tells Android to stop looking for it, while it's still looking up what
+  // Android's notice of it is to say: Android isn't told to look for it again after, so no notice comes of a payment
+  // the wallet showed already.
+  it("never tells Android to look for a payment once its outcome was heard, however slowly its notice's words come", async () => {
+    let allowedNow = () => true;
+    phone({ allowed: () => allowedNow() });
+    const { localSend } = await import("./localBus.js");
+    await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
+    // Android's answer on whether notices may show is slow: what the wallet tells it of the send waits.
+    const slow = Promise.withResolvers();
+    allowedNow = () => slow.promise;
+    const hash = "ec".repeat(32);
+    engine.executed = Promise.withResolvers();
+    engine.sendTransaction.mockResolvedValueOnce({ hash, nonce: 1n });
+    await localSend({ type: "DUSK_UI_SEND_TX", params: { kind: "transfer", privacy: "public", to: ACCOUNT, amount: "30000000" } });
+    // Its outcome heard meanwhile: Android's told to let it go.
+    engine.executed.resolve({ data: { err: null } });
+    await vi.waitFor(() => expect(phoneNotices.settled).toContain(hash));
+    // The answer comes, and the wallet goes on: nothing more for Android of that payment.
+    slow.resolve(true);
+    allowedNow = () => true;
+    const { getTxMeta } = await import("../shared/txStore.js");
+    await vi.waitFor(async () => expect((await getTxMeta(hash))?.status).toBe("executed"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(phoneNotices.watched.map((send) => send.hash)).not.toContain(hash);
   });
 
   // Astra's: a send sent again with Send it now was never looked for by Android, nor followed to its block, as each
@@ -1713,17 +1801,17 @@ describe("arrival notices in the app on a phone", () => {
     phone({ allowed: () => true });
     const { localSend } = await import("./localBus.js");
     await expect(localSend({ type: "DUSK_UI_NOTICES_ASK" })).resolves.toMatchObject({ state: "on" });
-    await sendAndSettle(localSend, "e7".repeat(32), { amount: "10000000", toName: "lena.dusk", memo: "Metro sin cobertura 153" });
+    await sendAndSettle(localSend, "e7".repeat(32), { amount: "10000000", toName: "lena.dusk", memo: "Metro sin cobertura 153", watched: true });
     await settled("e7".repeat(32));
     const watched = (hash) => phoneNotices.watched.find((w) => w.hash === hash);
     await vi.waitFor(() => expect(watched("e7".repeat(32))).toBeTruthy());
     expect([watched("e7".repeat(32)).body, watched("e7".repeat(32)).publicBody]).toEqual(["0.01 DUSK to lena.dusk · “Metro sin cobertura 153” · Mainnet", "Mainnet"]);
     // A memo a notice can't show as it is: left to its details.
-    await sendAndSettle(localSend, "e8".repeat(32), { amount: "10000000", toName: "lena.dusk", memo: "Factura\u202e153" });
-    await settled("e8".repeat(32));
-    await vi.waitFor(() => expect(watched("e8".repeat(32))).toBeTruthy());
-    expect(watched("e8".repeat(32)).body).toBe("0.01 DUSK to lena.dusk · Mainnet");
-    await vi.waitFor(() => expect(phoneNotices.settled).toContain("e8".repeat(32)));
+    await sendAndSettle(localSend, "e6".repeat(32), { amount: "10000000", toName: "lena.dusk", memo: "Factura\u202e153", watched: true });
+    await settled("e6".repeat(32));
+    await vi.waitFor(() => expect(watched("e6".repeat(32))).toBeTruthy());
+    expect(watched("e6".repeat(32)).body).toBe("0.01 DUSK to lena.dusk · Mainnet");
+    await vi.waitFor(() => expect(phoneNotices.settled).toContain("e6".repeat(32)));
   });
 
   // Astra's: after a reset, Android kept looking for the old wallet's sends on its node, and told them.
@@ -1731,7 +1819,7 @@ describe("arrival notices in the app on a phone", () => {
     phone({ allowed: () => true });
     const { localSend } = await import("./localBus.js");
     await localSend({ type: "DUSK_UI_NOTICES_ASK" });
-    await sendAndSettle(localSend, "e4".repeat(32));
+    await sendAndSettle(localSend, "e4".repeat(32), { watched: true });
     await vi.waitFor(() => expect(phoneNotices.watched.map((w) => [w.hash, w.wallet])).toEqual([["e4".repeat(32), `account of ${engine.wallet}`]]));
     expect(phoneNotices.forgotten).toEqual([]);
 

@@ -184,9 +184,13 @@ object Arrivals {
     return false
   }
 
-  /** A send to look for while the app is away: its node, the notice for each outcome, the wallet it's from, and its notice's token. */
+  /**
+   * A send to look for while the app is away: its node, the notice for each
+   * outcome, its body with the amount and without (`hiddenBody`, posted while
+   * balances are hidden, `hide`), the wallet it's from, and its notice's token.
+   */
   @Synchronized
-  fun watch(context: Context, hash: String, nodeUrl: String, title: String, failTitle: String, body: String, wallet: String, token: String, publicBody: String = "") {
+  fun watch(context: Context, hash: String, nodeUrl: String, title: String, failTitle: String, body: String, wallet: String, token: String, publicBody: String = "", hiddenBody: String = "") {
     if (!HASH.matches(hash) || !(nodeUrl.startsWith("https://") || nodeUrl.startsWith("http://"))) return
     val pending = list(context, "pending")
     val next = JSONArray()
@@ -201,6 +205,7 @@ object Arrivals {
         .put("title", title)
         .put("failTitle", failTitle)
         .put("body", body)
+        .put("hiddenBody", hiddenBody)
         .put("publicBody", publicBody)
         .put("wallet", wallet)
         .put("token", if (isToken(token)) token else "")
@@ -210,6 +215,16 @@ object Arrivals {
     prefs(context).edit().putInt("tries", 0).commit()
     schedule(context, DELAYS[0])
   }
+
+  /** Whether balances are hidden in the wallet, as it says now: read as each send's notice is posted. */
+  fun hide(context: Context, hidden: Boolean) {
+    prefs(context).edit().putBoolean("hidden", hidden).commit()
+  }
+
+  // A send's body as it's posted: without the amount while balances are
+  // hidden, the network alone where it was kept without such a body.
+  private fun bodyOf(context: Context, entry: JSONObject): String =
+    if (prefs(context).getBoolean("hidden", false)) entry.optString("hiddenBody").ifEmpty { entry.optString("publicBody") } else entry.optString("body")
 
   // No need to look for it any more: what's left.
   @Synchronized
@@ -328,7 +343,7 @@ object Arrivals {
       // Forgotten while the node answered (its wallet reset or removed): nothing told.
       synchronized(this) {
         if (watched(context, hash)) {
-          post(context, if (went) entry.optString("title") else entry.optString("failTitle"), entry.optString("body"), hash, if (went) "executed" else "failed", block, entry.optString("token"), entry.optString("publicBody"))
+          post(context, if (went) entry.optString("title") else entry.optString("failTitle"), bodyOf(context, entry), hash, if (went) "executed" else "failed", block, entry.optString("token"), entry.optString("publicBody"))
           drop(context, hash)
         }
       }

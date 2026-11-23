@@ -43,13 +43,15 @@ export const showAppNotice = async ({ title, body, publicBody = "", hash = "", t
 
 /**
  * A send for Android to look for once the app leaves the screen, and the
- * notice it shows when it's in a block, for either outcome (`publicBody` on
- * a locked phone that hides what notices say); `wallet`, the wallet it's
- * from, whose removal forgets it; `token`, its notice's, which the notice's
- * tap brings back.
- * @param {{ hash: string, nodeUrl: string, title: string, failTitle: string, body: string, publicBody?: string, wallet?: string, token?: string }} send
+ * notice it shows when it's in a block, for either outcome: `body` with its
+ * amount, `hiddenBody` without, which Android picks as it posts the notice,
+ * as balances are shown or hidden then (hideAppAmounts); `publicBody` on a
+ * locked phone that hides what notices say. `wallet`, the wallet it's from,
+ * whose removal forgets it; `token`, its notice's, which the notice's tap
+ * brings back.
+ * @param {{ hash: string, nodeUrl: string, title: string, failTitle: string, body: string, hiddenBody?: string, publicBody?: string, wallet?: string, token?: string }} send
  */
-export const watchAppArrival = async ({ hash, nodeUrl, title, failTitle, body, publicBody = "", wallet = "", token = "" }) =>
+export const watchAppArrival = async ({ hash, nodeUrl, title, failTitle, body, hiddenBody = "", publicBody = "", wallet = "", token = "" }) =>
   (
     await ask("watch", {
       hash: String(hash ?? ""),
@@ -57,11 +59,22 @@ export const watchAppArrival = async ({ hash, nodeUrl, title, failTitle, body, p
       title: String(title ?? ""),
       failTitle: String(failTitle ?? ""),
       body: String(body ?? ""),
+      hiddenBody: String(hiddenBody ?? ""),
       publicBody: String(publicBody ?? ""),
       wallet: String(wallet ?? ""),
       token: String(token ?? ""),
     })
   ).allowed === true;
+
+/**
+ * Whether balances are hidden, for Android to read as it posts a send's
+ * notice (watchAppArrival): its words without the amount while they are.
+ * Kept whether or not notices may show. Never fails.
+ * @param {boolean} hidden
+ */
+export const hideAppAmounts = async (hidden) => {
+  await ask("hidden", { hidden: hidden === true });
+};
 
 /**
  * The accounts Android looks at for money coming in, about every 15 minutes

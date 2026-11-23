@@ -11,6 +11,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 - Showed amounts inside sends, stakes and other flows while balances are hidden, from the form and what Max fills in to Review and Sent, and in a site's approval window; they stay hidden where you browse.
 
+### Fixed
+
+- Dropped a payment's amount from the Android app's notice of it as balances are hidden while it's on its way, and put it back as they're shown.
+
 ## [0.4.0] - 2026-11-21
 
 ### Added

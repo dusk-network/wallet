@@ -32,7 +32,7 @@ import { sendPasswordLimit, sendPasswordOnce } from "../shared/sendPassword.js";
 import { handleWalletCommand, keepWalletShown, walletsShown } from "./walletCommands.js";
 import { getWalletDirectory } from "../shared/wallets.js";
 import { arrivalNotice, askForNotices, mayNotify, noticesState, saidNoticesOff, waitingNotice } from "../shared/phoneNotices.js";
-import { appNoticesAllowed, askAppNotices, settleAppArrival, showAppNotice, waitAppSend, watchAppArrival } from "../platform/notices.js";
+import { appNoticesAllowed, askAppNotices, hideAppAmounts, settleAppArrival, showAppNotice, waitAppSend, watchAppArrival } from "../platform/notices.js";
 import { incomingNoticeToken, isIncomingNoticeToken, noticeTokenFor, takeNoticeToken } from "../shared/noticeTokens.js";
 import { isPhone } from "../ui/lib/device.js";
 import { clearContacts, contactsStore, keepOnlyContactsOf, moveLegacyContacts } from "../shared/contactsStore.js";
@@ -107,11 +107,12 @@ let chainAskedAt = -Infinity;
 const noticeTokenOf = (hash, walletId) => noticeTokenFor(hash, String(walletId ?? "")).catch(() => "");
 
 // What a payment's notice says of it, as Activity does: how much, but not
-// while balances are hidden, and to whom: the contact's name, a profile's of
-// this wallet, the .dusk name it was sent to, else its short address.
-async function paymentOf({ kind, to, amount, toName, walletId, memo }) {
+// while balances are hidden (`hidden`, else as the settings say now), and to
+// whom: the contact's name, a profile's of this wallet, the .dusk name it was
+// sent to, else its short address.
+async function paymentOf({ kind, to, amount, toName, walletId, memo }, { hidden = null } = {}) {
   if (String(kind ?? "") !== TX_KIND.TRANSFER || !to) return {};
-  const hidden = (await getSettings().catch(() => null))?.hideBalances === true;
+  if (hidden === null) hidden = (await getSettings().catch(() => null))?.hideBalances === true;
   const address = String(to);
   const contacts = await contactsStore(engineContactsVault(localEngineCall))
     .list()
@@ -130,6 +131,7 @@ async function paymentOf({ kind, to, amount, toName, walletId, memo }) {
 // (watchArrival); each send's notice shows once.
 async function noticeArrival({ hash, ok, tx }) {
   if (!isPhone()) return;
+  heardHere.add(hash);
   settleAppArrival(hash).catch(() => {});
   if (globalThis.document?.visibilityState !== "hidden") return;
   if (!(await mayNotify(appNoticesAllowed))) return;
@@ -142,26 +144,45 @@ onTxSettled((hash, tx) => {
   noticeArrival({ hash, ok: tx.status === "executed", tx }).catch(() => {});
 });
 
+// The sends whose outcome the wallet heard in this run, which Android was told
+// to stop looking for (noticeArrival).
+const heardHere = new Set();
+
 // A send the person asked to hear of, for Android to look for once the app
 // leaves the screen, when it cuts the page's network (android/ArrivalJob.kt):
-// its notice, for either outcome, comes from there.
+// its notice, for either outcome, comes from there. Its words with its amount
+// and without, from one look-up: Android takes the one balances being hidden
+// or not says as it posts the notice (hideAppAmounts), so it's told of the
+// send once. One whose outcome was heard while that was looked up isn't
+// told at all: Android has let it go.
 async function watchArrival(hash, tx) {
   if (!hash || !isPhone() || !(await mayNotify(appNoticesAllowed))) return;
   const { kind, nodeUrl, walletId } = tx;
-  const payment = await paymentOf(tx);
+  const payment = await paymentOf(tx, { hidden: false });
   const went = arrivalNotice({ kind, ok: true, nodeUrl, ...payment });
   const failed = arrivalNotice({ kind, ok: false, nodeUrl, ...payment });
+  const hidden = arrivalNotice({ kind, ok: true, nodeUrl, ...payment, amount: "" });
+  const token = await noticeTokenOf(hash, walletId);
+  if (heardHere.has(hash)) return;
   await watchAppArrival({
     hash,
     nodeUrl,
     title: went.title,
     failTitle: failed.title,
     body: went.body,
+    hiddenBody: hidden.body,
     publicBody: went.network,
     wallet: String(walletId ?? ""),
-    token: await noticeTokenOf(hash, walletId),
+    token,
   });
 }
+
+// Whether balances are hidden, kept where Android reads it as it posts a
+// send's notice: as the app starts, and as it's turned on or off.
+const tellAppAmounts = async () => {
+  if (isPhone()) await hideAppAmounts((await getSettings().catch(() => null))?.hideBalances === true);
+};
+tellAppAmounts().catch(() => {});
 
 // A send handed to the node, followed as each one is: Android looks for it
 // once the app leaves the screen, where the person asked for notices
@@ -533,8 +554,10 @@ export async function localSend(message) {
     });
     // Balances hidden or shown: a waiting payment's notice says its amount,
     // or not, from now on, the app put away next included (round 40's
-    // second review: it kept the amount, balances hidden).
-    if (message?.type === "DUSK_UI_SET_HIDE_BALANCES") await tellWaitingForApp();
+    // second review: it kept the amount, balances hidden); and Android's
+    // told, for the notice of a payment on its way, which it words as it
+    // posts it.
+    if (message?.type === "DUSK_UI_SET_HIDE_BALANCES") await Promise.all([tellWaitingForApp(), tellAppAmounts().catch(() => {})]);
     if (common) return common;
     // Switch, add, remove and rename wallets, and change the password.
     const wallets = await handleWalletCommand(message, {
@@ -596,6 +619,8 @@ export async function localSend(message) {
         await finishReset();
         // On the default network from now on.
         await ensureEngineConfigured();
+        // Balances shown again, as the reset left them: Android's told, as a toggle tells it.
+        await tellAppAmounts().catch(() => {});
         return { ok: true };
       });
     }
@@ -629,6 +654,8 @@ export async function localSend(message) {
         // A phrase made here has no history: its shielded sync starts now.
         if (message.fresh === true) await setShieldedCheckpointNow({ profileIndex: 0 }).catch(() => {});
         await keepWalletShown(unlockedNow());
+        // Whether balances are hidden, as the new wallet starts with them: Android's told.
+        await tellAppAmounts().catch(() => {});
         return { ok: true, accounts: getAccounts() };
       });
     }
@@ -657,6 +684,8 @@ export async function localSend(message) {
         await ensureEngineConfigured();
         await unlockWallets({ wallets: [{ ...restored, mnemonic: String(mnemonic) }], walletKey: restored.id });
         await keepWalletShown(unlockedNow());
+        // Whether balances are hidden, as the restore left them: Android's told.
+        await tellAppAmounts().catch(() => {});
         return { ok: true, accounts: getAccounts() };
       });
     }
