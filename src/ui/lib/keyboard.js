@@ -58,10 +58,54 @@ export function keyboardTop(win, { told = true } = {}) {
   return Math.round(layout * (sideways(win) ? 0.2 : 0.5));
 }
 
-// Whether the page is shorter than the screen leaves it without a keyboard.
+// How long after a field is tapped its keyboard can make the page shorter.
+const KEYBOARD_COMES_MS = 1500;
+
+// Each page's own height at its width with no keyboard over it, whether a
+// keyboard that made the page shorter is up, the height last measured, and
+// when a field was last tapped (`pages`).
+const pages = new WeakMap();
+
+function pageOf(win) {
+  let page = pages.get(win);
+  if (!page) pages.set(win, (page = { width: -1, height: 0, up: false, last: 0, tapped: -Infinity }));
+  return page;
+}
+
+// A field tapped or given the focus: its keyboard may make the page shorter now.
+function noteTapped(win) {
+  pageOf(win).tapped = Date.now();
+}
+
+// Whether a keyboard made the page itself shorter (not the visual viewport):
+// shorter than its own height at this width by a keyboard's height, just after
+// a field was tapped. Made shorter otherwise, as a window resized in a split
+// screen, the page has a new height of its own; never measured against the
+// screen's height, which a window in part of the screen is shorter than with
+// no keyboard. A turn starts it over, but not while such a keyboard is up: the
+// first height then is the keyboard's, and the page's own is the one it has
+// once the keyboard's gone, a keyboard's height taller.
 function madeShorter(win, layout) {
-  const screen = Number(win.screen?.height) || 0;
-  return Boolean(screen && layout < screen * 0.7);
+  const page = pageOf(win);
+  const width = win.innerWidth || 0;
+  const now = Date.now();
+  if (page.width !== width) {
+    page.width = width;
+    page.height = page.up ? 0 : layout;
+  } else if (page.up) {
+    if (layout - page.last > KEYBOARD_MIN || (page.height && layout >= page.height - KEYBOARD_MIN)) {
+      page.up = false;
+      page.height = Math.max(page.height, layout);
+    }
+  } else if (!page.height || layout >= page.height || page.height - layout <= KEYBOARD_MIN) {
+    page.height = Math.max(page.height, layout);
+  } else if (now - page.tapped < KEYBOARD_COMES_MS) {
+    page.up = true;
+  } else {
+    page.height = layout;
+  }
+  page.last = layout;
+  return page.up;
 }
 
 // Whether the browser says the keyboard covers part of the page now.
@@ -69,7 +113,8 @@ function keyboardSaid(win) {
   const layout = win.document?.documentElement?.clientHeight || win.innerHeight || 0;
   const vv = win.visualViewport;
   const seen = vv ? vv.offsetTop + vv.height : layout;
-  return layout - seen > KEYBOARD_MIN || madeShorter(win, layout);
+  const shorter = madeShorter(win, layout);
+  return layout - seen > KEYBOARD_MIN || shorter;
 }
 
 // Whether the phone's on its side, as its screen says; else the page wider
@@ -167,6 +212,8 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
   const doc = win?.document;
   const touch = () => isPhone(win?.navigator);
   const root = doc?.documentElement;
+  // The page's height as it opens, a keyboard down: what one makes it shorter than.
+  if (win) madeShorter(win, doc?.documentElement?.clientHeight || win.innerHeight || 0);
   let room = 0;
   // Where the box the keyboard moved was before it did, to go back to.
   let before = null;
@@ -273,7 +320,16 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
       markSideways(el);
     });
   };
+  // A field tapped, focused already or not: its keyboard may come now.
+  doc.addEventListener(
+    "pointerdown",
+    (e) => {
+      if (isTyped(e.target)) noteTapped(win);
+    },
+    true
+  );
   doc.addEventListener("focusin", (e) => {
+    if (isTyped(e.target)) noteTapped(win);
     markSideways(e.target);
     if (isTyped(e.target)) soon();
   });

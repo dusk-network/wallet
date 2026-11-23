@@ -374,3 +374,188 @@ test("puts Review's Confirm after its details on a phone turned sideways, over n
   });
   expect(confirmTop).toBeGreaterThanOrEqual(detailsBottom);
 });
+
+// The Android app, as index.html has it: the full view's shell as a column, its top bar over the page as it scrolls,
+// the app's internals there (its store kept in the page). Renderer-only, as above.
+async function appOn(page, route, extra = {}) {
+  await page.addInitScript(() => {
+    const store = new Map();
+    window.__TAURI_INTERNALS__ = {
+      metadata: { currentWindow: { label: "main" }, currentWebview: { windowLabel: "main", label: "main" } },
+      transformCallback: () => 1,
+      invoke: async (cmd, args = {}) => {
+        if (cmd === "plugin:store|load" || cmd === "plugin:store|get_store") return 1;
+        if (cmd === "plugin:store|get") return [store.get(args.key), store.has(args.key)];
+        if (cmd === "plugin:store|set") return void store.set(args.key, args.value);
+        if (cmd === "plugin:store|has") return store.has(args.key);
+        if (cmd === "plugin:store|delete") return store.delete(args.key);
+        if (cmd === "plugin:store|entries") return [...store.entries()];
+        if (cmd === "plugin:store|keys") return [...store.keys()];
+        if (cmd === "plugin:store|values") return [...store.values()];
+        if (cmd === "plugin:store|length") return store.size;
+        return null;
+      },
+    };
+  });
+  await page.route("**/phone/app.html", (r) => r.fulfill({
+    contentType: "text/html",
+    body: '<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover"><link rel="stylesheet" href="/ui.css"><body class="page--full"><div class="full-wrap"><div class="panel"><header class="panel-header"><div class="brand"><div class="brand-mark" aria-hidden="true"><img class="brand-mark__glyph" src="/icons/dusk-glyph.svg" alt=""></div><div class="brand-text"><div class="panel-title">Dusk Wallet</div></div><button class="panel-subtitle network-pill" id="network-pill" type="button"><span class="network-pill__label"></span><span class="network-pill__chev" aria-hidden="true">▾</span></button></div><div class="header-actions" id="header-actions"></div></header><main class="panel-content"><div id="app"></div></main></div></div></body>',
+  }));
+  await page.route("**/src/wallet/localBus.js*", (r) => r.fulfill({
+    contentType: "text/javascript",
+    body: "export const localSend = message => window.testSend(message);",
+  }));
+  await page.route(/nodes\.dusk\.network/, (r) => r.abort());
+  await page.goto("/phone/app.html");
+  await page.evaluate(async ({ route, extra, ACCOUNT }) => {
+    window.testSend = async (message) => {
+      if (message.type === "DUSK_UI_OVERVIEW") {
+        return {
+          hasVault: true, isUnlocked: true, networkName: "Testnet", nodeUrl: "https://testnet.nodes.dusk.network",
+          accounts: [ACCOUNT], addresses: [], selectedAccountIndex: 0, accountCount: 1, txs: [],
+          balance: { value: "1234567890000" }, shieldedBalance: { value: "0", spendable: "0" },
+        };
+      }
+      if (message.type === "DUSK_UI_GET_CACHED_GAS_PRICE") return { ok: true, result: { min: "1", median: "1", max: "1" } };
+      return { ok: true, result: null };
+    };
+    const { state } = await import("/src/ui/popup/state.js");
+    Object.assign(state, { route, addressBook: { ...state.addressBook, loaded: true, items: [] }, ...extra });
+    const { render } = await import("/src/ui/popup/app.js");
+    await render();
+  }, { route, extra, ACCOUNT });
+  await expect(page.locator("body")).toHaveAttribute("data-runtime", "tauri");
+}
+
+// The app's WebView says what its keyboard covers: the visual viewport gets shorter by it (`px`, 0 for none), as
+// tall as the page otherwise, whatever the window's made. The keyboard stays so at least a frame, as a real one
+// does, for the page to see it.
+const keyboardUp = (page, px) =>
+  page.evaluate((px) => {
+    const vv = window.visualViewport;
+    Object.defineProperty(vv, "height", { configurable: true, get: () => document.documentElement.clientHeight - px });
+    vv.dispatchEvent(new Event("resize"));
+    return new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+  }, px);
+// The phone's screen as the window says it: which way round it's held, and as tall as `tall`, else the window.
+const phoneScreen = (tall = 0) => {
+  Object.defineProperty(Screen.prototype, "height", { configurable: true, get: () => tall || window.innerHeight });
+  Object.defineProperty(Screen.prototype, "width", { configurable: true, get: () => window.innerWidth });
+  Object.defineProperty(ScreenOrientation.prototype, "type", { configurable: true, get: () => (window.innerWidth > window.innerHeight ? "landscape-primary" : "portrait-primary") });
+};
+const typingSideways = (page) => page.evaluate(() => document.documentElement.hasAttribute("data-typing-sideways"));
+
+// The app turned sideways at its column's widths (860 px or less), its top bar over the page: typing "1,234" with
+// the keyboard up leaves a 94 px strip, and its two answers went half under the keyboard with the bar shown.
+for (const [width, height] of [[800, 360], [844, 390]]) {
+  test.describe(`the app turned sideways at ${width} × ${height}`, () => {
+    test.use({ viewport: { width, height }, screen: { width, height } });
+    test("gives the top bar's room to the amount's answers, both whole above the keyboard", async ({ page }) => {
+      await appOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "", memo: "" } });
+      const amount = page.getByLabel("Amount", { exact: true });
+      await amount.focus();
+      await keyboardUp(page, height - 94);
+      await page.keyboard.type("1,234");
+      const choices = page.locator(".amount-question__choice");
+      await expect(choices).toHaveCount(2);
+      await expect.poll(() => typingSideways(page)).toBe(true);
+      await twoFrames(page);
+      // What's left above the keyboard: from the top of the page that scrolls to the keyboard's top.
+      const top = await page.evaluate(() => Math.max(0, document.querySelector(".panel-content").getBoundingClientRect().top));
+      for (const choice of await choices.all()) {
+        const box = await boxOf(choice);
+        expect(box.top).toBeGreaterThanOrEqual(top);
+        expect(box.bottom).toBeLessThanOrEqual(94);
+      }
+    });
+  });
+}
+
+// A window in a part of the screen, sideways, shorter than the screen without a keyboard (800 × 260 of one 420 px
+// tall): the keyboard up, then down with the amount still typed in, and the top bar back.
+test.describe("the app in a window shorter than its screen", () => {
+  test.use({ viewport: { width: 800, height: 260 } });
+  test("brings the top bar back once the keyboard's down, the amount still typed in", async ({ page }) => {
+    // The screen, as the phone says it: on its side, 420 px tall, more than the window.
+    await page.addInitScript(phoneScreen, 420);
+    await appOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "", memo: "" } });
+    const amount = page.getByLabel("Amount", { exact: true });
+    await amount.focus();
+    await keyboardUp(page, 170);
+    await expect.poll(() => typingSideways(page)).toBe(true);
+    await expect(page.locator(".panel-header")).toBeHidden();
+    await keyboardUp(page, 0);
+    await expect.poll(() => typingSideways(page)).toBe(false);
+    await expect(page.locator(".panel-header")).toBeVisible();
+    await expect(amount).toBeFocused();
+  });
+});
+
+// An ordinary phone held upright: the top bar stays while the amount's typed in, the keyboard up and down.
+test("keeps the app's top bar on a phone held upright, the keyboard up or down", async ({ page }) => {
+  await appOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "", memo: "" } });
+  const amount = page.getByLabel("Amount", { exact: true });
+  await amount.focus();
+  await keyboardUp(page, 336);
+  await page.keyboard.type("1,234");
+  await expect(page.locator(".amount-question__choice")).toHaveCount(2);
+  expect(await typingSideways(page)).toBe(false);
+  await expect(page.locator(".panel-header")).toBeVisible();
+  await keyboardUp(page, 0);
+  await expect(page.locator(".panel-header")).toBeVisible();
+});
+
+// A window in a split screen made 100 px shorter, a keyboard opened and closed in it before: the window's new
+// height, not a keyboard. The top bar stays, and goes and comes back with a keyboard after.
+test.describe("the app in a split screen made shorter", () => {
+  test.use({ viewport: { width: 800, height: 420 } });
+  test("keeps the top bar once the window's made shorter with no keyboard, and hides it only for one", async ({ page }) => {
+    await page.addInitScript(phoneScreen);
+    await appOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "", memo: "" } });
+    const amount = page.getByLabel("Amount", { exact: true });
+    await amount.focus();
+    await keyboardUp(page, 300);
+    await expect.poll(() => typingSideways(page)).toBe(true);
+    await keyboardUp(page, 0);
+    await expect.poll(() => typingSideways(page)).toBe(false);
+    // A moment on, the divider moved: the window 100 px shorter, no keyboard, the amount still focused.
+    await page.waitForTimeout(1600);
+    await page.setViewportSize({ width: 800, height: 320 });
+    await keyboardUp(page, 0);
+    await expect.poll(() => typingSideways(page)).toBe(false);
+    await expect(page.locator(".panel-header")).toBeVisible();
+    // A keyboard again: the bar's room given to it, then the bar back.
+    await keyboardUp(page, 226);
+    await expect.poll(() => typingSideways(page)).toBe(true);
+    await keyboardUp(page, 0);
+    await expect.poll(() => typingSideways(page)).toBe(false);
+    await expect(page.locator(".panel-header")).toBeVisible();
+    await expect(amount).toBeFocused();
+  });
+});
+
+// A keyboard that makes the page itself shorter (the visual viewport as tall as the page), up as the phone's turned:
+// still up once turned, though the first height sideways is already the keyboard's, and gone once the page is a
+// keyboard's height taller again.
+test("hides the top bar for a keyboard that makes the page shorter, through a turn, and brings it back once it's gone", async ({ page }) => {
+  await page.addInitScript(phoneScreen);
+  await page.setViewportSize({ width: 360, height: 800 });
+  await appOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "", memo: "" } });
+  await keyboardUp(page, 0);
+  const amount = page.getByLabel("Amount", { exact: true });
+  await amount.focus();
+  // Upright, the keyboard up: the page 336 px shorter, the top bar where it is.
+  await page.setViewportSize({ width: 360, height: 464 });
+  await twoFrames(page);
+  expect(await typingSideways(page)).toBe(false);
+  await expect(page.locator(".panel-header")).toBeVisible();
+  // Turned with it up: the strip sideways is 94 px, the bar's room given to it.
+  await page.setViewportSize({ width: 800, height: 94 });
+  await expect.poll(() => typingSideways(page)).toBe(true);
+  await expect(page.locator(".panel-header")).toBeHidden();
+  // The keyboard goes: the page 266 px taller, the bar back.
+  await page.setViewportSize({ width: 800, height: 360 });
+  await expect.poll(() => typingSideways(page)).toBe(false);
+  await expect(page.locator(".panel-header")).toBeVisible();
+  await expect(amount).toBeFocused();
+});

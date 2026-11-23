@@ -18,6 +18,8 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Set the Android app's four Receive buttons two by two, the dot beside the network's name in the full view's sidebar, Receive and Send at one height at the head of its dashboard, and Unstake from Sozu apart from the figures and buttons over it.
 - Read the tokens and NFTs a profile with no DUSK and no activity yet watches, and showed them on Home in place of Get your first DUSK, which shows once they're read and there are none; while they're read, or where they can't be, Tokens and NFTs says so.
 - Asked again for a token balance that couldn't be read once a read's pause is over, rather than at every draw, and kept a balance read before a send from coming back after it while the token list is read again.
+- Gave the Android app's top bar's room to a field typed in with the phone on its side, as the popup's does, so an amount's question and its answers show whole above the keyboard, and brought the top bar back once the keyboard's put away, also in a window shorter than the phone's screen or made shorter in a split screen.
+- Kept the profile menu's last items above a phone's navigation bar in the Android app where the phone reports no room for it, at any width, and gave each profile's Copy a finger's size on a touch screen.
 
 ## [0.4.0] - 2026-11-21
 

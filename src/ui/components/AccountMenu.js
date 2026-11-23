@@ -1,4 +1,6 @@
 import { h } from "../lib/dom.js";
+import { isPhone } from "../lib/device.js";
+import { isTauriRuntime } from "../../platform/runtime.js";
 import { lookupPrimaryName } from "../../shared/duskNames.js";
 import { walletLabel } from "../../shared/wallets.js";
 import { iconSvg } from "./ActionIcon.js";
@@ -7,8 +9,12 @@ import { shortAddressEl } from "./ShortAddress.js";
 import { menuKeys } from "./MenuKeys.js";
 
 // The window's safe area as CSS reads it: where a phone's cutout or its
-// navigation bar sits, at a side when the phone's turned. None where it can't
-// be read.
+// navigation bar sits, at a side when the phone's turned. The app on a phone
+// or a tablet is drawn under its navigation bar (edge to edge), which a
+// WebView may report as no inset at the bottom: the app's floor for the bar
+// then, at any width (--dusk-nav-bar-floor, ui.css). An inset reported is
+// taken as it is, and a computer's window has no such bar. None where it
+// can't be read.
 function safeArea() {
   const none = { top: 0, right: 0, bottom: 0, left: 0 };
   try {
@@ -19,6 +25,7 @@ function safeArea() {
     const style = globalThis.getComputedStyle?.(probe);
     const px = (value) => Number.parseFloat(value) || 0;
     const insets = style ? { top: px(style.paddingTop), right: px(style.paddingRight), bottom: px(style.paddingBottom), left: px(style.paddingLeft) } : none;
+    if (style && !insets.bottom && isTauriRuntime() && isPhone()) insets.bottom = px(style.getPropertyValue("--dusk-nav-bar-floor"));
     probe.remove();
     return insets;
   } catch {
@@ -223,6 +230,8 @@ export function createAccountMenuController({
     // and inside its safe area: a phone's cutout or navigation bar.
     const r = anchorEl.getBoundingClientRect();
     const safe = safeArea();
+    // As tall as the window leaves it inside that area, scrolling past it.
+    menu.style.maxHeight = `calc(100vh - ${16 + safe.top + safe.bottom}px)`;
     const menuWidth = Math.max(260, menu.offsetWidth || 0);
     const menuHeight = menu.offsetHeight || 0;
     const left = Math.max(8 + safe.left, Math.min(r.left, window.innerWidth - safe.right - menuWidth - 8));

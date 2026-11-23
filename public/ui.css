@@ -2926,6 +2926,25 @@ button.receive-copy:hover {
   box-shadow: none;
 }
 
+/* On a touch screen, a profile's Copy takes a finger: 44 px around its 28 px
+   button, which keeps its place in the row. From inside its 1 px border, it
+   reaches 6 px past the button to the right, the menu's own padding, so
+   nothing scrolls sideways, 8 px up and down, and 10 px to the left, over
+   room of its own that the profile's button gives up, so every press on that
+   button stays its own. */
+@media (pointer: coarse) {
+  button.acct-menu-copy {
+    position: relative;
+    margin-left: 10px;
+  }
+
+  button.acct-menu-copy::after {
+    content: "";
+    position: absolute;
+    inset: -9px -7px -9px -11px;
+  }
+}
+
 /* Icons are inline SVG (iconSvg), centered in their button (.icon-btn already
    centers), in its colour, so they look the same whatever fonts the system has */
 button.balance-refresh,
@@ -3833,6 +3852,11 @@ button.choice.is-picked .choice-dot {
 body[data-runtime="tauri"] {
   --dusk-safe-top-min: 0px;
   --dusk-safe-bottom-min: 0px;
+  /* A phone's navigation bar, which the app is drawn under (edge to edge),
+     where its screen reports no inset for it: the room the app keeps clear
+     for it, upright (--dusk-safe-bottom-min) and for its menus at any width
+     (AccountMenu.js). */
+  --dusk-nav-bar-floor: 56px;
 }
 
 @media (max-width: 600px) {
@@ -3865,7 +3889,7 @@ body[data-runtime="tauri"] .panel-header {
 @media (max-width: 600px) {
   body[data-runtime="tauri"] {
     --dusk-safe-top-min: 32px;
-    --dusk-safe-bottom-min: 56px;
+    --dusk-safe-bottom-min: var(--dusk-nav-bar-floor);
   }
 }
 
@@ -6117,6 +6141,15 @@ button.chain-link.text-btn--inline:not(:disabled):hover {
 :root[data-typing-sideways] .panel > .testnet-strip,
 :root[data-typing-sideways] body.page--popup .panel-header {
   display: none;
+}
+
+/* So does the app's top bar, which stays over its page as that scrolls (the
+   full view's scrolls away with it): 60 px of a 94 px strip left a field's
+   answers half under the keyboard. As the sidebar, it's beside the strip. */
+@media (max-width: 860px) {
+  :root[data-typing-sideways] body[data-runtime="tauri"] .panel-header {
+    display: none;
+  }
 }
 
 :root[data-typing-sideways] body.page--full {
