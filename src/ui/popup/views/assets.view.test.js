@@ -240,6 +240,36 @@ describe("a read of the watched tokens that fails", () => {
     expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(1);
     expect(page.text()).toMatch(exactly("123.45"));
   });
+
+  it("reads a balance again once a send marks it stale, even with a read on its way, and lets no older answer put back the balance from before", async () => {
+    const page = await homeTokens();
+    page.answer.fail = false;
+    const before = Promise.withResolvers();
+    page.answer.balance = before.promise;
+    page.draw();
+    await page.settleAll();
+    expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(1);
+
+    // The token is sent while its balance is being read: marked stale, as a send does.
+    const after = Promise.withResolvers();
+    page.answer.balance = after.promise;
+    const [cid] = Object.keys(page.state.assets.balancesAt);
+    page.state.assets.balancesAt[cid] = 0;
+    page.draw();
+    await page.settleAll();
+    expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(2);
+
+    // The newer answer comes first, then the one from before the send: it's ignored.
+    after.resolve({ result: "2345" });
+    await page.settleAll();
+    before.resolve({ result: "12345" });
+    await page.settleAll();
+    page.draw();
+    await page.settleAll();
+    expect(page.text()).toMatch(exactly("23.45"));
+    expect(page.text()).not.toMatch(exactly("123.45"));
+    expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(2);
+  });
 });
 
 describe("sending a token from its page", () => {

@@ -207,18 +207,24 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
 
   const now = Date.now();
   const STALE_MS = 25_000;
-  // The balances being read: none is asked for again while its answer is on its way.
-  const reading = (st.balancesReading ??= new Set());
+  // The balance read on its way for each token, by number: none is asked for
+  // again while it's on its way, unless the balance was marked stale since (a
+  // send of the token sets its time to 0). Then it's read again, and only the
+  // newest read's answer counts, so an older one never puts back a balance
+  // from before the send.
+  const reading = (st.balancesReading ??= new Map());
 
   for (const t of tokens) {
     const cid = String(t?.contractId ?? "").trim();
-    if (!cid || reading.has(cid)) continue;
+    if (!cid) continue;
     const last = Number(st.balancesAt?.[cid] ?? 0) || 0;
+    if (reading.has(cid) && last !== 0) continue;
     if (st.balances?.[cid] !== undefined && now - last < STALE_MS) continue;
 
     // Mark as "requested" to avoid spamming during rapid renders.
     st.balancesAt[cid] = now;
-    reading.add(cid);
+    const read = (st.balanceReadSeq = (st.balanceReadSeq ?? 0) + 1);
+    reading.set(cid, read);
 
     actions
       ?.send?.({
@@ -228,7 +234,7 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
         driver: t?.driver,
       })
       .then((resp) => {
-        if (state.assets !== st) return;
+        if (state.assets !== st || reading.get(cid) !== read) return;
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch token balance");
         const v = String(resp?.result ?? resp ?? "0");
         st.balances[cid] = v;
@@ -238,7 +244,9 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
       .catch(() => {
         // Keep previous cached value if any; do not hard-fail the whole view.
       })
-      .finally(() => reading.delete(cid));
+      .finally(() => {
+        if (reading.get(cid) === read) reading.delete(cid);
+      });
   }
 
   return st;
