@@ -10,7 +10,6 @@ import { stDuskLines, txErrorText } from "./txDisplay.js";
 import { zonedClockText } from "../../lib/time.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyButton } from "../../components/CopyButton.js";
-import { balance, balancesHidden } from "../../components/Balance.js";
 import { walletNameOf } from "../../components/ProfileName.js";
 import { askSendPassword } from "../../components/SendPasswordDialog.js";
 import { SEND_PASSWORD_WAITS } from "../../../shared/errors.js";
@@ -93,7 +92,7 @@ function heldText(sent, ov) {
     const own = ownProfileName(ov, address);
     return own ? `your ${own}` : shortAddress(address);
   };
-  return sentMeanwhileText(record, { toText, whenText: whenAtText, hidden: balancesHidden(ov) });
+  return sentMeanwhileText(record, { toText, whenText: whenAtText });
 }
 
 /**
@@ -519,9 +518,9 @@ function stepMark(stepState) {
 
 // What a completed stake or unstake with Sozu got or gave back, or, its
 // pool's event not read yet, that it's coming: never nothing.
-function sozuLines(sent, fact, hidden) {
+function sozuLines(sent, fact) {
   // Its block's figure is the one the chain made, final or not yet: as it is.
-  if (fact) return stDuskLines(fact, hidden);
+  if (fact) return stDuskLines(fact);
   return [{ label: sent.sozu === "unstake" ? "You gave back" : "You got", value: "stDUSK and rate coming in a moment" }];
 }
 
@@ -626,24 +625,23 @@ function noticeOffer({ state, actions }) {
 export function sentView(ov, { state, actions, sozu } = {}) {
   const sent = state?.sent;
   if (!sent) return [];
-  const hidden = balancesHidden(ov);
   const { phase, status, feePaid } = sentStatus(sent, ov);
   const steps = sentSteps(sent, ov);
   const final = sentIsFinal(sent, ov);
   const capLux = safeBigInt(sent.feeCapLux ?? 0, 0n);
   const explorerUrl = sent.hash ? explorerTxUrl(String(sent.nodeUrl || ov?.nodeUrl || ""), sent.hash) : null;
 
-  // The amount in DUSK, or in a token's units, hidden with Hide balances; or
-  // words such as "All rewards" when the wallet doesn't know the amount.
+  // The amount in DUSK, or in a token's units; or words such as "All
+  // rewards" when the wallet doesn't know the amount.
   const amountEl =
     sent.amountLux != null && safeBigInt(sent.amountLux, 0n) > 0n
       ? h("div", { class: "sent-amount" }, [
-          balance(hidden, formatDuskExact(sent.amountLux)),
+          formatDuskExact(sent.amountLux),
           h("span", { class: "balance-unit", text: " DUSK" }),
         ])
       : sent.amountDisplay
         ? h("div", { class: "sent-amount" }, [
-            balance(hidden, sent.amountDisplay),
+            String(sent.amountDisplay),
             h("span", { class: "balance-unit", text: ` ${sent.unit || ""}` }),
           ])
         : sent.amountText
@@ -699,10 +697,10 @@ export function sentView(ov, { state, actions, sozu } = {}) {
   // at most the cap while that isn't known.
   const feeRow = (() => {
     if (phase === "not_sent" || status === "removed") return null;
-    if (phase === "unconfirmed") return capLux > 0n ? ["Fee", ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK, if it went out"]] : null;
+    if (phase === "unconfirmed") return capLux > 0n ? ["Fee", `Up to ${formatFee(capLux, { max: true })} DUSK, if it went out`] : null;
     const label = status === "failed" ? "Fee charged" : "Fee";
-    if (feePaid != null) return [label, [balance(hidden, formatDuskExact(feePaid)), " DUSK"]];
-    if (capLux > 0n) return [label, ["Up to ", balance(hidden, formatFee(capLux, { max: true })), " DUSK"]];
+    if (feePaid != null) return [label, `${formatDuskExact(feePaid)} DUSK`];
+    if (capLux > 0n) return [label, `Up to ${formatFee(capLux, { max: true })} DUSK`];
     return null;
   })();
 
@@ -711,7 +709,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
 
   // What it got or gave back, and the fee.
   const rows = h("div", { class: "group" }, [
-    ...(sent.sozu && status === "executed" ? sozuLines(sent, sozu, hidden) : []).map(({ label, value }) => kv(label, value)),
+    ...(sent.sozu && status === "executed" ? sozuLines(sent, sozu) : []).map(({ label, value }) => kv(label, value)),
     feeRow ? kv(feeRow[0], feeRow[1]) : null,
   ].filter(Boolean));
 
@@ -803,7 +801,7 @@ export function sentView(ov, { state, actions, sozu } = {}) {
           disabled: !heldRecord || checking,
           onclick: () => {
             if (!heldRecord) return;
-            state.draft = againDraft(heldRecord, ov, { hidden: balancesHidden(ov) });
+            state.draft = againDraft(heldRecord, ov);
             state.sent = null;
             state.route = "confirm";
             actions?.render?.()?.catch?.(() => {});

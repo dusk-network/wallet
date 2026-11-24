@@ -36,7 +36,7 @@ import { REQUEST_DRAFT_KEY, SEND_DRAFT_KEY as KEY } from "../../shared/sendDraft
 // (`carried`), with the recipient they're for (`carriedTo`); that it's one
 // kept on purpose (`kept`); and a paste refused, still in To as it was, with
 // why (`refusedText`, `refusedProblem`, `refusedChainId`), which stands.
-const FIELDS = ["to", "duskName", "nameChoices", "amountDusk", "amountMasked", "memo", "gas", "requestChainId", "filledFrom", "filledIn", "linkAt", "linkTaken", "carried", "carriedTo", "kept", "refusedText", "refusedProblem", "refusedChainId"];
+const FIELDS = ["to", "duskName", "nameChoices", "amountDusk", "memo", "gas", "requestChainId", "filledFrom", "filledIn", "linkAt", "linkTaken", "carried", "carriedTo", "kept", "refusedText", "refusedProblem", "refusedChainId"];
 
 let held = null;
 // What the extension's session store held as this page opened (loadKeptSend).
@@ -174,7 +174,7 @@ export function carriedDropped(draft, recipient) {
   if (!from || !chosen || chosen === from) return null;
   const carried = Array.isArray(draft.carried) ? draft.carried : [];
   return {
-    ...(carried.includes("amount") ? { amountDusk: "", amountLux: undefined, amountMasked: false } : {}),
+    ...(carried.includes("amount") ? { amountDusk: "", amountLux: undefined } : {}),
     ...(carried.includes("memo") ? { memo: "" } : {}),
     carried: undefined,
     carriedTo: undefined,

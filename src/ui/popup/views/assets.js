@@ -8,7 +8,7 @@ import { contractIdText, shortAddress } from "../../lib/strings.js";
 import { subnav } from "../../components/Subnav.js";
 import { iconSvg } from "../../components/ActionIcon.js";
 import { copyContractButton } from "../../components/ContractValue.js";
-import { HIDDEN_BALANCE, balance, balancesHidden } from "../../components/Balance.js";
+import { balance, balancesHidden } from "../../components/Balance.js";
 import { bracketTitle } from "../../components/BracketTitle.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { fieldLabel, integerInput, reviewActions, submitOnGasEnter, textInput } from "../../components/FormControls.js";
@@ -684,7 +684,7 @@ export function assetTokenView(ov, { state, actions } = {}) {
       // More than it holds, by how much, once its balance is read.
       if (balUnits != null && safeBigInt(valueUnits, 0n) > safeBigInt(balUnits, 0n)) {
         const short = formatTokenUnits(safeBigInt(valueUnits, 0n) - safeBigInt(balUnits, 0n), dec, { maxFrac: dec });
-        throw new Error(`That's ${hidden ? HIDDEN_BALANCE : short} ${sym} more than you have.`);
+        throw new Error(`That's ${short} ${sym} more than you have.`);
       }
 
       const enc = await actions?.send?.({
@@ -798,6 +798,8 @@ export function assetTokenView(ov, { state, actions } = {}) {
     onEnter: () => transferAmountInput.focus(),
     oninput: (e) => {
       form.to = String(e?.target?.value ?? "");
+      form.token = cid;
+      sayAvailable();
     },
   });
   const transferAmountInput = textInput({
@@ -808,20 +810,40 @@ export function assetTokenView(ov, { state, actions } = {}) {
     onEnter: () => reviewTransferBtn.click(),
     oninput: (e) => {
       form.amount = String(e?.target?.value ?? "");
+      form.token = cid;
+      sayAvailable();
     },
   });
 
   const reviewTransferBtn = h("button", { class: "btn-primary", text: "Review transfer", onclick: reviewTransfer });
 
+  // What the profile holds of the token, under the amount while this token's
+  // transfer is filled in (its field focused, or typed in for this token, not
+  // left typed in for another), as Send says what's available: to the last
+  // decimal the amount takes, never 0 for an amount that can be sent. With
+  // balances hidden, the figure at the page's head stays hidden while the
+  // page is only looked at.
+  const available = h("p", { class: "asset-action-note asset-avail", hidden: true });
   const sendSection = h("section", { class: "asset-action-section" }, [
     bracketTitle({ class: "asset-action-title", text: `Send ${sym}` }),
     fieldLabel(transferToInput, "Recipient"),
     transferToInput,
     fieldLabel(transferAmountInput, "Amount"),
     transferAmountInput,
+    available,
     transferError.el,
     reviewTransferBtn,
   ]);
+  function sayAvailable(focused = globalThis.document?.activeElement) {
+    const typed = form.token === cid && [form.to, form.amount].some((value) => String(value ?? "").trim());
+    const filling = typed || Boolean(focused && sendSection.contains(focused));
+    const said = filling && balUnits != null ? `Available ${formatTokenUnits(balUnits, dec, { maxFrac: dec })} ${sym}` : "";
+    if (available.textContent !== said) available.textContent = said;
+    available.hidden = !said;
+  }
+  sendSection.addEventListener("focusin", () => sayAvailable());
+  sendSection.addEventListener("focusout", (e) => sayAvailable(e?.relatedTarget ?? null));
+  sayAvailable();
 
   const approveMaxBtn = h("button", {
     class: "mini-btn",
@@ -935,7 +957,6 @@ export function assetTokenConfirmView(ov, { state, actions } = {}) {
   const pay = payGuard({
     editor: gasEditor,
     availableLux: ov?.balance?.value != null ? safeBigInt(ov.balance.value, 0n) : null,
-    hidden: balancesHidden(ov),
     button: confirmBtn,
   });
 

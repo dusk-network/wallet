@@ -403,5 +403,14 @@ describe("payments from Send waiting for the network, on Home", () => {
     buttons()[2].click();
     await vi.waitFor(() => expect(state.route).toBe("confirm"));
     expect(state.draft).toMatchObject({ to: LUCAS, amountLux: "10000000", memo: "Hors ligne deux", replaces: "s2" });
+
+    // With balances hidden, Home hides what it pays; its Review is the same, which shows it.
+    const shown = state.draft;
+    state.route = "home";
+    document.body.replaceChildren(...homeView(ov([held, stopped], { hideBalances: true }), { state, actions }));
+    for (const box of boxes(document)) expect(everything(box.el)).not.toContain("0.01");
+    buttons()[2].click();
+    await vi.waitFor(() => expect(state.route).toBe("confirm"));
+    expect(state.draft).toEqual(shown);
   });
 });

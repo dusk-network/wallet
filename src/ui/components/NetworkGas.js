@@ -134,13 +134,13 @@ const feeOfGas = (gas) => {
  * `gas` where it hasn't drawn yet.
  *
  * @param {{
- *   editor: HTMLElement, availableLux: bigint | null, sendsLux?: bigint, shielded?: boolean, hidden?: boolean,
+ *   editor: HTMLElement, availableLux: bigint | null, sendsLux?: bigint, shielded?: boolean,
  *   button?: HTMLButtonElement, ready?: () => boolean, gas?: { limit: unknown, price: unknown } | null,
  * }} opts - `sendsLux`: what it takes from the balance besides its fee; `ready`:
  *   whether the rest of the page lets the button on
  * @returns {{ el: HTMLElement, covered: () => boolean, draw: () => void }}
  */
-export function payGuard({ editor, availableLux, sendsLux = 0n, shielded = false, hidden = false, button, ready = () => true, gas = null }) {
+export function payGuard({ editor, availableLux, sendsLux = 0n, shielded = false, button, ready = () => true, gas = null }) {
   const el = h("div", { class: "field-error pay-guard", role: "alert", hidden: true });
   let feeLux = feeOfGas(editor?.getGasInputs?.() ?? gas) ?? feeOfGas(gas);
   const missing = () => {
@@ -150,7 +150,7 @@ export function payGuard({ editor, availableLux, sendsLux = 0n, shielded = false
   };
   const draw = () => {
     const missingLux = missing();
-    const text = missingLux > 0n ? shortfallText({ missingLux, moves: sendsLux > 0n, shielded, hidden }) : "";
+    const text = missingLux > 0n ? shortfallText({ missingLux, moves: sendsLux > 0n, shielded }) : "";
     if (el.textContent !== text) el.textContent = text;
     el.hidden = !text;
     if (button) button.disabled = Boolean(text) || Boolean(editor?.error) || !ready();
@@ -176,10 +176,9 @@ export function payGuard({ editor, availableLux, sendsLux = 0n, shielded = false
  *   gas?: { limit: string, price: string } | null, fallbackPrice?: string,
  * }} opts
  */
-export function reviewGas({ kind, gasOpts, amountLux, comesBack = false, hideTotal = false, ov, actions, gas, fallbackPrice = "" }) {
+export function reviewGas({ kind, gasOpts, amountLux, comesBack = false, ov, actions, gas, fallbackPrice = "" }) {
   const defaultGas = getDefaultGas(kind, gasOpts);
   const editor = document.createElement("dusk-gas-editor");
-  editor.hideTotal = hideTotal;
   editor.comesBack = comesBack;
   editor.amountLux = amountLux;
   editor.maxDecimals = UI_DISPLAY_DECIMALS;

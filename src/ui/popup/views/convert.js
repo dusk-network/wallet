@@ -14,7 +14,7 @@ import { guarded } from "../../lib/clickGuard.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
-import { balance, balancesHidden, shieldedLuxOf } from "../../components/Balance.js";
+import { shieldedLuxOf } from "../../components/Balance.js";
 import { fieldLabel, reviewActions, submitOnGasEnter } from "../../components/FormControls.js";
 import { gasFeeLux, payGuard, reviewGas, startingGas } from "../../components/NetworkGas.js";
 import { shortfallText } from "../../lib/shortfall.js";
@@ -34,7 +34,6 @@ const flowLine = (kind) =>
 export function convertFormView(ov, { state, actions } = {}) {
   const draft = state.draft || {};
   const kind = draft.kind === TX_KIND.UNSHIELD ? TX_KIND.UNSHIELD : TX_KIND.SHIELD;
-  const hidden = balancesHidden(ov);
 
   // The fee Review starts from, so Max matches what Review asks.
   const feeLux = gasFeeLux(
@@ -97,7 +96,7 @@ export function convertFormView(ov, { state, actions } = {}) {
     }
     // Not against a balance that can't be read now, as if it were 0.
     if (known && lux + feeLux > availRaw) {
-      field.setError(shortfallText({ missingLux: lux + feeLux - availRaw, shielded: kind === TX_KIND.UNSHIELD, hidden }));
+      field.setError(shortfallText({ missingLux: lux + feeLux - availRaw, shielded: kind === TX_KIND.UNSHIELD }));
       return null;
     }
     field.setError("");
@@ -111,7 +110,6 @@ export function convertFormView(ov, { state, actions } = {}) {
     title: "All of it, less the network fee",
     disabled: avail <= 0n,
     onclick: () => {
-      // The real amount, with balances hidden too: it's what gets moved.
       field.setValue(formatLuxForInput(avail));
       check();
       syncDraft();
@@ -120,9 +118,7 @@ export function convertFormView(ov, { state, actions } = {}) {
   });
   const available = h("div", { class: "amount-avail", hidden: !known }, [
     h("span", { class: "amount-avail__text" }, [
-      feeLux > 0n ? "Available after fees " : "Available ",
-      balance(hidden, formatDusk(avail)),
-      " DUSK",
+      `${feeLux > 0n ? "Available after fees" : "Available"} ${formatDusk(avail)} DUSK`,
     ]),
     maxBtn,
   ]);
@@ -209,7 +205,6 @@ export function convertConfirmView(ov, { state, actions } = {}) {
     availableLux: paying != null ? safeBigInt(paying, 0n) : null,
     sendsLux: safeBigInt(d.amountLux, 0n),
     shielded: kind === TX_KIND.UNSHIELD,
-    hidden: balancesHidden(ov),
     button: confirmBtn,
   });
 

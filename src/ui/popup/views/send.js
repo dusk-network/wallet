@@ -19,7 +19,7 @@ import { guarded } from "../../lib/clickGuard.js";
 import { joinedAddress } from "../../lib/recipient.js";
 import { shortAddress } from "../../lib/strings.js";
 import { iconSvg } from "../../components/ActionIcon.js";
-import { HIDDEN_BALANCE, balance, balancesHidden, shieldedLuxOf } from "../../components/Balance.js";
+import { shieldedLuxOf } from "../../components/Balance.js";
 import { subnav } from "../../components/Subnav.js";
 import "../../components/GasEditor.js";
 import { amountField } from "../../components/AmountField.js";
@@ -116,34 +116,33 @@ function againWho(ov, to, name) {
 
 /**
  * "Already sent to Alice: 0.02 DUSK with this memo at 08:53.": a payment made
- * already, for the form, the amount hidden as balances are where Max filled
- * it in. On Review, under the amount: "Already sent to Alice: same amount and
- * memo at 08:53."
+ * already, for the form. On Review, under the amount: "Already sent to Alice:
+ * same amount and memo at 08:53."
  * @param {object} ov
- * @param {{ lux: bigint, masked: boolean, to: string, memo: string, name?: string, time: number }} payment
+ * @param {{ lux: bigint, to: string, memo: string, name?: string, time: number }} payment
  * @param {{ review?: boolean }} [opts]
  */
-function sentAgainWords(ov, { lux, masked, to, memo, name = "", time }, { review = false } = {}) {
+function sentAgainWords(ov, { lux, to, memo, name = "", time }, { review = false } = {}) {
   const who = againWho(ov, to, name);
   const withMemo = Boolean(memo.trim());
   if (review) return [`Already sent to ${who}: same amount${withMemo ? " and memo" : ""} ${whenAtText(time)}.`];
-  return [`Already sent to ${who}: `, balance(balancesHidden(ov) && masked, formatDuskExact(lux)), ` DUSK${withMemo ? " with this memo" : ""} ${whenAtText(time)}.`];
+  return [`Already sent to ${who}: ${formatDuskExact(lux)} DUSK${withMemo ? " with this memo" : ""} ${whenAtText(time)}.`];
 }
 
 /**
  * "Already waiting to go to Lucas: 0.01 DUSK with this memo, made at 02:34.":
  * one made already that waits for the network and goes out by itself, for
- * the form, the amount hidden as balances are where Max filled it in. On
- * Review: "Already waiting to go to Lucas: same amount and memo, made at 02:34."
+ * the form. On Review: "Already waiting to go to Lucas: same amount and memo,
+ * made at 02:34."
  * @param {object} ov
- * @param {{ lux: bigint, masked: boolean, to: string, memo: string, name?: string, time: number }} payment
+ * @param {{ lux: bigint, to: string, memo: string, name?: string, time: number }} payment
  * @param {{ review?: boolean }} [opts]
  */
-function waitingAgainWords(ov, { lux, masked, to, memo, name = "", time }, { review = false } = {}) {
+function waitingAgainWords(ov, { lux, to, memo, name = "", time }, { review = false } = {}) {
   const who = againWho(ov, to, name);
   const withMemo = Boolean(memo.trim());
   if (review) return [`Already waiting to go to ${who}: same amount${withMemo ? " and memo" : ""}, made ${whenAtText(time)}.`];
-  return [`Already waiting to go to ${who}: `, balance(balancesHidden(ov) && masked, formatDuskExact(lux)), ` DUSK${withMemo ? " with this memo" : ""}, made ${whenAtText(time)}.`];
+  return [`Already waiting to go to ${who}: ${formatDuskExact(lux)} DUSK${withMemo ? " with this memo" : ""}, made ${whenAtText(time)}.`];
 }
 
 // A shared request whose .dusk names are being looked up before it's read
@@ -161,7 +160,7 @@ export function sendFormView(ov, { state, actions } = {}) {
   // A request for another network leaves nothing of itself here, whether it
   // opened this page or the network changed under it: the form says why.
   if (state.draft?.requestChainId && chainMismatchText(state.draft.requestChainId, ov?.nodeUrl)) {
-    state.draft = { ...refusedRequest(state.draft), amountDusk: "", amountMasked: false, memo: "" };
+    state.draft = { ...refusedRequest(state.draft), amountDusk: "", memo: "" };
   }
   const draft = state.draft || {};
 
@@ -233,7 +232,6 @@ export function sendFormView(ov, { state, actions } = {}) {
   }
 
   // Balances from overview.
-  const hidden = balancesHidden(ov);
   const pubBalLux = safeBigInt(ov?.balance?.value, 0n);
   const shValueLux = shieldedLuxOf(ov) ?? 0n;
   // Unknown where it can't be read: Available and Max show nothing, never 0.
@@ -256,7 +254,6 @@ export function sendFormView(ov, { state, actions } = {}) {
   const field = amountField({
     label: "Amount",
     value: typeof draft.amountDusk === "string" ? draft.amountDusk : "",
-    masked: hidden && Boolean(draft.amountMasked),
     onInput: () => {
       stopReading();
       typedOver("amount");
@@ -299,8 +296,7 @@ export function sendFormView(ov, { state, actions } = {}) {
       if (maxLux == null || maxLux <= 0n) return;
       stopReading();
       typedOver("amount");
-      // The real amount, which gets sent, shown as dots with balances hidden.
-      field.setValue(formatLuxForInput(maxLux), { masked: hidden });
+      field.setValue(formatLuxForInput(maxLux));
       checkAmount();
       syncDraft();
       field.focus();
@@ -327,8 +323,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const lux = readAmount(opts);
     amountOff = lux == null && Boolean(String(amount.value ?? "").trim());
     syncReview();
-    // Not for an amount Max filled in while balances are hidden.
-    inCurrency.set(lux != null && !field.isMasked() ? lux : null);
+    inCurrency.set(lux);
     return lux;
   }
 
@@ -353,7 +348,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     }
     const maxLux = getMaxAmountLux();
     if (maxLux != null && lux > maxLux) {
-      field.setError(shortfallText({ missingLux: lux + feeLuxForRecipientType(detectedRecipientType) - (detectedRecipientType === "address" ? shSpendLux - waitingShieldedLux : pubBalLux - waitingPublicLux), shielded: detectedRecipientType === "address", hidden }));
+      field.setError(shortfallText({ missingLux: lux + feeLuxForRecipientType(detectedRecipientType) - (detectedRecipientType === "address" ? shSpendLux - waitingShieldedLux : pubBalLux - waitingPublicLux), shielded: detectedRecipientType === "address" }));
       return null;
     }
     field.setError("");
@@ -372,7 +367,7 @@ export function sendFormView(ov, { state, actions } = {}) {
     const feeLux = feeLuxForRecipientType(detectedRecipientType);
     availText.replaceChildren(
       feeLux > 0n ? "Available after fees " : "Available ",
-      balance(hidden, formatDusk(maxLux)),
+      formatDusk(maxLux),
       " DUSK"
     );
     available.hidden = false;
@@ -468,7 +463,6 @@ export function sendFormView(ov, { state, actions } = {}) {
         to: to.value,
         refusedText: to.value || undefined,
         amountDusk: "",
-        amountMasked: false,
         memo: "",
       };
       sayRefused({ chainId: state.draft.refusedChainId, problem: state.draft.refusedProblem });
@@ -1128,9 +1122,9 @@ export function sendFormView(ov, { state, actions } = {}) {
     const made = payment && !waiting ? sentAlready(activityRows(ov, state), payment) : null;
     const name = ownProfileName(ov, recipient) || contactNameText(contactsIndex?.get(recipient.toLowerCase())?.name) || waiting?.toName || "";
     const words = waiting
-      ? waitingAgainWords(ov, { ...payment, masked: field.isMasked(), name, time: Number(waiting.at) })
+      ? waitingAgainWords(ov, { ...payment, name, time: Number(waiting.at) })
       : made && made.time !== null
-        ? sentAgainWords(ov, { ...payment, masked: field.isMasked(), name, time: made.time })
+        ? sentAgainWords(ov, { ...payment, name, time: made.time })
         : null;
     setChildren(againNote, words ? [h("div", { class: "callout-title" }, words)] : []);
     againNote.hidden = !againNote.children.length;
@@ -1146,7 +1140,6 @@ export function sendFormView(ov, { state, actions } = {}) {
       duskName: undefined,
       nameChoices: { ...nameChoices },
       amountDusk: String(amount.value || ""),
-      amountMasked: field.isMasked(),
       memo: String(memo.value || ""),
       // preserve any gas edits the user may have made on the confirm screen
       gas: state.draft?.gas,
@@ -1337,7 +1330,6 @@ export function sendFormView(ov, { state, actions } = {}) {
           privacy,
           amountLux: amtLux,
           amountDusk: amount.value.trim(),
-          amountMasked: field.isMasked(),
           memo: memoVal,
           gas: prevGas,
           // A request link's network, for Review to say so when it isn't this
@@ -1615,8 +1607,8 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           "div",
           { class: "callout-title" },
           waitingTwin
-            ? waitingAgainWords(ov, { ...payment, masked: Boolean(d.amountMasked), name: againName, time: Number(waitingTwin.at) }, { review: true })
-            : sentAgainWords(ov, { ...payment, masked: Boolean(d.amountMasked), name: againName, time: madeAgain.time }, { review: true })
+            ? waitingAgainWords(ov, { ...payment, name: againName, time: Number(waitingTwin.at) }, { review: true })
+            : sentAgainWords(ov, { ...payment, name: againName, time: madeAgain.time }, { review: true })
         ),
       ])
     : null;
@@ -1758,20 +1750,16 @@ export function sendConfirmView(ov, { state, actions } = {}) {
   // Back returns to Send with the draft, so Review has no Cancel. Its button
   // says what it sends, the amount as Review shows it: "Send 0.1 DUSK"; a
   // payment made already says it sends it again, as the web wallet's does.
-  const amountShown = balancesHidden(ov) && Boolean(d.amountMasked) ? HIDDEN_BALANCE : formatDuskExact(d.amountLux);
-  const confirmBtn = h("button", { class: "btn-primary", text: `Send ${amountShown} DUSK${repeat ? " again" : ""}`, disabled: nothingArrives });
+  const confirmBtn = h("button", { class: "btn-primary", text: `Send ${formatDuskExact(d.amountLux)} DUSK${repeat ? " again" : ""}`, disabled: nothingArrives });
 
-  // What Max filled in stays hidden with the balances; an amount typed shows.
-  const amountMasked = balancesHidden(ov) && Boolean(d.amountMasked);
   // What it comes to in your currency, on mainnet, beside the DUSK.
   const reviewInCurrency = inCurrencyLine(ov, "review-line review-in-currency");
-  reviewInCurrency.set(amountMasked ? null : safeBigInt(d.amountLux, 0n));
+  reviewInCurrency.set(safeBigInt(d.amountLux, 0n));
   // The network's gas price by default; Custom fee for gas of your own.
   const { defaultGas, editor: gasEditor, error: confirmError, readGas } = reviewGas({
     kind: TX_KIND.TRANSFER,
     gasOpts: { privacy },
     amountLux: d.amountLux,
-    hideTotal: amountMasked,
     ov,
     actions,
     gas: d?.gas,
@@ -1785,7 +1773,6 @@ export function sendConfirmView(ov, { state, actions } = {}) {
     availableLux: paying != null ? safeBigInt(paying, 0n) - waitingLux(ov, privacy, { except: String(d.replaces ?? "") }) : null,
     sendsLux: safeBigInt(d.amountLux, 0n),
     shielded: privacy === "shielded",
-    hidden: balancesHidden(ov),
     button: confirmBtn,
     ready: () => !nothingArrives,
   });
@@ -1868,12 +1855,12 @@ export function sendConfirmView(ov, { state, actions } = {}) {
           text: service ? `Bridge to ${service.chain}` : privacy === "shielded" ? "Shielded transfer" : "Public transfer",
         }),
         h("div", { class: "balance-amount" }, [
-          balance(amountMasked, formatDuskExact(d.amountLux)),
+          formatDuskExact(d.amountLux),
           h("span", { class: "balance-unit", text: " DUSK" }),
         ]),
         reviewInCurrency.el,
         // To the bridge: what arrives on the other chain, once it takes its fee.
-        service && !amountMasked ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
+        service ? h("div", { class: "review-line review-bridge-fee", text: bridgeServiceLine(service) }) : null,
         // What a public send shows everyone; a shielded one has no such line.
         privacy === "public" ? visibleLine : null,
       ].filter(Boolean)),

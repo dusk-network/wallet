@@ -148,11 +148,10 @@ describe("a stake or an unstake with Sozu, completed", () => {
     expect([valueOf(/got/i), valueOf(/gave/i), valueOf(/rate/i)]).toEqual(["49.875 stDUSK", null, "1 stDUSK = 2 DUSK"]);
     completed("unstake", fact("unstake", 63_297_959n));
     expect([valueOf(/gave/i), valueOf(/got/i), valueOf(/rate/i)]).toEqual(["0.063297959 stDUSK", null, "1 stDUSK = 2 DUSK"]);
-    // Hidden with the balances; the rate isn't one.
+    // With balances hidden too: this screen is the stake's result, which shows what it got.
     completed("stake", fact("stake", 49_875_000_000n), overview({ hideBalances: true }));
-    expect(valueOf(/got/i)).toMatch(/^•••• stDUSK$/);
-    expect(screen()).not.toContain("49.875");
-    expect(valueOf(/rate/i)).toBe("1 stDUSK = 2 DUSK");
+    expect([valueOf(/got/i), valueOf(/rate/i)]).toEqual(["49.875 stDUSK", "1 stDUSK = 2 DUSK"]);
+    expect(screen()).not.toContain("••••");
   });
 });
 
@@ -640,7 +639,7 @@ describe("after Confirm", () => {
     expect(state.draft).toMatchObject({ to: OTHER, amountLux: dusk(1500) });
   });
 
-  it("leaves the fee out of a failed step's words with Hide balances, shown and announced", () => {
+  it("says a failed send's fee once, in its row, with Hide balances on too", () => {
     const sent = { phase: "sent", hash: HASH, status: "failed", feeCapLux: "2500000" };
     const txs = [{ hash: HASH, status: "failed", feePaid: "2000000" }];
     // What's said of the failed send: its step's words and what's announced of it, and its fee row, drawn.
@@ -648,14 +647,17 @@ describe("after Confirm", () => {
       body.replaceChildren(...sentView(ov, { state: { sent }, actions: {} }));
       return [sentSteps(sent, ov).at(-1).sub, sentAnnouncement(sent, ov), fee()];
     };
-    // Shown: the fee it was charged in its row, or at most the cap while that isn't known.
-    expect(said(overview({ txs }))[2]).toMatch(exactly("0.002 DUSK"));
-    expect(said(overview())[2]).toMatch(exactly("0.0025 DUSK"));
-    // Hidden: no figure in its words or what's announced, and its row's figure masked, charged or capped.
-    for (const ov of [overview({ txs, hideBalances: true }), overview({ hideBalances: true })]) {
-      const [words, announced, row] = said(ov);
-      expect([words, announced]).toEqual([expect.not.stringMatching(/\d/), expect.not.stringMatching(/\d/)]);
-      expect(row).toMatch(/^[^\d]*••••[^\d]*$/);
+    // The fee it was charged, or at most the cap while that isn't known: in its row, never in its words or what's
+    // announced. This screen is the send's result, so balances hidden show it the same.
+    for (const hideBalances of [false, true]) {
+      for (const [ov, charged] of [
+        [overview({ txs, hideBalances }), "0.002 DUSK"],
+        [overview({ hideBalances }), "0.0025 DUSK"],
+      ]) {
+        const [words, announced, row] = said(ov);
+        expect([words, announced]).toEqual([expect.not.stringMatching(/\d/), expect.not.stringMatching(/\d/)]);
+        expect(row).toMatch(exactly(charged));
+      }
     }
   });
 

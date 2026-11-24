@@ -1,5 +1,4 @@
 import { h } from "../lib/dom.js";
-import { HIDDEN_BALANCE } from "./Balance.js";
 import { decimalInput } from "./FormControls.js";
 import { amountChoices, amountProblem } from "../../shared/amount.js";
 import { amountQuestionEls } from "./AmountQuestion.js";
@@ -16,12 +15,11 @@ let fieldSeq = 0;
  * @param {string} [opts.value]
  * @param {string} [opts.unit]
  * @param {boolean} [opts.disabled]
- * @param {boolean} [opts.masked] - the value shows as dots until something's typed
  * @param {() => void} [opts.onInput]
  * @param {() => void} [opts.onEnter]
- * @returns {{ el: HTMLElement, input: HTMLInputElement, error: HTMLElement, setError: (text: string) => void, setProblem: (raw: string, example?: { whole?: string, decimal?: string }) => void, setValue: (value: string, opts?: { masked?: boolean }) => void, isMasked: () => boolean, focus: () => void }}
+ * @returns {{ el: HTMLElement, input: HTMLInputElement, error: HTMLElement, setError: (text: string) => void, setProblem: (raw: string, example?: { whole?: string, decimal?: string }) => void, setValue: (value: string) => void, focus: () => void }}
  */
-export function amountField({ label, value = "", unit = "DUSK", disabled = false, masked = false, onInput, onEnter } = {}) {
+export function amountField({ label, value = "", unit = "DUSK", disabled = false, onInput, onEnter } = {}) {
   const errorId = `amount-error-${++fieldSeq}`;
   const input = decimalInput({
     class: "amount-field__input",
@@ -33,34 +31,14 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
     disabled,
     onEnter,
   });
-  // What Max fills in while balances are hidden shows as dots, in a field of
-  // its own: `input` keeps the amount for what reads it, away from the screen
-  // and screen readers. Dots in the field, not a placeholder, so deleting them
-  // is a change too: what's left of them goes, and what's typed takes over.
-  const cover = decimalInput({
-    class: "amount-field__input",
-    "aria-label": `${label}, hidden`,
-    value: HIDDEN_BALANCE,
-    autocomplete: "off",
-    inputmode: "decimal",
-    disabled,
-    hidden: true,
-    onEnter,
-  });
-  const isMasked = () => input.hidden === true;
-  const setMasked = (on) => {
-    input.hidden = on;
-    cover.hidden = !on;
-  };
-  const focus = () => (isMasked() ? cover : input).focus();
+  const focus = () => input.focus();
   const el = h("div", { class: "amount-field" }, [
     input,
-    cover,
     h("span", { class: "amount-field__unit", "aria-hidden": "true", text: unit }),
   ]);
   // A press anywhere on the field types into it.
   el.addEventListener("click", (e) => {
-    if (e?.target !== input && e?.target !== cover && !input.disabled) focus();
+    if (e?.target !== input && !input.disabled) focus();
   });
   const error = h("div", { id: errorId, class: "field-error amount-field__error", role: "alert", hidden: true });
 
@@ -71,27 +49,17 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
     fit();
     onInput?.();
   });
-  cover.addEventListener("input", () => {
-    input.value = String(cover.value ?? "").replaceAll(HIDDEN_BALANCE[0], "");
-    cover.value = HIDDEN_BALANCE;
-    setMasked(false);
-    fit();
-    input.focus();
-    onInput?.();
-  });
 
   // What the error line says now, its question's choices too: an alert reads out again on every change.
   let said = "";
   const mark = (text) => {
     el.classList.toggle("is-invalid", Boolean(text));
-    for (const field of [input, cover]) {
-      if (text) {
-        field.setAttribute("aria-invalid", "true");
-        field.setAttribute("aria-describedby", errorId);
-      } else {
-        field.removeAttribute("aria-invalid");
-        field.removeAttribute("aria-describedby");
-      }
+    if (text) {
+      input.setAttribute("aria-invalid", "true");
+      input.setAttribute("aria-describedby", errorId);
+    } else {
+      input.removeAttribute("aria-invalid");
+      input.removeAttribute("aria-describedby");
     }
   };
   const setError = (text) => {
@@ -103,9 +71,8 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
     mark(text);
   };
 
-  const setValue = (next, { masked: maskIt = false } = {}) => {
+  const setValue = (next) => {
     input.value = String(next ?? "");
-    setMasked(maskIt && Boolean(input.value));
     fit();
   };
 
@@ -135,7 +102,5 @@ export function amountField({ label, value = "", unit = "DUSK", disabled = false
     mark(asked.question);
   };
 
-  setMasked(masked && Boolean(input.value));
-
-  return { el, input, error, setError, setProblem, setValue, isMasked, focus };
+  return { el, input, error, setError, setProblem, setValue, focus };
 }

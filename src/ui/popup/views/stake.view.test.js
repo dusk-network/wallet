@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The fake DOM goes before the views: it defines HTMLElement for the gas editor.
-import { accessibleName, installFakeDom, isShown, pastClickGuard, settle, typeInto, visibleText } from "../../testing/fakeDom.js";
+import { accessibleName, installFakeDom, isShown, pastClickGuard, screenReaderText, settle, typeInto, visibleText } from "../../testing/fakeDom.js";
 import { networks } from "@dusk-network/networks";
 import { REWARDS_COUNTED } from "@dusk-network/app-core/export";
 import { entryOf } from "../../../shared/fixtures/rows.js";
@@ -776,24 +776,23 @@ describe("staking reviews", () => {
   });
 
   // Lena's: the unstake's Review said "Total up to 0.01 DUSK" for the 0.1 DUSK coming back.
-  it("say what an unstake or a claim brings back, the fee apart and never a total of the fee alone, hidden as the balances are", async () => {
-    // The fee, and the row under it: what comes back, never the fee again as a total.
-    for (const [label, back] of [
-      ["Unstake", "2,000 DUSK"],
-      ["Claim rewards", "42 DUSK"],
-    ]) {
-      popup({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) }, named());
-      button(label).click();
-      await settle();
-      expect([gasFee(), gasTotal()]).toEqual([expect.stringMatching(exactly("0.05 DUSK")), expect.stringMatching(exactly(back))]);
+  it("say what an unstake or a claim brings back, the fee apart and never a total of the fee alone, with balances hidden too", async () => {
+    // The fee, and the row under it: what comes back, never the fee again as a total. With balances hidden the same:
+    // a Review shows what it moves, the head and its button too.
+    for (const overview of [named(), ov({ hideBalances: true })]) {
+      for (const [label, back, verb] of [
+        ["Unstake", "2,000 DUSK", "Unstake"],
+        ["Claim rewards", "42 DUSK", "Claim"],
+      ]) {
+        popup({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) }, overview);
+        button(label).click();
+        await settle();
+        expect([gasFee(), gasTotal()]).toEqual([expect.stringMatching(exactly("0.05 DUSK")), expect.stringMatching(exactly(back))]);
+        expect([visibleText(body.querySelector(".balance-amount")), visibleText(confirm())]).toEqual([back, `${verb} ${back}`]);
+      }
     }
-    // The stake and its rewards are balances: hidden with them; the fee isn't one.
-    popup({ route: "stake", staking: staking(owner({ relatedStakes: [related()] })) }, ov({ hideBalances: true }));
-    button("Unstake").click();
-    await settle();
-    expect([gasFee(), hiddenFigure(gasTotal())]).toEqual([expect.stringMatching(exactly("0.05 DUSK")), true]);
 
-    // From Sozu: what's typed comes back, shown as on every Review; what Max filled in, hidden.
+    // From Sozu, balances hidden: what's typed comes back, and what Max filled in, shown alike.
     const liquid = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu({ action: "withdraw", position: { poolBalanceLux: dusk(12), stDuskBalanceLux: dusk(4) } }) };
     const app = popup(liquid, ov({ hideBalances: true }));
     typeInto(field("Unstake amount"), "5");
@@ -803,9 +802,11 @@ describe("staking reviews", () => {
     liquid.route = "stake";
     app.draw();
     button("Max").click();
+    expect(field("Unstake amount").value).toBe("12");
     button("Review unstake").click();
     await settle();
-    expect([gasFee(), hiddenFigure(gasTotal())]).toEqual([expect.stringMatching(exactly("0.01 DUSK")), true]);
+    expect([gasFee(), gasTotal()]).toEqual([expect.stringMatching(exactly("0.01 DUSK")), expect.stringMatching(exactly("12 DUSK"))]);
+    expect(visibleText(confirm())).toBe("Unstake 12 DUSK");
   });
 
   it("name another owner", async () => {
@@ -942,6 +943,47 @@ describe("a stake with Sozu in figures", () => {
       const counted = visibleText(body.querySelector(".stake-years-counted"));
       expect(counted).toMatch(/taken out by unstaking is part of grown while held/i);
       expect(counted).toBe(REWARDS_COUNTED);
+    });
+
+    // With Hide balances, what's held with Sozu is a balance looked at, as Staking's are: hidden on Liquid staking's
+    // card and in its history under Details, deposits open or paused, with no tooltip to give it away, nor a loss's
+    // sign. The forms under it show theirs, as they're used.
+    it("hides what's held on Liquid staking's card and in its history with Hide balances, a loss's sign too, deposits open or paused, while its forms show theirs", async () => {
+      const staked = "5c".repeat(32);
+      archive.query = archiveWith({ 4800021: [{ origin: staked, events: [poolEvent("deposit", [100_000_000_000n, 250_000_000n, 2_000_000_000_000n, 1_000_000_000_000n])] }] });
+      const history = [move(staked, "sozu_stake", "100000000000", 4_800_021, Date.UTC(2026, 2, 1, 12))];
+      // 100 DUSK put in for 49.875 stDUSK, worth 90 DUSK now: a loss.
+      const liquid = (overview, maintenance) => {
+        const st = holding(49_875_000_000n, 90_000_000_000n);
+        st.status = { ...st.status, features: { maintenance, synchronization: false } };
+        return { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: st, activity: activityOf(overview, history) };
+      };
+      // All a part says: its text, its tooltips and its labels.
+      const said = (el) => [el.textContent, ...[el, ...el.querySelectorAll("*")].flatMap((n) => [n.getAttribute("title"), n.getAttribute("aria-label")])].filter(Boolean).join(" ");
+      const earned = () => body.querySelectorAll(".sozu-history .kv").find((kv) => visibleText(kv.querySelector(".kv-label")) === "Rewards so far, before deposit fees")?.querySelector(".kv-value");
+
+      // Shown, the position's a loss, its sign before it.
+      popup(liquid(ov(), false), ov());
+      await vi.waitFor(() => expect(visibleText(earned())).toMatch(/^−\d/));
+
+      const overview = ov({ hideBalances: true });
+      for (const maintenance of [false, true]) {
+        const state = liquid(overview, maintenance);
+        const app = popup(state, overview);
+        await vi.waitFor(() => expect(hiddenFigure(rowValue("Rewards so far, before deposit fees"))).toBe(true));
+        for (const label of ["Worth now", "stDUSK", "Put in", "Rewards so far, before deposit fees"]) expect(hiddenFigure(rowValue(label)), `${label}, paused: ${maintenance}`).toBe(true);
+        expect([said(body.querySelector(".sozu-position")), said(body.querySelector(".sozu-history"))]).toEqual([expect.not.stringMatching(/\d/), expect.not.stringMatching(/\d/)]);
+        expect([visibleText(earned()), screenReaderText(earned())]).toEqual([expect.not.stringMatching(/[−-]/), expect.not.stringMatching(/[−-]/)]);
+        // The stake's form: what's available, as Send says it.
+        expect(visibleText(body.querySelector(".amount-avail > span"))).toMatch(exactly("1,482.9383 DUSK"));
+        // The unstake's: what's staked with Sozu, which Max fills in.
+        state.sozu.action = "withdraw";
+        app.draw();
+        expect(visibleText(body.querySelector(".amount-avail > span"))).toMatch(exactly("90 DUSK"));
+        button("Max").click();
+        expect(field("Unstake amount").value).toBe("90");
+        expect(said(body.querySelector(".sozu-position"))).not.toMatch(/\d/);
+      }
     });
 
     // Lena's: what unstaking took out is a figure for a tax return, its deposit fee counted as part of the cost; a stake
@@ -1503,51 +1545,55 @@ describe("liquid staking", () => {
 });
 
 describe("what Max fills in, with Hide balances", () => {
-  const shownField = () => [...body.querySelectorAll(".amount-field input")].find((input) => !input.hidden);
+  // Every Max note shown on the form: what Max kept.
+  const maxNotes = () => body.querySelectorAll(".amount-note").filter(isShown).map(visibleText).filter((text) => /^Max keeps/.test(text));
 
-  it("hides a Sozu stake's amount and what it gets, on the form and on Review, and sends it all the same", async () => {
-    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
-    popup(state, ov({ hideBalances: true }));
-    button("Max").click();
-    expect(shownField().value).toBe("••••");
-    expect(hiddenFigure(visibleText(body.querySelector(".stake-estimate")))).toBe(true);
-
-    button("Review stake").click();
-    await settle();
-    expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
-    expect([hiddenFigure(reviewValue(/stDUSK/)), hiddenFigure(gasTotal())]).toEqual([true, true]);
-    expect(BigInt(state.sozuDraft.fnArgsAmountLux) > 0n).toBe(true);
+  it("shows a Sozu stake's amount, what it gets and what Max kept, on the form and on Review, as with balances shown", async () => {
+    // What the form says once Max is pressed, and then its Review, with balances shown or hidden.
+    const said = async (overview) => {
+      const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
+      popup(state, overview);
+      button("Max").click();
+      const form = [field("Stake amount").value, ...[".amount-avail", ".sozu-terms", ".stake-estimate"].map((part) => visibleText(body.querySelector(part))), maxNotes()];
+      button("Review stake").click();
+      await settle();
+      const review = [visibleText(body.querySelector(".balance-amount")), reviewValue(/stDUSK/), rowValue("Deposit fee"), gasTotal(), visibleText(confirm())];
+      return { form, review, sends: state.sozuDraft.fnArgsAmountLux, page: body.textContent };
+    };
+    const shown = await said(ov());
+    const hidden = await said(ov({ hideBalances: true }));
+    expect(hidden).toEqual({ ...shown, page: hidden.page });
+    expect(hidden.page).not.toContain("••••");
+    // Each a figure: all of the public balance but both fees, and what Max kept of it.
+    expect(shown.form[0]).toBe("1482.9233");
+    expect(shown.form[1]).toMatch(exactly("1,482.9383 DUSK"));
+    expect(shown.form[4]).toEqual([expect.stringMatching(exactly("0.015 DUSK"))]);
+    expect(shown.review[0]).toBe("1,482.9233 DUSK");
+    expect(shown.sends).toBe("1482923300000");
   });
 
-  it("hides a native stake's amount from Max on Review, and sends it all the same", async () => {
+  it("shows a native stake's amount from Max on the form and on Review, through Back and Review again", async () => {
     const state = { route: "stake", staking: staking(owner({ publicBalance: { value: dusk(2000) } }), { screen: "native" }) };
     popup(state, ov({ hideBalances: true }));
+    expect(visibleText(body.querySelector(".amount-avail"))).toMatch(exactly("2,000 DUSK"));
     button("Max").click();
-    expect(shownField().value).toBe("••••");
+    expect(field("Stake amount").value).toBe("1999.9");
+    expect(maxNotes()).toEqual([expect.stringMatching(exactly("0.1 DUSK"))]);
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
-    expect(hiddenFigure(gasTotal())).toBe(true);
-    expect(BigInt(state.stakeDraft.amountLux) > 0n).toBe(true);
+    expect(visibleText(body.querySelector(".balance-amount"))).toBe("1,999.9 DUSK");
+    expect(gasTotal()).toMatch(exactly("1,999.95 DUSK"));
+    expect(visibleText(confirm())).toBe("Stake 1,999.9 DUSK");
+    expect(state.stakeDraft.amountLux).toBe("1999900000000");
 
     // And through Back to the form and Review again.
     body.querySelector(".subnav-back").click();
     await settle();
-    expect(shownField().value).toBe("••••");
+    expect(field("Stake amount").value).toBe("1999.9");
     button("Review stake").click();
     await settle();
-    expect(visibleText(body.querySelector(".balance-amount"))).toBe("•••• DUSK");
-  });
-
-  it("clears the amount when the dots are deleted, and Review stays off", () => {
-    const state = { route: "stake", staking: staking(owner(), { screen: "liquid" }), sozu: sozu() };
-    popup(state, ov({ hideBalances: true }));
-    button("Max").click();
-    expect(button("Review stake").disabled).toBe(false);
-    typeInto(shownField(), "•••");
-    expect(shownField().value).toBe("");
-    expect(button("Review stake").disabled).toBe(true);
-    expect(state.sozu.depositAmountDusk).toBe("");
+    expect(visibleText(body.querySelector(".balance-amount"))).toBe("1,999.9 DUSK");
+    expect(body.textContent).not.toContain("••••");
   });
 });
 

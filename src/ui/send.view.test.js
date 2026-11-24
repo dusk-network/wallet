@@ -533,45 +533,32 @@ describe("a Review while offline", () => {
 });
 
 describe("what Max fills in, with Hide balances", () => {
-  const shown = () => [...dom.document.body.querySelectorAll(".amount-field input")].find((input) => !input.hidden);
-
-  it("shows as dots on the form and on Review, and is what gets sent", async () => {
+  it("shows on the form and on Review, with the fee and the total, and is what gets sent", async () => {
     const state = newState();
     const ov = overview({ hideBalances: true });
     const form = mount(state, ov);
     typeInto(form.to, ALICE.account);
     dom.document.body.querySelector(".amount-avail .mini-btn").click();
-    expect(shown().value).toBe("••••");
-    expect(form.amount.value).not.toBe("");
+    // In the one field, as typed: a send being made shows its figures.
+    expect(dom.document.body.querySelectorAll(".amount-field input")).toHaveLength(1);
+    expect([form.amount.value, isShown(form.amount)]).toEqual(["177.9840", true]);
 
     form.review.click();
     await settle();
     expect(state.route).toBe("confirm");
-    expect(BigInt(state.draft.amountLux) > 0n).toBe(true);
+    expect(state.draft.amountLux).toBe("177984000000");
     mount(state, ov);
-    expect(visibleText(dom.document.body.querySelector(".balance-amount"))).toBe("•••• DUSK");
-    expect(feeAndTotal()[1]).toEqual(saying("•••• DUSK"));
-  });
+    expect(visibleText(dom.document.body.querySelector(".balance-amount"))).toBe("177.984 DUSK");
+    expect(feeAndTotal()).toEqual([saying("0.0025 DUSK"), saying("177.9865 DUSK")]);
+    expect(visibleText(confirmButton())).toBe("Send 177.984 DUSK");
+    expect(dom.document.body.textContent).not.toContain("••••");
 
-  it("shows what's typed over it", () => {
-    const state = newState();
-    const form = mount(state, overview({ hideBalances: true }));
-    typeInto(form.to, ALICE.account);
-    dom.document.body.querySelector(".amount-avail .mini-btn").click();
-    typeInto(shown(), "1");
-    expect(shown().value).toBe("1");
-    expect(state.draft.amountMasked).toBe(false);
+    // Back on the form, it's there to change, as typed.
+    state.route = "send";
+    const back = mount(state, ov);
+    expect(back.amount.value).toBe("177.9840");
+    typeInto(back.amount, "1");
     expect(state.draft.amountDusk).toBe("1");
-  });
-
-  it("clears the amount when the dots are deleted", () => {
-    const state = newState();
-    const form = mount(state, overview({ hideBalances: true }));
-    typeInto(form.to, ALICE.account);
-    dom.document.body.querySelector(".amount-avail .mini-btn").click();
-    typeInto(shown(), "•••");
-    expect(shown().value).toBe("");
-    expect(state.draft.amountDusk).toBe("");
   });
 });
 
@@ -941,14 +928,17 @@ describe("send's amount", () => {
     expect(feeAndTotal()).toEqual([saying("0.0075 DUSK"), saying("177.9865 DUSK")]);
   });
 
-  it("hides what's available with Hide balances, while Max still fills in the real amount", () => {
+  it("says what's available with Hide balances too, public and shielded, and how much is short", () => {
     const form = mount(newState(), overview({ hideBalances: true }));
-    typeInto(form.to, ALICE.account);
-    expect(form.balanceLine()).toEqual(saying("•••• DUSK"));
-    // The fee isn't a balance.
-    expect(form.feeNote()).toEqual(saying("0.0025 DUSK"));
-    dom.document.body.querySelector(".amount-avail button").click();
-    expect(form.amount.value).toBe("177.9840");
+    typeInto(form.to, "alice.dusk");
+    expect([form.balanceLine(), form.feeNote()]).toEqual([saying("177.984 DUSK"), saying("0.0025 DUSK")]);
+    form.radios()[1].click();
+    expect([form.balanceLine(), form.feeNote()]).toEqual([saying("24.95 DUSK"), saying("0.05 DUSK")]);
+    form.radios()[0].click();
+    typeInto(form.amount, "177.99");
+    expect(form.amountError()).toBe(shortfallText({ missingLux: 6_000_000n }));
+    expect(form.amountError()).toEqual(saying("0.006 DUSK"));
+    expect(dom.document.body.textContent).not.toContain("••••");
   });
 });
 

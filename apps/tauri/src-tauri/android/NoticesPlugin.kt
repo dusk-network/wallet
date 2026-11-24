@@ -3,8 +3,8 @@
 // when it arrives, a payment's notice once they may show, the sends to look
 // for once the app leaves the screen (ArrivalJob.kt), forgotten with their
 // wallet, the accounts to look at for money coming in (`incoming`), a payment
-// waiting for the network while the app's away (`waiting`), and the
-// transaction a notice's tap opened the app on.
+// waiting for the network while the app's away (`waiting`), whether balances
+// are hidden (`hidden`), and the transaction a notice's tap opened the app on.
 //
 // Copied into the generated Android project by build.rs, as the icon is, and
 // registered by src/android.rs as the plugin "dusk-notices". Each command
@@ -42,9 +42,17 @@ class WatchArgs {
   var title: String = ""
   var failTitle: String = ""
   var body: String = ""
+  // The body without the amount, posted while balances are hidden (`hidden`).
+  var hiddenBody: String = ""
   var publicBody: String = ""
   var wallet: String = ""
   var token: String = ""
+}
+
+@InvokeArg
+class HiddenArgs {
+  // Whether balances are hidden in the wallet, as it says now.
+  var hidden: Boolean = false
 }
 
 @InvokeArg
@@ -170,7 +178,15 @@ class NoticesPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun watch(invoke: Invoke) {
     val args = invoke.parseArgs(WatchArgs::class.java)
-    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body, args.wallet, args.token, args.publicBody)
+    Arrivals.watch(activity.applicationContext, args.hash, args.nodeUrl, args.title, args.failTitle, args.body, args.wallet, args.token, args.publicBody, args.hiddenBody)
+    answer(invoke, Arrivals.allowed(activity))
+  }
+
+  /** Whether balances are hidden: a send's notice is worded as this says when it's posted. Kept whatever Android allows. */
+  @Command
+  fun hidden(invoke: Invoke) {
+    val args = invoke.parseArgs(HiddenArgs::class.java)
+    Arrivals.hide(activity.applicationContext, args.hidden)
     answer(invoke, Arrivals.allowed(activity))
   }
 

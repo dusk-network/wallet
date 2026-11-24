@@ -1,7 +1,6 @@
 import { UI_DISPLAY_DECIMALS, formatDusk, formatDuskExact, formatFee, groupThousands, safeBigInt } from "../../shared/amount.js";
 import { h, setChildren } from "../lib/dom.js";
 import { GAS_PRICE_BUSY } from "../../shared/txDefaults.js";
-import { balance } from "./Balance.js";
 import { fieldLabel, integerInput } from "./FormControls.js";
 
 // The one fee editor, on every Review and in the approval windows: the
@@ -50,7 +49,6 @@ export class DuskGasEditor extends HTMLElement {
   #initialized = false;
 
   #amountLux = 0n;
-  #hideTotal = false;
   #comesBack = false;
   #extraLux = [];
   #maxDecimals = UI_DISPLAY_DECIMALS;
@@ -85,12 +83,6 @@ export class DuskGasEditor extends HTMLElement {
     this.#initialized = true;
     this.style.display = "block";
     this.render();
-  }
-
-  // An amount Max filled in stays hidden with the balances, and the total
-  // gives it away; so does what you receive, for an amount that's a balance.
-  set hideTotal(v) {
-    this.#hideTotal = Boolean(v);
   }
 
   /**
@@ -359,9 +351,7 @@ export class DuskGasEditor extends HTMLElement {
     this.#totalRow.hidden = this.#comesBack && this.#amountLux <= 0n;
     const total = (value) => {
       this.#totalValue.title = "";
-      if (this.#comesBack) setChildren(this.#totalValue, [h("span", {}, ["about ", balance(this.#hideTotal, formatDusk(this.#amountLux.toString())), " DUSK"])]);
-      else if (typeof value === "string") this.#totalValue.textContent = value;
-      else setChildren(this.#totalValue, [value]);
+      this.#totalValue.textContent = this.#comesBack ? `about ${formatDusk(this.#amountLux.toString())} DUSK` : value;
     };
 
     // Gas that won't do has no fee or total to show.
@@ -386,7 +376,7 @@ export class DuskGasEditor extends HTMLElement {
     for (const x of this.#extraLux) totalLux += x;
 
     // A maximum too, so it rounds up as the fee does.
-    total(this.#hideTotal ? h("span", {}, ["up to ", balance(true, ""), " DUSK"]) : `up to ${formatFee(totalLux, { max: true })} DUSK`);
+    total(`up to ${formatFee(totalLux, { max: true })} DUSK`);
   }
 
   /**
