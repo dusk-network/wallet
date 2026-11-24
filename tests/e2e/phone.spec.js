@@ -296,6 +296,70 @@ test("keeps Copy request above the keyboard with the request's Memo", async ({ p
   expect(await memo.evaluate((node) => node.getBoundingClientRect().top)).toBeGreaterThanOrEqual(0);
 });
 
+// The strip a phone's keyboard leaves when the browser says nothing of it: the
+// top half upright, the top fifth sideways (keyboard.js).
+const keyboardStrip = (page) =>
+  page.evaluate(() => document.documentElement.clientHeight * (String(screen.orientation?.type ?? "").startsWith("landscape") ? 0.2 : 0.5));
+const boxOf = (locator) => locator.evaluate((node) => node.getBoundingClientRect().toJSON());
+const twoFrames = (page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+
+// An amount over the balance, or one that reads two ways, typed on a phone turned sideways: what's said of it
+// went above the keyboard with the button after it, and the amount being typed went out of view above them.
+test("keeps the amount being typed in above the keyboard, with what's said of it, on a phone turned sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 915, height: 412 });
+  const screens = [
+    { route: "send", extra: { draft: { to: TO, privacy: "public", amountDusk: "", memo: "" } }, amount: () => page.getByLabel("Amount", { exact: true }), typed: ["999999", "1,234"] },
+    { route: "receive", extra: { receive: { tab: "public", requestOpen: true, amountDusk: "", memo: "", context: null } }, amount: () => page.locator(".receive-request").getByLabel("Amount"), typed: ["1,234"] },
+  ];
+  for (const { route, extra, amount: field, typed } of screens) {
+    await popupOn(page, route, extra);
+    const amount = field();
+    for (const text of typed) {
+      await amount.focus();
+      await amount.fill("");
+      await page.keyboard.type(text);
+      // What's said of the amount, tied to it, then the frames the page moves in.
+      await expect.poll(() => amount.getAttribute("aria-describedby"), { message: `${route} ${text}` }).toBeTruthy();
+      const said = page.locator(`#${await amount.getAttribute("aria-describedby")}`);
+      await expect(said).toBeVisible();
+      await twoFrames(page);
+      const strip = await keyboardStrip(page);
+      // A question asked of the amount, a button for each reading: the buttons above the keyboard, as what must be
+      // answered; else the amount being typed.
+      const choices = said.getByRole("button");
+      const shown = (await choices.count()) ? await choices.all() : [amount];
+      if (text === "1,234") expect(shown.length, `${route} ${text}`).toBe(2);
+      for (const el of shown) {
+        const box = await boxOf(el);
+        expect(box.top, `${route} ${text}`).toBeGreaterThanOrEqual(0);
+        expect(box.bottom, `${route} ${text}`).toBeLessThanOrEqual(strip);
+      }
+    }
+  }
+});
+
+// The same payment, waiting to go out, said as its memo is typed: Review and as much of what's said as fits above
+// the keyboard, a phone turned sideways too. A warning takes the page on to its button; what's said of the field
+// itself stays with the field.
+test("keeps Review above the keyboard with a warning said as the memo is typed, on a phone turned sideways", async ({ page }) => {
+  await page.setViewportSize({ width: 915, height: 412 });
+  const waiting = { sendId: "s1", profileIndex: 0, waiting: true, to: TO, lux: "10000000", feeLux: "2500000", memo: "Invoice 2026-115", privacy: "public", at: Date.now() - 60_000 };
+  await popupOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "0.01", memo: "" } }, { waitingSends: [waiting] });
+  const memo = page.getByLabel("Memo");
+  await memo.focus();
+  await page.keyboard.type("Invoice 2026-115");
+  const warning = page.getByRole("alert");
+  await expect(warning).toBeVisible();
+  await twoFrames(page);
+  const strip = await keyboardStrip(page);
+  const review = await boxOf(page.getByRole("button", { name: "Review" }));
+  expect(review.top).toBeGreaterThanOrEqual(0);
+  expect(review.bottom).toBeLessThanOrEqual(strip);
+  const said = await boxOf(warning);
+  expect(said.bottom).toBeGreaterThan(0);
+  expect(said.top).toBeLessThan(strip);
+});
+
 // Sofía's and Lena's: in landscape, Review's Confirm bar covered the address, fee and total until a scroll.
 test("puts Review's Confirm after its details on a phone turned sideways, over none of them", async ({ page }) => {
   await page.setViewportSize({ width: 915, height: 412 });

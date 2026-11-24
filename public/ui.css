@@ -247,6 +247,13 @@ body.page--full .panel-content #app {
   max-width: 760px;
 }
 
+/* As a column, the content runs between the header's edges. */
+@media (max-width: 860px) {
+  body.page--full .panel-content #app {
+    max-width: none;
+  }
+}
+
 @media (min-width: 980px) {
   body.page--full .panel-content #app {
     max-width: 820px;
@@ -348,8 +355,26 @@ body[data-runtime="tauri"].page--full .panel {
   align-items: center;
   justify-content: space-between;
   gap: 6px;
-  padding: 12px 10px 12px 14px;
+  /* The logo and the last button's icon on the content's edges: the gutter,
+     less each one's inset in its box (the popup's 30 px logo box and 32 px
+     buttons). */
+  padding: 12px calc(var(--panel-padding) - 8px) 12px calc(var(--panel-padding) - 4px);
   background: var(--background);
+}
+
+/* The full view and the app as a column (32 px logo box, 34 px buttons), on a
+   phone with the popup's 16 px gutter. */
+@media (max-width: 860px) {
+  body.page--full .panel-header {
+    padding-left: calc(var(--panel-padding) - 5px);
+    padding-right: calc(var(--panel-padding) - 9px);
+  }
+}
+
+@media (max-width: 520px) {
+  body.page--full {
+    --panel-padding: 16px;
+  }
 }
 
 /* Header actions (account chip + expand/options). The brand and its network
@@ -576,7 +601,9 @@ code {
   width: 100%;
 }
 
-.btnrow--grid > button:nth-child(3),
+/* A third button that's the last takes the row; four make two rows of two
+   (the app's Receive). */
+.btnrow--grid > button:nth-child(3):last-child,
 .btnrow--grid > button:only-child {
   grid-column: 1 / -1;
 }
@@ -1644,11 +1671,17 @@ body.page--popup .site-bar-action {
     font-size: 15px;
   }
 
+  /* The pill as wide as the sidebar: the dot beside the network's name, the
+     chevron at the end. */
   body.page--full .brand .network-pill {
     grid-column: 1 / -1;
     width: 100%;
-    justify-content: space-between;
+    justify-content: flex-start;
     margin-top: 10px;
+  }
+
+  body.page--full .brand .network-pill__chev {
+    margin-left: auto;
   }
 
   /* In the sidebar, the words sit right under the network's pill, with the
@@ -1767,10 +1800,14 @@ body.page--popup .site-bar-action {
     gap: 10px;
   }
 
+  /* Receive and Send one height and type size: Receive as tall as the
+     primary button's own 46 px, a finger's, which the app turned sideways is
+     tapped with. */
   body.page--full .dashboard-top-action {
     width: auto;
     min-width: 108px;
-    height: 38px;
+    min-height: 46px;
+    font-size: 14.5px;
   }
 
   body.page--full .dashboard-actions {
@@ -2303,6 +2340,9 @@ button.balance-refresh:hover {
 @supports (bottom: env(safe-area-inset-bottom)) {
   .toast-region {
     bottom: max(12px, env(safe-area-inset-bottom));
+    /* A phone on its side has its cutout and navigation bar at the sides. */
+    left: max(12px, env(safe-area-inset-left));
+    right: max(12px, env(safe-area-inset-right));
   }
 }
 
@@ -2539,7 +2579,8 @@ button.network-pill {
   align-items: center;
   gap: 6px;
 
-  height: 30px;
+  /* As tall as the profile's chip beside it. */
+  height: 34px;
   padding: 0 9px 0 11px;
   border-radius: var(--radius-pill);
 
@@ -2645,6 +2686,18 @@ button.network-pill.is-disabled .network-pill__chev {
 
 .network-word[hidden] {
   display: none;
+}
+
+/* Under the top bar, the words start on the content's edge with the logo,
+   not at the header's padding, which leaves the logo's inset to its box. */
+body.page--popup .network-word {
+  padding-left: 4px;
+}
+
+@media (max-width: 860px) {
+  body.page--full .network-word {
+    padding-left: 5px;
+  }
 }
 
 /* While it shows, the brand and the buttons keep the top bar's line, and the
@@ -2818,9 +2871,12 @@ button.net-menu-item--active {
   }
 }
 
-/* The switcher scrolls when its wallets don't fit the window */
+/* The switcher scrolls when its wallets don't fit the window. It's as wide
+   as it can be from the start: placed by its width as it opens, it grew as
+   a .dusk name came in, and ran off the window's edge. */
 .acct-menu {
-  max-height: calc(100vh - 16px);
+  width: min(280px, calc(100vw - 16px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  max-height: calc(100vh - 16px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
   overflow-y: auto;
 }
 
@@ -2991,11 +3047,6 @@ body.page--popup .header-actions {
 body.page--popup .account-chip {
   height: 34px;
   margin-right: 2px;
-}
-
-/* Two lines, the wallet's under the profile's, take a few pixels more */
-body.page--popup .account-chip.account-chip--wallet {
-  height: 38px;
 }
 
 /* Round icon buttons in the popup's header */
@@ -3355,6 +3406,16 @@ body.page--popup .brand-mark {
 .stake-pair > button {
   min-height: 38px;
   padding: 8px 12px;
+}
+
+/* Unstake from Sozu, as far from the figures over it as the pair is, and
+   under the pair as far as the pair's two are apart. */
+.stake-sum > .btn-outline {
+  margin-top: 14px;
+}
+
+.stake-sum > .stake-pair + .btn-outline {
+  margin-top: 8px;
 }
 
 .stake-cap {
@@ -3786,6 +3847,10 @@ body[data-runtime="tauri"] {
    clock, whose icons the app makes light. */
 body[data-runtime="tauri"] .panel {
   padding-top: max(env(safe-area-inset-top, 0px), var(--dusk-safe-top-min));
+  /* On its side, the phone's cutout and navigation bar are at the sides:
+     the wallet starts and ends inside them. */
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
 }
 
 body[data-runtime="tauri"] .panel-header {
@@ -3794,7 +3859,7 @@ body[data-runtime="tauri"] .panel-header {
 
 @media (max-width: 420px) {
   body[data-runtime="tauri"] .brand-text { display: none; }
-  body[data-runtime="tauri"] .panel-header { padding-left: 12px; padding-right: 12px; gap: 10px; }
+  body[data-runtime="tauri"] .panel-header { gap: 10px; }
 }
 
 @media (max-width: 600px) {
@@ -3835,6 +3900,31 @@ body[data-runtime="tauri"].page--full .panel {
 @media (max-width: 420px) {
   body[data-runtime="tauri"] .panel-content {
     padding-bottom: calc(var(--panel-padding) + 96px) !important;
+  }
+}
+
+/* Held upright, a Review's bar is the bottom of the app's screen: it takes
+   the room under the page, where that room left the bar floating over the
+   details, and nothing scrolls under it. Under Confirm, the screen's own
+   inset; on a touch screen at least the app's floor for a phone's navigation
+   bar, which the app is drawn under (edge to edge) and a WebView may not
+   report. It's taller here, and what gets the focus isn't left under it. */
+@media (max-width: 600px) and (orientation: portrait) {
+  body[data-runtime="tauri"] .panel-content:has(.review-actions) {
+    padding-bottom: 0 !important;
+    scroll-padding-bottom: 160px;
+  }
+
+  body[data-runtime="tauri"] .review-actions {
+    bottom: 0;
+    margin-bottom: 0;
+    padding-bottom: calc(var(--panel-padding) + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+@media (max-width: 600px) and (orientation: portrait) and (pointer: coarse) {
+  body[data-runtime="tauri"] .review-actions {
+    padding-bottom: calc(var(--panel-padding) + max(env(safe-area-inset-bottom, 0px), var(--dusk-safe-bottom-min)));
   }
 }
 

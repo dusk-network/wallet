@@ -6,6 +6,26 @@ import { copyButton } from "./CopyButton.js";
 import { shortAddressEl } from "./ShortAddress.js";
 import { menuKeys } from "./MenuKeys.js";
 
+// The window's safe area as CSS reads it: where a phone's cutout or its
+// navigation bar sits, at a side when the phone's turned. None where it can't
+// be read.
+function safeArea() {
+  const none = { top: 0, right: 0, bottom: 0, left: 0 };
+  try {
+    const probe = document.createElement("div");
+    probe.style.cssText =
+      "position:fixed;visibility:hidden;pointer-events:none;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)";
+    document.body.appendChild(probe);
+    const style = globalThis.getComputedStyle?.(probe);
+    const px = (value) => Number.parseFloat(value) || 0;
+    const insets = style ? { top: px(style.paddingTop), right: px(style.paddingRight), bottom: px(style.paddingBottom), left: px(style.paddingLeft) } : none;
+    probe.remove();
+    return insets;
+  } catch {
+    return none;
+  }
+}
+
 /**
  * Small controller that renders the profile selection menu under an anchor.
  * Uses the same base classes as the network menu so ui.css styling applies.
@@ -199,16 +219,18 @@ export function createAccountMenuController({
     document.body.appendChild(menu);
     menuEl = menu;
 
-    // Position near the anchor while keeping the menu inside the viewport.
+    // Position near the anchor while keeping the menu inside the viewport,
+    // and inside its safe area: a phone's cutout or navigation bar.
     const r = anchorEl.getBoundingClientRect();
+    const safe = safeArea();
     const menuWidth = Math.max(260, menu.offsetWidth || 0);
     const menuHeight = menu.offsetHeight || 0;
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - menuWidth - 8));
+    const left = Math.max(8 + safe.left, Math.min(r.left, window.innerWidth - safe.right - menuWidth - 8));
     const below = r.bottom + 8;
     const above = r.top - menuHeight - 8;
-    const top = below + menuHeight <= window.innerHeight - 8
+    const top = below + menuHeight <= window.innerHeight - safe.bottom - 8
       ? below
-      : Math.max(8, above);
+      : Math.max(8 + safe.top, above);
     menu.style.left = `${left}px`;
     menu.style.top = `${top}px`;
 

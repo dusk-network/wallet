@@ -57,6 +57,8 @@ export function requestCaption({ lux, memo, to, name = "", network = "" }) {
 }
 
 let nameNotes = 0;
+// The request form's errors, each with an id of its own however often Receive is drawn.
+let requestErrors = 0;
 
 export function receiveView(ov, { state, actions } = {}) {
   const accounts = Array.isArray(ov?.accounts) ? ov.accounts : [];
@@ -172,10 +174,10 @@ export function receiveView(ov, { state, actions } = {}) {
     value: typeof r.memo === "string" ? r.memo : "",
     onEnter: () => copyRequestBtn.click(),
   });
-  const amountErr = h("div", { class: "field-error receive-amount-error", role: "alert", hidden: true });
+  const amountErr = h("div", { id: `receive-amount-error-${++requestErrors}`, class: "field-error receive-amount-error", role: "alert", hidden: true });
   // What it asks comes to in your currency, on mainnet: the link stays in DUSK.
   const amountInCurrency = inCurrencyLine(ov, "receive-in-currency");
-  const memoErr = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
+  const memoErr = h("div", { id: `receive-memo-error-${requestErrors}`, class: "field-error memo-error", role: "alert", hidden: true });
   // A memo with what changes how it reads, or digits that may not read as they
   // look: as the payer will see it, its codes and what to check, under the field.
   const memoShown = h("div", { class: "receive-memo-shown", role: "status", hidden: true });
@@ -538,6 +540,12 @@ export function receiveView(ov, { state, actions } = {}) {
       sayUnder(amountErr, requestDetails.open ? made.problems.amount ?? "" : "");
     }
     sayUnder(memoErr, requestDetails.open ? made.problems.memo ?? "" : "");
+    // Each error is its field's own while it shows: read with it, and kept
+    // above a phone's keyboard with it, the field in view (keyboard.js).
+    for (const [input, error] of [[amountInput, amountErr], [memoInput, memoErr]]) {
+      if (error.hidden) input.removeAttribute("aria-describedby");
+      else input.setAttribute("aria-describedby", error.id);
+    }
     sayUnder(linkErr, requestDetails.open && curRecipient ? made.problems.to ?? "" : "");
 
     const memoVal = String(memoInput.value ?? "").trim();
