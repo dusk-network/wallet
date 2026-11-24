@@ -129,7 +129,13 @@ function parseTokenAmountHuman(raw, decimals) {
 // public account), on one network, for one profile.
 export const assetsOwner = (ov) => [String(ov?.accounts?.[0] ?? ""), String(ov?.nodeUrl ?? "").trim(), Number(ov?.selectedAccountIndex ?? 0) || 0].join("|");
 
-function ensureAssetsLoaded(ov, { state, actions } = {}) {
+/**
+ * The profile's watched tokens and NFTs, read once a while (state.assets):
+ * what's held now, its read asked for where it's due.
+ * @param {object} ov
+ * @param {{ state: object, actions?: object }} ctx
+ */
+export function ensureAssetsLoaded(ov, { state, actions } = {}) {
   // Another wallet, network or profile starts them over: nothing of the last
   // one shows, and what was being read for it lands nowhere.
   const owner = assetsOwner(ov);
@@ -211,7 +217,9 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
   // again while it's on its way, unless the balance was marked stale since (a
   // send of the token sets its time to 0). Then it's read again, and only the
   // newest read's answer counts, so an older one never puts back a balance
-  // from before the send.
+  // from before the send, whether or not the new read has gone yet. A read
+  // that failed counts as one: asked again once a read is as old, not at each
+  // draw.
   const reading = (st.balancesReading ??= new Map());
 
   for (const t of tokens) {
@@ -219,7 +227,7 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
     if (!cid) continue;
     const last = Number(st.balancesAt?.[cid] ?? 0) || 0;
     if (reading.has(cid) && last !== 0) continue;
-    if (st.balances?.[cid] !== undefined && now - last < STALE_MS) continue;
+    if (last !== 0 && now - last < STALE_MS) continue;
 
     // Mark as "requested" to avoid spamming during rapid renders.
     st.balancesAt[cid] = now;
@@ -234,7 +242,8 @@ function ensureTokenBalancesLoaded(ov, { state, actions } = {}) {
         driver: t?.driver,
       })
       .then((resp) => {
-        if (state.assets !== st || reading.get(cid) !== read) return;
+        // Marked stale since it was asked (a send of the token): it counts for nothing.
+        if (state.assets !== st || reading.get(cid) !== read || !st.balancesAt[cid]) return;
         if (resp?.error) throw new Error(resp.error.message ?? "Failed to fetch token balance");
         const v = String(resp?.result ?? resp ?? "0");
         st.balances[cid] = v;

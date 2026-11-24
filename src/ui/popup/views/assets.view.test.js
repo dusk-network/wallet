@@ -78,7 +78,8 @@ describe("a read of the watched tokens that fails", () => {
 
   // The popup's asset screens as it draws them: Home's Tokens and NFTs, a token's page, an NFT's, Add token. Drawn
   // again whenever it asks, by the route; its answers coming a moment later, as the background's do. `answer.list`
-  // is the watched list a read gives, `answer.balance` a token balance's answer (a promise holds it).
+  // is the watched list a read gives (`answer.held`, a promise, holds the next one), `answer.balance` a token
+  // balance's answer (a promise holds it).
   async function homeTokens() {
     const { installFakeDom, settle, visibleText } = await import("../../testing/fakeDom.js");
     const { vi } = await import("vitest");
@@ -95,7 +96,7 @@ describe("a read of the watched tokens that fails", () => {
     const later = (value) => new Promise((resolve) => setTimeout(() => resolve(value)));
     const actions = {
       send: vi.fn((message) => {
-        if (message.type === "DUSK_UI_ASSETS_GET") return later(answer.fail ? { error: { message: "Watched tokens can't be read now." } } : { result: answer.list });
+        if (message.type === "DUSK_UI_ASSETS_GET") return answer.held ?? later(answer.fail ? { error: { message: "Watched tokens can't be read now." } } : { result: answer.list });
         if (message.type === "DUSK_UI_DRC20_GET_BALANCE") return answer.balance instanceof Promise ? answer.balance : later(answer.balance);
         return later({ ok: true });
       }),
@@ -241,6 +242,77 @@ describe("a read of the watched tokens that fails", () => {
     expect(page.text()).toMatch(exactly("123.45"));
   });
 
+  it("asks for a balance that couldn't be read once a read's pause is over, not at each draw", async () => {
+    const page = await homeTokens();
+    try {
+      page.answer.fail = false;
+      page.answer.balance = { error: { message: "The node didn't answer." } };
+      page.draw();
+      await page.settleAll();
+      expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(1);
+      // Drawn again and again, each draw after the last answer: still the one read.
+      for (let i = 0; i < 6; i++) {
+        page.draw();
+        await page.settleAll();
+      }
+      expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(1);
+      // As old as a read is let be: asked once more, and it's there.
+      page.vi.setSystemTime(Date.now() + 25_001);
+      page.answer.balance = { result: "12345" };
+      page.draw();
+      await page.settleAll();
+      expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(2);
+      expect(page.text()).toMatch(exactly("123.45"));
+    } finally {
+      page.vi.useRealTimers();
+    }
+  });
+
+  it("reads a balance again after a send, the watched list read again first, and lets the answer from before the send count for nothing", async () => {
+    const page = await homeTokens();
+    try {
+      page.answer.fail = false;
+      page.draw();
+      await page.settleAll();
+      expect(page.text()).toMatch(exactly("123.45"));
+      // Read again once it's due, its answer on its way as the token is sent: marked stale, as a send does, the
+      // watched list as old as a read in full by then, so it's read again first, its answer on its way too.
+      page.vi.setSystemTime(Date.now() + 25_001);
+      const before = Promise.withResolvers();
+      page.answer.balance = before.promise;
+      page.draw();
+      await page.settleAll();
+      expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(2);
+      page.vi.setSystemTime(Date.now() + 5_000);
+      const [cid] = Object.keys(page.state.assets.balancesAt);
+      page.state.assets.balancesAt[cid] = 0;
+      const list = Promise.withResolvers();
+      page.answer.held = list.promise;
+      page.draw();
+      await page.settleAll();
+      // The answer from before the send comes first, unlike what's shown: it counts for nothing, shown or kept.
+      before.resolve({ result: "9999" });
+      await page.settleAll();
+      page.draw();
+      await page.settleAll();
+      expect(page.text()).toMatch(exactly("123.45"));
+      expect(page.text()).not.toMatch(exactly("99.99"));
+      // Then the list: the balance is read again, and its answer shows.
+      page.answer.held = null;
+      page.answer.balance = { result: "2345" };
+      list.resolve({ result: TOKENS });
+      await page.settleAll();
+      page.draw();
+      await page.settleAll();
+      expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(3);
+      expect(page.text()).toMatch(exactly("23.45"));
+      expect(page.text()).not.toMatch(exactly("123.45"));
+      expect(page.text()).not.toMatch(exactly("99.99"));
+    } finally {
+      page.vi.useRealTimers();
+    }
+  });
+
   it("reads a balance again once a send marks it stale, even with a read on its way, and lets no older answer put back the balance from before", async () => {
     const page = await homeTokens();
     page.answer.fail = false;
@@ -269,6 +341,92 @@ describe("a read of the watched tokens that fails", () => {
     expect(page.text()).toMatch(exactly("23.45"));
     expect(page.text()).not.toMatch(exactly("123.45"));
     expect(page.asked("DUSK_UI_DRC20_GET_BALANCE")).toBe(2);
+  });
+});
+
+describe("a profile with no DUSK and no activity yet, on Home", () => {
+  const TOKEN = `0x${"cd".repeat(32)}`;
+  const NFT = `${"ef".repeat(32)}`;
+  // Nothing public or shielded, nothing staked, nothing sent or received: Home says how to get DUSK, unless the
+  // profile holds tokens or NFTs.
+  const ov = {
+    isUnlocked: true,
+    nodeUrl: "https://testnet.nodes.dusk.network",
+    accounts: ["wallet-a"],
+    selectedAccountIndex: 0,
+    balance: { value: "0" },
+    shieldedBalance: { value: "0", spendable: "0" },
+    staked: { lux: "0", native: "0", sozu: "0" },
+    txs: [],
+  };
+
+  // Home as the popup draws it, drawn again whenever it asks, each draw's words kept; the watched list's answer
+  // `answer` (an error or the list), as late as `answered` lets it come; a balance 123.45 TKN.
+  async function home(answer, answered = null) {
+    const { installFakeDom, settle, visibleText } = await import("../../testing/fakeDom.js");
+    const { vi } = await import("vitest");
+    const { document } = installFakeDom();
+    const { homeView } = await import("./home.js");
+    const state = { route: "home", addressBook: { loaded: true, items: [] } };
+    const later = (value) => new Promise((resolve) => setTimeout(() => resolve(value)));
+    const draws = [];
+    const draw = () => {
+      document.body.replaceChildren(...homeView(ov, { state, actions }));
+      draws.push(visibleText(document.body));
+    };
+    const actions = {
+      send: vi.fn((message) => {
+        if (message.type === "DUSK_UI_ASSETS_GET") return (answered ?? later)(answer);
+        if (message.type === "DUSK_UI_DRC20_GET_BALANCE") return later({ result: "12345" });
+        return later({ ok: true });
+      }),
+      render: vi.fn(async () => draw()),
+      showToast: vi.fn(),
+    };
+    draw();
+    const settleAll = async () => {
+      for (let i = 0; i < 6; i++) await settle();
+    };
+    await settleAll();
+    return {
+      draws,
+      settleAll,
+      reads: () => actions.send.mock.calls.filter(([m]) => m.type === "DUSK_UI_ASSETS_GET").length,
+      rows: () => document.body.querySelectorAll(".asset-row").map(visibleText),
+    };
+  }
+  const HOW = "Get your first DUSK";
+  const TKN = { contractId: TOKEN, symbol: "TKN", name: "Token", decimals: 2 };
+  const ART = { contractId: NFT, tokenId: "7", symbol: "ART", name: "Artwork" };
+
+  it.each([
+    ["a token and an NFT", { tokens: [TKN], nfts: [ART] }, [expect.stringMatching(exactly("123.45 TKN")), expect.stringMatching(/ART #7/)]],
+    ["a token", { tokens: [TKN], nfts: [] }, [expect.stringMatching(exactly("123.45 TKN"))]],
+    ["an NFT", { tokens: [], nfts: [ART] }, [expect.stringMatching(/ART #7/)]],
+  ])("reads its watched tokens and NFTs, and shows %s it holds in place of how to get DUSK, which no draw says", async (_, list, rows) => {
+    const page = await home({ result: list });
+    expect(page.reads()).toBe(1);
+    expect(page.rows()).toEqual(rows);
+    expect(page.draws.length).toBeGreaterThan(1);
+    for (const said of page.draws) expect(said).not.toContain(HOW);
+  });
+
+  it("says how to get DUSK once the list it watches is read and holds none, and never before, the list read once", async () => {
+    const answer = Promise.withResolvers();
+    const page = await home({ result: { tokens: [], nfts: [] } }, () => answer.promise);
+    // The list still on its way, however long: Tokens and NFTs says it's read, nothing says there's none.
+    expect(page.draws.at(-1)).toMatch(/Loading/);
+    for (const said of page.draws) expect(said).not.toContain(HOW);
+    answer.resolve({ result: { tokens: [], nfts: [] } });
+    await page.settleAll();
+    expect(page.draws.at(-1)).toContain(HOW);
+    expect([page.reads(), page.rows()]).toEqual([1, []]);
+  });
+
+  it("says the list couldn't be read where it can't be, never how to get DUSK as if it held none", async () => {
+    const page = await home({ error: { message: "Watched tokens can't be read now." } });
+    expect(page.draws.at(-1)).toContain("Watched tokens can't be read now.");
+    for (const said of page.draws) expect(said).not.toContain(HOW);
   });
 });
 
