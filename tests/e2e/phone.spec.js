@@ -559,3 +559,49 @@ test("hides the top bar for a keyboard that makes the page shorter, through a tu
   await expect(page.locator(".panel-header")).toBeVisible();
   await expect(amount).toBeFocused();
 });
+
+// The page hidden as another app takes the screen, or shown again (`visible`), as the app switcher does.
+const shownAgain = (page, visible) =>
+  page.evaluate((visible) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (visible ? "visible" : "hidden") });
+    Object.defineProperty(document, "hidden", { configurable: true, get: () => !visible });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }, visible);
+
+// Away to another app a while, the amount typed in, then back: Android brings the keyboard that makes the page shorter
+// back over the same field, still focused, with no tap and no focus event. The bar's room is given to it again, the
+// amount's answers whole above it.
+test("gives the top bar's room again to a keyboard brought back over the field as the app shows again", async ({ page }) => {
+  await page.addInitScript(phoneScreen);
+  await page.setViewportSize({ width: 800, height: 360 });
+  await appOn(page, "send", { draft: { to: TO, privacy: "public", amountDusk: "", memo: "" } });
+  await keyboardUp(page, 0);
+  const amount = page.getByLabel("Amount", { exact: true });
+  await amount.focus();
+  await page.setViewportSize({ width: 800, height: 94 });
+  await page.keyboard.type("1,234");
+  const choices = page.locator(".amount-question__choice");
+  await expect(choices).toHaveCount(2);
+  await expect.poll(() => typingSideways(page)).toBe(true);
+  // Away: the keyboard goes as the app does, and the page is hidden a while.
+  await page.setViewportSize({ width: 800, height: 360 });
+  await expect.poll(() => typingSideways(page)).toBe(false);
+  await shownAgain(page, false);
+  await page.waitForTimeout(1600);
+  // Back: no tap, and no focus event, the field having kept it; the page shown, then the keyboard over the field.
+  await page.evaluate(() => {
+    for (const type of ["focusin", "focusout"]) window.addEventListener(type, (e) => e.stopImmediatePropagation(), true);
+  });
+  await shownAgain(page, true);
+  await page.setViewportSize({ width: 800, height: 94 });
+  await expect.poll(() => typingSideways(page)).toBe(true);
+  await expect(page.locator(".panel-header")).toBeHidden();
+  await twoFrames(page);
+  const top = await page.evaluate(() => Math.max(0, document.querySelector(".panel-content").getBoundingClientRect().top));
+  for (const choice of await choices.all()) {
+    const box = await boxOf(choice);
+    expect(box.top).toBeGreaterThanOrEqual(top);
+    expect(box.bottom).toBeLessThanOrEqual(94);
+  }
+  await expect(amount).toBeFocused();
+});

@@ -72,19 +72,21 @@ function pageOf(win) {
   return page;
 }
 
-// A field tapped or given the focus: its keyboard may make the page shorter now.
+// A field tapped or given the focus, or the page shown again with one still
+// typed in: its keyboard may make the page shorter now.
 function noteTapped(win) {
   pageOf(win).tapped = Date.now();
 }
 
 // Whether a keyboard made the page itself shorter (not the visual viewport):
 // shorter than its own height at this width by a keyboard's height, just after
-// a field was tapped. Made shorter otherwise, as a window resized in a split
-// screen, the page has a new height of its own; never measured against the
-// screen's height, which a window in part of the screen is shorter than with
-// no keyboard. A turn starts it over, but not while such a keyboard is up: the
-// first height then is the keyboard's, and the page's own is the one it has
-// once the keyboard's gone, a keyboard's height taller.
+// a field was tapped, or the page shown again with one typed in. Made shorter
+// otherwise, as a window resized in a split screen, the page has a new height
+// of its own; never measured against the screen's height, which a window in
+// part of the screen is shorter than with no keyboard. A turn starts it over,
+// but not while such a keyboard is up: the first height then is the
+// keyboard's, and the page's own is the one it has once the keyboard's gone,
+// a keyboard's height taller.
 function madeShorter(win, layout) {
   const page = pageOf(win);
   const width = win.innerWidth || 0;
@@ -349,12 +351,18 @@ export function installKeyboardRoom({ win = globalThis.window } = {}) {
   win.visualViewport?.addEventListener?.("resize", soon);
   // Back from the phone's app switcher, the keyboard up again over the field
   // still typed in, which says nothing of it (Marek's: a recovery-word box
-  // half behind it): above it again.
+  // half behind it): above it again. The page shown again, a field still
+  // typed in, is as that field tapped: the keyboard brought back may make the
+  // page shorter, its own height kept as it was.
+  const shownAgain = () => {
+    if (isTyped(doc.activeElement)) noteTapped(win);
+    soon();
+  };
   doc.addEventListener("visibilitychange", () => {
-    if (doc.visibilityState !== "hidden") soon();
+    if (doc.visibilityState !== "hidden") shownAgain();
   });
   win.addEventListener?.("focus", soon);
-  win.addEventListener?.("pageshow", soon);
+  win.addEventListener?.("pageshow", shownAgain);
   // Turned sideways or back: the room made for the keyboard the other way
   // round goes, and the page goes back where it was before the keyboard came;
   // a field still typed in goes above the keyboard again from there.
