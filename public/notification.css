@@ -2,8 +2,10 @@
    and the components in ui.css (groups, key-value rows, pills); only what
    these windows need is here. The window is about 380 by 590. */
 
+/* The logo on the content's 16 px edge, less its inset in its 32 px box; the
+   network's pill ends on the other. */
 body.page--notification .panel-header {
-  padding: 12px 16px;
+  padding: 12px 16px 12px 11px;
 }
 
 /* The network the request is on, beside the wallet's name */

@@ -151,6 +151,9 @@ function waitingAgainWords(ov, { lux, to, memo, name = "", time }, { review = fa
 // time.
 let pasteReading = null;
 
+// Memo's error, with an id of its own however often Send is drawn.
+let memoErrors = 0;
+
 export function sendFormView(ov, { state, actions } = {}) {
   // While it's drawn, and then while it's on the page (liveForm).
   let drawing = true;
@@ -192,11 +195,15 @@ export function sendFormView(ov, { state, actions } = {}) {
     value: typeof draft.memo === "string" ? draft.memo : "",
     onEnter: () => nextBtn.click(),
   });
-  const memoError = h("div", { class: "field-error memo-error", role: "alert", hidden: true });
+  const memoError = h("div", { id: `memo-error-${++memoErrors}`, class: "field-error memo-error", role: "alert", hidden: true });
   const checkMemo = () => {
     const tooLong = memoTooLong(memo.value);
     memoError.textContent = tooLong ? MEMO_TOO_LONG_TEXT : "";
     memoError.hidden = !tooLong;
+    // The memo's own while it shows: read with it, and kept above a phone's
+    // keyboard with it, the memo in view (keyboard.js).
+    if (tooLong) memo.setAttribute("aria-describedby", memoError.id);
+    else memo.removeAttribute("aria-describedby");
     return !tooLong;
   };
 

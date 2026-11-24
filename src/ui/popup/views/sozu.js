@@ -43,6 +43,7 @@ import { shortfallText } from "../../lib/shortfall.js";
 import { profileNameEl, withReviewWallet } from "../../components/ProfileName.js";
 import { SOZU_FACT_SOON_MS, activityKey, activityRows, keptRatesOf, nativeRewardsOf, sozuFactsOf, sozuGrowthOf, wholeActivity } from "../activity.js";
 import { sendFromReview } from "./sent.js";
+import { readWatchedAgain } from "./assets.js";
 import { lastReadText } from "./txRow.js";
 import { keepBalances, keptBalancesOf } from "../../../shared/keptBalances.js";
 import { NODE_ANSWER_MS } from "../../../shared/networkStatus.js";
@@ -369,7 +370,7 @@ function maybeAutoWatchStDusk({ state, actions, st, status, profileIndex }) {
     ?.then((resp) => {
       if (resp?.error) throw new Error(resp.error.message ?? "Failed to add stDUSK");
       st.autoStDuskWatchKey = key;
-      if (state.assets) state.assets.loaded = false;
+      readWatchedAgain(state);
     })
     ?.catch(() => {
       // Auto-watch should never break the liquid staking panel.
@@ -998,7 +999,7 @@ export function sozuLiquidStakingView(ov, { state, actions, onBack } = {}) {
       });
       if (resp?.error) throw new Error(resp.error.message ?? "Couldn't add stDUSK");
       st.autoStDuskWatchKey = stDuskWatchKey(currentProfileIndex, stDuskContractId);
-      if (state.assets) state.assets.loaded = false;
+      readWatchedAgain(state);
       actions?.showToast?.("stDUSK added to Assets.");
       actions?.render?.({ forceRefresh: true }).catch(() => {});
     } catch (e) {
